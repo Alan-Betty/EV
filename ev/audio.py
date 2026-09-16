@@ -583,6 +583,20 @@ class _MciPlayer:
             time.sleep(0.01)
         return False
 
+    def warm(self, path: str) -> None:
+        """Load the MP3 decoder once, without playing anything.
+
+        The first `open` on a cold MCI costs ~390ms while Windows loads the
+        codec; every one after that is ~20ms. Paying it during startup keeps
+        it off the user's first reply.
+        """
+        try:
+            code, _ = self._send(f'open "{path}" type mpegvideo alias evwarm')
+            if code == 0:
+                self._send("close evwarm")
+        except Exception as exc:
+            log.debug("MCI warm failed: %s", exc)
+
     def stop(self) -> None:
         with self._lock:
             if self._alias:

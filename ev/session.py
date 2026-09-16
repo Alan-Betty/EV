@@ -21,8 +21,20 @@ import config
 
 
 class Mode(str, Enum):
-    ACTIVE = "active"
+    """Where E.V. is in a conversation.
+
+    IDLE     - not being talked to; the wake phrase is required.
+    ENGAGED  - mid-conversation; just talk, no wake phrase needed. Decays back
+               to IDLE after a stretch of silence.
+    STANDBY  - explicitly told to wait; ignores everything but "wake up".
+    """
+
+    IDLE = "idle"
+    ENGAGED = "engaged"
     STANDBY = "standby"
+
+    # Kept so existing call sites reading Mode.ACTIVE keep working.
+    ACTIVE = "engaged"
 
 
 class Intent(str, Enum):
@@ -111,7 +123,7 @@ def match_intent(text: str, mode: Mode = Mode.ACTIVE) -> Intent | None:
     # shutdown. Everything else is the user talking to someone who is not E.V.
     if mode is Mode.STANDBY and intent not in {Intent.RESUME, Intent.SHUTDOWN}:
         return None
-    if mode is Mode.ACTIVE and intent is Intent.RESUME:
+    if mode is not Mode.STANDBY and intent is Intent.RESUME:
         return Intent.STATUS  # already awake; treat it as a check-in
     return intent
 
@@ -161,38 +173,70 @@ def all_responses() -> list[str]:
 
 @dataclass
 class Session:
-    """Tracks whether E.V. is listening, and for how long it has been idle."""
+    """Tracks whether E.V. is being talked to, and how recently.
 
-    mode: Mode = Mode.ACTIVE
+    The point of the ENGAGED state is continuity: once a conversation has
+    started, the user should be able to keep talking without saying the name
+    before every sentence. The state decays on its own, so E.V. stops
+    listening in on the room a minute after the conversation ends.
+    """
+
+    mode: Mode = Mode.IDLE
     standby_since: float = 0.0
-    last_reply_at: float = 0.0
-    # A terminal_command held back for confirmation, if any.
-    pending: dict | None = None
-    history_note: str = field(default="", repr=False)
+    last_exchange_at: float = 0.0
+    pending: dict | None = None  # a terminal_command held for confirmation
+    turns: int = 0
 
+    # -- queries ----------------------------------------------------------
     @property
     def in_standby(self) -> bool:
         return self.mode is Mode.STANDBY
 
-    def enter_standby(self) -> None:
-        self.mode = Mode.STANDBY
-        self.standby_since = time.monotonic()
-        self.pending = None
+    @property
+    def engaged(self) -> bool:
+        """True while E.V. is mid-conversation and needs no wake phrase."""
+        if self.mode is not Mode.ENGAGED:
+            return False
+        if self.silence_seconds > config.CONVERSATION_WINDOW_S:
+            # Conversation went quiet; drop back to needing the wake phrase.
+            self.mode = Mode.IDLE
+            self.turns = 0
+            return False
+        return True
 
-    def resume(self) -> None:
-        self.mode = Mode.ACTIVE
-        self.standby_since = 0.0
-        self.last_reply_at = time.monotonic()
+    @property
+    def silence_seconds(self) -> float:
+        if not self.last_exchange_at:
+            return float("inf")
+        return time.monotonic() - self.last_exchange_at
 
     @property
     def standby_seconds(self) -> float:
         return time.monotonic() - self.standby_since if self.in_standby else 0.0
 
-    def in_followup_window(self) -> bool:
-        """True while a follow-up needs no wake phrase."""
-        if self.in_standby:
-            return False
-        return time.monotonic() - self.last_reply_at < config.FOLLOWUP_WINDOW_S
+    # -- transitions ------------------------------------------------------
+    def engage(self) -> None:
+        """Start (or extend) a conversation."""
+        self.mode = Mode.ENGAGED
+        self.standby_since = 0.0
+        self.last_exchange_at = time.monotonic()
 
-    def mark_replied(self) -> None:
-        self.last_reply_at = time.monotonic()
+    def enter_standby(self) -> None:
+        self.mode = Mode.STANDBY
+        self.standby_since = time.monotonic()
+        self.pending = None
+        self.turns = 0
+
+    def resume(self) -> None:
+        self.engage()
+
+    def go_idle(self) -> None:
+        self.mode = Mode.IDLE
+        self.turns = 0
+
+    def mark_exchange(self) -> None:
+        """Record that a real exchange happened, extending the conversation."""
+        self.last_exchange_at = time.monotonic()
+        if self.mode is not Mode.STANDBY:
+            self.mode = Mode.ENGAGED
+            self.turns += 1

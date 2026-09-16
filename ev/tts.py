@@ -59,6 +59,11 @@ def clean_for_speech(text: str) -> str:
 def split_for_speech(text: str, limit: int | None = None) -> list[str]:
     """Break a reply into chunks that are each quick to synthesise.
 
+    The first chunk is deliberately kept short. Synthesis time scales with
+    text length (0.87s for a few words, 1.65s for a sentence), so a small
+    opening chunk is what makes E.V. start talking sooner; the rest is
+    synthesised while that plays and the seam is inaudible.
+
     Splits on sentence boundaries first, and only falls back to splitting on
     words for a single sentence longer than the limit. Every word survives.
     """
@@ -66,8 +71,23 @@ def split_for_speech(text: str, limit: int | None = None) -> list[str]:
     spoken = clean_for_speech(text)
     if not spoken:
         return []
-    if len(spoken) <= limit:
+
+    # Short enough to say in one breath: no seam, no benefit to splitting.
+    if len(spoken) <= config.TTS_FIRST_CHUNK_CHARS:
         return [spoken]
+
+    sentences = [s for s in _SENTENCE_END.split(spoken) if s.strip()]
+    if len(sentences) > 1 and len(sentences[0]) <= limit:
+        # Lead with the first sentence, then chunk the remainder normally.
+        rest = " ".join(sentences[1:])
+        return [sentences[0], *_chunk(rest, limit)]
+
+    return _chunk(spoken, limit)
+
+
+def _chunk(spoken: str, limit: int) -> list[str]:
+    if len(spoken) <= limit:
+        return [spoken] if spoken else []
 
     chunks: list[str] = []
     current = ""
@@ -216,16 +236,23 @@ class Speaker:
         """
         if not self.enabled:
             return
+        warmed_player = False
         for phrase in phrases:
-            if self._cached(phrase) is not None:
-                continue
-            try:
-                path = await self._synthesise(phrase, _retry=False)
-            except Exception as exc:
-                log.debug("Prewarm failed for %r: %s", phrase, exc)
-                return  # offline or rate limited; not worth hammering
-            self._store(phrase, path)
-            _unlink(path)
+            cached = self._cached(phrase)
+            if cached is None:
+                try:
+                    path = await self._synthesise(phrase, _retry=False)
+                except Exception as exc:
+                    log.debug("Prewarm failed for %r: %s", phrase, exc)
+                    return  # offline or rate limited; not worth hammering
+                self._store(phrase, path)
+                cached = self._cached(phrase) or path
+            # Load the OS MP3 codec once, so the first real reply does not.
+            if not warmed_player and hasattr(self._player, "warm"):
+                await asyncio.to_thread(self._player.warm, cached)
+                warmed_player = True
+            if cached and not cached.startswith(str(config.TTS_CACHE_DIR)):
+                _unlink(cached)
 
     # -- cache ------------------------------------------------------------
     def _cache_key(self, text: str) -> str:

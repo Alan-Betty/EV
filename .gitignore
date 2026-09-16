@@ -1,6 +1,7 @@
 # Secrets — never commit a real key
 .env
 .env.local
+.env.bak
 
 # Generated speech cache (regenerable)
 .cache/

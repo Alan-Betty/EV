@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import shlex
 import subprocess
 from difflib import get_close_matches
@@ -31,6 +32,14 @@ def _candidates(app: str) -> list[str]:
     return [key.replace(" ", "")]
 
 
+def _launched(name: str) -> str:
+    """A short, varied confirmation. "Opening chrome." every time reads like a
+    status log rather than someone talking."""
+    return random.choice(
+        (f"{name}'s up.", f"{name}, up.", f"Got it, {name}'s open.", f"There's {name}.")
+    )
+
+
 def open_app(app: str = "", arguments: str = "", **_: object) -> ToolResult:
     if not app.strip():
         return ToolResult.failure("You didn't say which app.")
@@ -42,12 +51,12 @@ def open_app(app: str = "", arguments: str = "", **_: object) -> ToolResult:
         except ValueError:
             extra = [arguments.strip()]
 
-    pretty = app.strip()
+    pretty = app.strip().title()
     for candidate in _candidates(app):
         if candidate.startswith(_URI_PREFIXES):
             try:
                 popen_detached(["cmd", "/c", "start", "", candidate], shell=False)
-                return ToolResult.success(f"Opening {pretty}.", f"Launched URI {candidate}")
+                return ToolResult.success(_launched(pretty), f"Launched URI {candidate}")
             except OSError as exc:
                 log.debug("URI launch failed for %s: %s", candidate, exc)
                 continue
@@ -57,7 +66,7 @@ def open_app(app: str = "", arguments: str = "", **_: object) -> ToolResult:
             try:
                 popen_detached([exe, *extra])
                 return ToolResult.success(
-                    f"Opening {pretty}.", f"Launched {exe} {' '.join(extra)}".strip()
+                    _launched(pretty), f"Launched {exe} {' '.join(extra)}".strip()
                 )
             except OSError as exc:
                 log.debug("Direct launch failed for %s: %s", exe, exc)
@@ -74,7 +83,7 @@ def open_app(app: str = "", arguments: str = "", **_: object) -> ToolResult:
                 )
                 if result.returncode == 0:
                     return ToolResult.success(
-                        f"Opening {pretty}.", f"Launched {candidate} via shell"
+                        _launched(pretty), f"Launched {candidate} via shell"
                     )
                 log.debug("shell start failed for %s: %s", candidate, result.stderr.strip())
             except (OSError, subprocess.TimeoutExpired) as exc:

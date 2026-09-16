@@ -8,11 +8,16 @@ Built to run comfortably on a 4 GB machine.
 
 ```
 you  > hey EV open Chrome and look for a good gaming mouse
-E.V. > Searching for a good gaming mouse.
-
-you  > EV launch VS Code and start Claude Code on my API project
+E.V. > On it.
+you .> launch VS Code and start Claude Code on my API project
 E.V. > Claude's running on my-api with your prompt.
+you .> take five
+E.V. > Standing by.
 ```
+
+Say the name once. After that you just talk - the `.` means the conversation
+is still open. "Take five" puts E.V. to sleep instantly, mid-sentence if need
+be; "wake up" brings it back.
 
 **[Setup instructions and sample commands → quickstart.md](quickstart.md)**
 
@@ -32,6 +37,7 @@ E.V. runs none of them locally:
 | Speech synthesis — Edge Neural | Microsoft | one WebSocket, a temp MP3 |
 | Audio playback | Windows `winmm`, via `ctypes` | none |
 | Wake phrase | string match on the transcript | none |
+| Control phrases | matched locally, no network | none |
 
 What is left locally is a Python event loop, a 16 kHz mono audio stream, and
 `subprocess` calls. Resident memory lands around **90–160 MB**.
@@ -54,6 +60,8 @@ The design goes further than just picking cloud services:
                                               │
                                     wake phrase match
                                               │
+                                   local control phrase? ──► standby / resume
+                                              │                  (no network)
                                               ▼
                               Groq / Gemini + JSON tool schema
                                               │
@@ -89,7 +97,8 @@ ev/
   stt.py              speech to text: Groq Whisper, Google, or whisper.cpp
   tts.py              edge-tts synthesis and playback
   audio.py            microphone capture with VAD, MP3 playback via winmm
-  wake.py             wake-phrase matching
+  wake.py             fuzzy wake-phrase matching
+  session.py          conversation state and local control phrases
   tts_voices.py       list and audition Edge voices
 
 tools/
@@ -118,6 +127,10 @@ tests/
 | `terminal_command` | Runs shell commands, gated by the safety classifier. Foreground with output captured, or detached into its own window. |
 | `chat` | Speaks a reply when no action is called for. |
 
+Control phrases ("take five", "wake up", "stop", "goodbye") are matched in
+[ev/session.py](ev/session.py) before the model is consulted, so they respond
+instantly and work even while E.V. is talking.
+
 ## Safety
 
 Voice input is unreliable, so nothing destructive runs on the model's say-so.
@@ -139,7 +152,7 @@ typing into whatever happened to be on screen.
 ## Tests
 
 ```bash
-python tests/test_smoke.py    # 14 tests
+python tests/test_smoke.py    # 20 tests
 python tests/test_brain.py    # 10 tests
 ```
 

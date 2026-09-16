@@ -278,6 +278,91 @@ def test_browsers_resolve_even_though_they_are_not_on_path():
             assert os.path.isfile(resolved)
 
 
+def test_process_ids_are_never_read_aloud():
+    """Regression: E.V. announced "with PID 12648" after closing an app."""
+    from tools.terminal import _summarise
+
+    kill_one = 'SUCCESS: Sent termination signal to the process "notepad.exe" with PID 12648.'
+    assert _summarise("taskkill", 0, kill_one) == "Closed notepad."
+
+    kill_many = "\n".join(
+        f'SUCCESS: Sent termination signal to the process "chrome.exe" with PID {n}.'
+        for n in (101, 202, 303)
+    )
+    assert _summarise("taskkill", 0, kill_many) == "Closed chrome, 3 instances."
+
+    # Table headers and rule lines are for a screen, not an ear.
+    table = "Id     Name   State\n--     ----   -----\n1      Job1   Running"
+    spoken = _summarise("get-job", 0, table)
+    assert "Id" not in spoken and "----" not in spoken
+
+    # PID noise is stripped even from failures.
+    failure = 'ERROR: The process "foo.exe" with PID 99 could not be terminated.'
+    assert "PID" not in _summarise("taskkill", 1, failure)
+
+    assert _summarise("echo", 0, "") == "Done."
+    assert _summarise("python -V", 0, "Python 3.13.2") == "Python 3.13.2"
+
+
+def test_conversation_stays_open_without_repeating_the_name():
+    """You should not have to say "E.V." before every single sentence."""
+    import time as _time
+
+    from ev.session import Intent, Mode, Session, match_intent
+
+    original = config.CONVERSATION_WINDOW_S
+    config.CONVERSATION_WINDOW_S = 0.4
+    try:
+        session = Session()
+        # Cold: the wake phrase is required.
+        assert session.mode is Mode.IDLE
+        assert not session.engaged
+
+        session.engage()
+        assert session.engaged, "waking should open a conversation"
+
+        # Each exchange extends the window rather than restarting the clock.
+        for _ in range(3):
+            _time.sleep(0.2)
+            session.mark_exchange()
+            assert session.engaged, "an active back-and-forth must not lapse"
+
+        # Silence closes it again.
+        _time.sleep(0.6)
+        assert not session.engaged
+        assert session.mode is Mode.IDLE
+
+        # Standby is separate from the window and outranks it.
+        session.engage()
+        session.enter_standby()
+        assert not session.engaged and session.in_standby
+        assert match_intent("open chrome", session.mode) is None
+        assert match_intent("wake up", session.mode) is Intent.RESUME
+        session.resume()
+        assert session.engaged
+    finally:
+        config.CONVERSATION_WINDOW_S = original
+
+
+def test_speech_starts_with_a_short_chunk():
+    """The opening chunk stays small so E.V. starts talking sooner."""
+    from ev.tts import split_for_speech
+
+    short = "Chrome's up."
+    assert split_for_speech(short) == [short], "a short reply needs no seam"
+
+    long = (
+        "Chrome is up and I found four options. The Logitech is cheapest at "
+        "thirty dollars. The Razer has better switches but costs twice as much."
+    )
+    chunks = split_for_speech(long)
+    assert len(chunks) > 1
+    assert len(chunks[0]) <= config.TTS_CHUNK_CHARS
+    # Leading with the first sentence is what cuts time-to-first-audio.
+    assert chunks[0].endswith(".")
+    assert len(chunks[0]) < len(long) / 2
+
+
 def _run() -> int:
     tests = [
         (name, function)

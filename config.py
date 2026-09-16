@@ -173,8 +173,14 @@ WAKE_PHRASES = _env_list(
     "EV_WAKE_PHRASES",
     ["ev", "e.v.", "e v", "hey ev", "hey e.v.", "hey e v", "okay ev", "yo ev"],
 )
-# After E.V. replies, stay open this long for a follow-up with no wake phrase.
-FOLLOWUP_WINDOW_S = _env_float("EV_FOLLOWUP_WINDOW_S", 12.0)
+# How long a conversation stays open after the last exchange. Inside this
+# window E.V. needs no wake phrase, which is what makes a back-and-forth feel
+# like talking to someone rather than issuing commands. The timer resets on
+# every exchange, so a real conversation never lapses mid-flow.
+CONVERSATION_WINDOW_S = _env_float(
+    "EV_CONVERSATION_WINDOW_S", _env_float("EV_FOLLOWUP_WINDOW_S", 75.0)
+)
+FOLLOWUP_WINDOW_S = CONVERSATION_WINDOW_S  # backwards-compatible alias
 PUSH_TO_TALK_ENABLED = _env_bool("EV_PUSH_TO_TALK_ENABLED", True)
 PUSH_TO_TALK_KEY = _env("EV_PUSH_TO_TALK_KEY", "<ctrl>+<alt>+e")
 
@@ -183,7 +189,9 @@ PUSH_TO_TALK_KEY = _env("EV_PUSH_TO_TALK_KEY", "<ctrl>+<alt>+e")
 # Voice output (TTS)
 # ---------------------------------------------------------------------------
 TTS_ENABLED = _env_bool("EV_TTS_ENABLED", True)
-TTS_VOICE = _env("EV_TTS_VOICE", "en-US-GuyNeural")
+# Female, conversational, and natural enough to carry dry humour. Audition
+# alternatives with: python -m ev.tts_voices --demo <VoiceName>
+TTS_VOICE = _env("EV_TTS_VOICE", "en-US-AvaMultilingualNeural")
 # E.V. talks fast. This suits the persona and shortens every reply.
 TTS_RATE = _env("EV_TTS_RATE", "+18%")
 TTS_VOLUME = _env("EV_TTS_VOLUME", "+0%")
@@ -194,6 +202,10 @@ TTS_TIMEOUT_S = _env_float("EV_TTS_TIMEOUT_S", 15.0)
 # a chunk size, NOT a truncation limit - E.V. never drops words. Keeping the
 # first chunk short is what makes the reply start fast.
 TTS_CHUNK_CHARS = _env_int("EV_TTS_CHUNK_CHARS", 180)
+# Synthesis time scales with length, so the opening chunk is kept short to cut
+# the gap between the text appearing and E.V. actually speaking. A reply below
+# this length is spoken as one piece.
+TTS_FIRST_CHUNK_CHARS = _env_int("EV_TTS_FIRST_CHUNK_CHARS", 90)
 # Cut TTS off the moment the user starts talking over it.
 TTS_BARGE_IN = _env_bool("EV_TTS_BARGE_IN", True)
 # Consecutive speech-looking frames required before E.V. yields the floor.

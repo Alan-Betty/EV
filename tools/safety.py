@@ -105,6 +105,22 @@ _NEGATIVE = {
 }
 
 
+def is_negative(text: str) -> bool:
+    """True for a clear no.
+
+    Distinct from `not is_affirmative(...)`: anything that is neither a yes
+    nor a no is the user moving on to something else, and the caller needs to
+    tell those apart so an unrelated request is not swallowed as a refusal.
+    """
+    cleaned = re.sub(r"[^a-z' ]", "", text.lower()).strip()
+    if not cleaned:
+        return False
+    if cleaned in _NEGATIVE:
+        return True
+    words = cleaned.split()
+    return words[0] in _NEGATIVE or " ".join(words[:2]) in _NEGATIVE
+
+
 def is_affirmative(text: str) -> bool:
     """True only for a clear yes. Anything ambiguous counts as a no."""
     cleaned = re.sub(r"[^a-z' ]", "", text.lower()).strip()

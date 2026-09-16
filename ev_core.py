@@ -46,7 +46,7 @@ from ev.session import (
 from ev.stt import Transcriber, TranscriptionError
 from ev.tts import Speaker, clean_for_speech
 from tools import ToolResult, dispatch
-from tools.safety import is_affirmative
+from tools.safety import is_affirmative, is_negative
 
 log = logging.getLogger("ev")
 
@@ -163,7 +163,9 @@ class EV:
                 monitor.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await monitor
-        self.session.mark_replied()
+        # Replying keeps the conversation open, so the user's next sentence
+        # needs no wake phrase.
+        self.session.mark_exchange()
 
     async def _watch_for_barge_in(self) -> None:
         """Cut playback the moment the user starts talking over E.V.
@@ -194,11 +196,15 @@ class EV:
             print("Text mode. Type a command, or 'quit' to exit.\n")
         else:
             hint = (
-                f"Say '{config.WAKE_PHRASES[0]}' to wake me."
+                f"Say '{config.WAKE_PHRASES[0]}' to start."
                 if config.WAKE_REQUIRED
                 else "Wake phrase off - just talk."
             )
-            print(f"Listening. {hint} Ctrl+C to quit.\n")
+            print(f"Listening. {hint} Ctrl+C to quit.")
+            print(
+                f"Once we're talking you can drop the name for "
+                f"{int(config.CONVERSATION_WINDOW_S)}s. Say 'take five' to pause me.\n"
+            )
 
         while self._running:
             try:
@@ -217,14 +223,19 @@ class EV:
             await self._next_typed()
             if self.text_mode
             else await self._next_utterance(
-                wait_s=1.0 if self.session.in_followup_window() else None
+                # While engaged, poll on a short timeout so the conversation
+                # window can expire; when idle, just block until someone talks.
+                wait_s=2.0 if self.session.engaged else None
             )
         )
         if not transcript:
             return
 
         if not self.text_mode:
-            print(f"you  > {transcript}")
+            # A dot marks an open conversation, so it is obvious at a glance
+            # whether the name is needed for the next sentence.
+            marker = "." if self.session.engaged else " "
+            print(f"you {marker}> {transcript}")
 
         if self.text_mode and transcript.lower() in {"quit", "exit"}:
             self.request_stop()
@@ -262,25 +273,29 @@ class EV:
         if self.text_mode:
             return transcript
 
+        match = wake.detect(transcript)
+
         if self.session.in_standby:
             # Asleep: a wake phrase is welcome but not required, because
             # "E.V., wake up" and a bare "wake up" mean the same thing.
-            match = wake.detect(transcript)
             return match.command if match.matched and match.command else transcript
 
-        if self.session.in_followup_window():
-            match = wake.detect(transcript)
+        # Mid-conversation the name is optional. This is the whole point of
+        # the engaged state: saying "E.V." before every sentence is exhausting.
+        if self.session.engaged:
             return match.command if match.matched else transcript
 
-        match = wake.detect(transcript)
         if match.matched:
+            self.session.engage()
             return match.command
 
         # Near-misses are reported rather than ignored. Silence here is what
         # makes a voice assistant feel dead.
         if wake.heard_something_like_a_name(transcript):
-            print(f"[E.V.] Heard something close to my name but wasn't sure. "
-                  f"Try starting with '{config.WAKE_PHRASES[0]}'.")
+            print(
+                f"[E.V.] Heard something close to my name but wasn't sure. "
+                f"Try starting with '{config.WAKE_PHRASES[0]}'."
+            )
         else:
             log.debug("No wake phrase in %r", transcript)
         return None
@@ -350,6 +365,18 @@ class EV:
         pending = self.session.pending
         self.session.pending = None
         if pending is None:
+            return
+
+        if reply and not is_affirmative(reply) and not is_negative(reply):
+            # Not an answer at all - the user moved on. Drop the held command
+            # and handle this as a fresh request, instead of silently eating
+            # it as a "no" and leaving them wondering where their command went.
+            self.brain.remember(
+                pending["command"],
+                "The user did not answer the confirmation and asked for "
+                "something else; the command was not run.",
+            )
+            await self.handle(reply)
             return
 
         if not reply or not is_affirmative(reply):

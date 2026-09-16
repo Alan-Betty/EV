@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 
 import config
@@ -34,21 +35,55 @@ def _shell_argv(command: str, shell: str) -> list[str] | None:
     return [exe, "-NoProfile", "-NonInteractive", "-NoLogo", "-Command", command]
 
 
+# Process bookkeeping nobody wants read aloud: PIDs, handles, job tables.
+_KILL_OK = re.compile(
+    r'SUCCESS:\s*(?:Sent termination signal to the process|The process)\s*"?([^"]+?)"?\s*with PID\s*\d+',
+    re.IGNORECASE,
+)
+_PID_NOISE = re.compile(r"\s*\bwith PID\s+\d+\.?", re.IGNORECASE)
+_JOB_TABLE = re.compile(r"^\s*(Id|PID|ProcessId)\s+\w+", re.IGNORECASE)
+_SEPARATOR = re.compile(r"^[\s\-=_|+]+$")
+
+
+def _speakable_lines(output: str) -> list[str]:
+    """Drop table headers, rule lines and PID bookkeeping."""
+    kept: list[str] = []
+    for raw in output.splitlines():
+        line = raw.strip()
+        if not line or _SEPARATOR.match(line) or _JOB_TABLE.match(line):
+            continue
+        kept.append(_PID_NOISE.sub("", line).strip())
+    return kept
+
+
 def _summarise(command: str, returncode: int, output: str) -> str:
-    """Turn command output into something worth saying out loud."""
+    """Turn command output into something worth saying out loud.
+
+    Raw console output is written for a screen, not an ear. Reading it back
+    verbatim means E.V. announcing process IDs and table headers, so the
+    common shapes get rewritten into a plain sentence instead.
+    """
     if returncode != 0:
         first_error = next(
             (line.strip() for line in output.splitlines() if line.strip()),
             "no output",
         )
-        return f"That failed. {first_error[:120]}"
+        return f"That failed. {_PID_NOISE.sub('', first_error)[:120]}"
 
-    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    killed = _KILL_OK.search(output)
+    if killed:
+        name = killed.group(1).strip().rsplit(".exe", 1)[0]
+        count = len(_KILL_OK.findall(output))
+        if count > 1:
+            return f"Closed {name}, {count} instances."
+        return f"Closed {name}."
+
+    lines = _speakable_lines(output)
     if not lines:
-        return "Done, no output."
+        return "Done."
     if len(lines) == 1:
         return lines[0][:160]
-    return f"Done. {len(lines)} lines back, first one: {lines[0][:120]}"
+    return f"Done. {lines[0][:110]}"
 
 
 def terminal_command(

@@ -70,17 +70,24 @@ python ev_core.py
 ```
 
 E.V. calibrates to your room noise for a second, then listens. Say **"E.V."**
-followed by what you want.
+once to start — after that, just talk.
 
 ```
-Listening. Say 'ev' to wake me. Ctrl+C to quit.
+Listening. Say 'ev' to start. Ctrl+C to quit.
+Once we're talking you can drop the name for 75s. Say 'take five' to pause me.
 
 you  > hey EV open Chrome and look for a good gaming mouse
-E.V. > Searching for a good gaming mouse.
+E.V. > On it.
+you .> what's my python version          <- no "E.V." needed
+E.V. > Python 3.13.2
+you .> thanks
+E.V. > Mm-hm.
 ```
 
-After it replies you have about 12 seconds to say something else without
-repeating the wake word, so a back-and-forth stays natural.
+The `.` in the prompt means the conversation is open. The window resets on
+every exchange, so a real back-and-forth never lapses mid-flow — it only
+closes after you have actually stopped talking for a while. Tune it with
+`EV_CONVERSATION_WINDOW_S`, or say "take five" to end it immediately.
 
 ---
 
@@ -199,19 +206,42 @@ of its name, e.g. `EV_INPUT_DEVICE=Headset`.
 
 **It waits too long after I finish.** Lower `EV_SILENCE_HANG_MS` to `500`.
 
-**It answers when I wasn't talking to it.** That is the follow-up window. Lower
-`EV_FOLLOWUP_WINDOW_S`, or set it to `0` to require the wake word every time.
+**It answers when I wasn't talking to it.** That is the conversation window
+doing its job a little too well. Lower `EV_CONVERSATION_WINDOW_S` (try `20`),
+or set it to `0` to require the wake phrase on every single sentence. Saying
+"take five" closes the conversation instantly whenever you need the room back.
 
-**Change the voice.**
+**There is a gap before E.V. starts speaking.** Most of it is the ~0.75s round
+trip to Microsoft's voice service. Three things already cut it down:
+
+* Stock replies ("Standing by.", "Mm-hm.") are cached on disk, so they start in
+  under a tenth of a second.
+* Long replies lead with a short opening chunk, so speech begins while the rest
+  is still synthesising.
+* The Windows MP3 decoder is loaded at startup rather than on your first reply.
+
+If you want to go further, shorten replies — `EV_TTS_FIRST_CHUNK_CHARS` sets how
+much E.V. synthesises before starting to talk.
+
+**Change the voice.** The default is `en-US-AvaMultilingualNeural` — female,
+conversational, and the most natural of the current Edge voices.
 
 ```bash
-python -m ev.tts_voices              # list English voices
-python -m ev.tts_voices --demo en-US-ChristopherNeural   # hear one
+python -m ev.tts_voices                                 # list English voices
+python -m ev.tts_voices --demo en-US-AriaNeural         # hear one
 ```
 
-Then set `EV_TTS_VOICE` in `.env`. Good alternatives to the default:
-`en-US-AndrewMultilingualNeural` (warm), `en-US-ChristopherNeural`
-(authoritative), `en-GB-RyanNeural` (British), `en-US-AriaNeural` (female).
+Then set `EV_TTS_VOICE` in `.env`.
+
+| Voice | Character |
+|---|---|
+| `en-US-AvaMultilingualNeural` | Default. Warm, expressive, natural. |
+| `en-US-AriaNeural` | Confident, brighter, slightly more clipped. |
+| `en-US-EmmaMultilingualNeural` | Softer, cheerful. |
+| `en-GB-SoniaNeural` | British. |
+| `en-US-GuyNeural` | Male, dry. The previous default. |
+
+All of them synthesise in about 0.75s, so the choice costs nothing in speed.
 
 **Replies are too long.** The system prompt caps E.V. at one or two sentences.
 `EV_TTS_CHUNK_CHARS` is a *chunk* size, not a limit — E.V. never drops words,
