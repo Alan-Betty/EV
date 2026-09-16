@@ -108,6 +108,12 @@ LLM_TIMEOUT_S = _env_float("EV_LLM_TIMEOUT_S", 20.0)
 # Prior user/assistant exchanges kept in context. Deliberately small: short
 # history keeps latency, token spend and RAM all down.
 HISTORY_TURNS = _env_int("EV_HISTORY_TURNS", 6)
+# Stream the completion so speech can start on the first finished sentence
+# instead of after the last token. Falls back to a plain call on any error.
+LLM_STREAMING = _env_bool("EV_LLM_STREAMING", True)
+# How much of a tool result is replayed to the model next turn. Kept short:
+# it is context, not a transcript, and it never enters the assistant role.
+HISTORY_OBSERVATION_CHARS = _env_int("EV_HISTORY_OBSERVATION_CHARS", 400)
 
 
 # ---------------------------------------------------------------------------
@@ -189,9 +195,9 @@ PUSH_TO_TALK_KEY = _env("EV_PUSH_TO_TALK_KEY", "<ctrl>+<alt>+e")
 # Voice output (TTS)
 # ---------------------------------------------------------------------------
 TTS_ENABLED = _env_bool("EV_TTS_ENABLED", True)
-# Female, conversational, and natural enough to carry dry humour. Audition
+# Male, conversational, and natural enough to carry dry humour. Audition
 # alternatives with: python -m ev.tts_voices --demo <VoiceName>
-TTS_VOICE = _env("EV_TTS_VOICE", "en-US-AvaMultilingualNeural")
+TTS_VOICE = _env("EV_TTS_VOICE", "en-US-GuyNeural")
 # E.V. talks fast. This suits the persona and shortens every reply.
 TTS_RATE = _env("EV_TTS_RATE", "+18%")
 TTS_VOLUME = _env("EV_TTS_VOLUME", "+0%")
@@ -202,10 +208,18 @@ TTS_TIMEOUT_S = _env_float("EV_TTS_TIMEOUT_S", 15.0)
 # a chunk size, NOT a truncation limit - E.V. never drops words. Keeping the
 # first chunk short is what makes the reply start fast.
 TTS_CHUNK_CHARS = _env_int("EV_TTS_CHUNK_CHARS", 180)
-# Synthesis time scales with length, so the opening chunk is kept short to cut
-# the gap between the text appearing and E.V. actually speaking. A reply below
-# this length is spoken as one piece.
-TTS_FIRST_CHUNK_CHARS = _env_int("EV_TTS_FIRST_CHUNK_CHARS", 90)
+# Synthesis cost measured against edge-tts is roughly 0.7s fixed plus about
+# 0.004s per character: 12 chars 0.88s, 45 chars 1.06s, 90 chars 1.23s,
+# 180 chars 1.41s (medians over interleaved runs). So a short opening chunk
+# buys around 0.2s before the first word, and the rest is synthesised while
+# it plays. A reply below this length is spoken as one piece; single long
+# sentences are never split mid-sentence, which would sound worse than the
+# wait it saves.
+TTS_FIRST_CHUNK_CHARS = _env_int("EV_TTS_FIRST_CHUNK_CHARS", 60)
+# Shortest streamed fragment worth synthesising on its own. Below this the
+# sentence is held back: "E.V." parses as a finished sentence, and paying a
+# round trip to say four characters is worse than waiting for the rest.
+TTS_STREAM_MIN_CHARS = _env_int("EV_TTS_STREAM_MIN_CHARS", 12)
 # Cut TTS off the moment the user starts talking over it.
 TTS_BARGE_IN = _env_bool("EV_TTS_BARGE_IN", True)
 # Consecutive speech-looking frames required before E.V. yields the floor.
@@ -246,6 +260,99 @@ TERMINAL_SPAWN_S = _env_float("EV_TERMINAL_SPAWN_S", 2.5)
 # ---------------------------------------------------------------------------
 LOG_LEVEL = _env("EV_LOG_LEVEL", "INFO").upper()
 TEXT_MODE = _env_bool("EV_TEXT_MODE", False)  # typed input instead of microphone
+
+
+# ---------------------------------------------------------------------------
+# Terminal UI
+# ---------------------------------------------------------------------------
+# The UI is presentation only. It never touches the string handed to the
+# speaker, which is why none of these settings can affect what E.V. says.
+UI_PLAIN = _env_bool("EV_UI_PLAIN", False)  # force plain text, no rich, no colour
+UI_SPINNERS = _env_bool("EV_UI_SPINNERS", True)  # animated [Listening...] etc.
+
+
+# ---------------------------------------------------------------------------
+# File management
+# ---------------------------------------------------------------------------
+# Everything `file_manager` touches must sit under one of these roots. The
+# default is the user's profile, which covers Desktop, Downloads and
+# Documents while keeping a misheard command away from C:\Windows and the
+# rest of the system. Widen it deliberately, not by accident.
+FILE_ROOTS: list[Path] = [
+    Path(p).expanduser()
+    for p in (_env("EV_FILE_ROOTS").split(os.pathsep) if _env("EV_FILE_ROOTS") else [str(Path.home())])
+    if p.strip()
+]
+# Deleting always asks first. Turning this off means a misheard "delete" runs.
+FILE_CONFIRM_DELETE = _env_bool("EV_FILE_CONFIRM_DELETE", True)
+# Deletes go to the Recycle Bin when send2trash is installed, so a mistaken
+# yes is recoverable. Falls back to a real delete if it is not.
+FILE_USE_TRASH = _env_bool("EV_FILE_USE_TRASH", True)
+# Cap on how much of a file is read back into the model's context.
+FILE_MAX_READ_CHARS = _env_int("EV_FILE_MAX_READ_CHARS", 4000)
+# Refuse to act on more than this many files in one sweep, so "organise my
+# Downloads" cannot run away with a home directory.
+FILE_MAX_BATCH = _env_int("EV_FILE_MAX_BATCH", 500)
+
+def _known_folder(registry_name: str, fallback: str) -> Path:
+    """Resolve a Windows user folder, honouring OneDrive redirection.
+
+    Hardcoding `~/Desktop` is wrong on any machine where the profile folders
+    are backed by OneDrive, which is a very common default. On this kind of
+    setup `~/Documents` and `~/OneDrive/Documents` can *both* exist, but only
+    the second is the one Explorer shows - so writing to the first puts files
+    somewhere the user will never find them.
+
+    Falls back to `~/<fallback>` off Windows, or when the key is missing.
+    """
+    home = Path.home()
+    if os.name == "nt":
+        try:
+            import winreg
+
+            key = r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key) as handle:
+                raw, _ = winreg.QueryValueEx(handle, registry_name)
+            resolved = Path(os.path.expandvars(raw))
+            if resolved.is_dir():
+                return resolved
+        except (ImportError, OSError, ValueError):
+            pass
+    return home / fallback
+
+
+# Spoken folder names mapped to real locations.
+USER_DIRS: dict[str, Path] = {
+    "desktop": _known_folder("Desktop", "Desktop"),
+    "downloads": _known_folder("{374DE290-123F-4565-9164-39C4925E467B}", "Downloads"),
+    "documents": _known_folder("Personal", "Documents"),
+    "pictures": _known_folder("My Pictures", "Pictures"),
+    "music": _known_folder("My Music", "Music"),
+    "videos": _known_folder("My Video", "Videos"),
+    "home": Path.home(),
+}
+
+# Resolved after USER_DIRS so it follows the same redirection.
+# Where a new file goes when the user names no folder. Resolved from
+# USER_DIRS so it follows the same OneDrive redirection.
+FILE_DEFAULT_DIR = (
+    Path(_env("EV_FILE_DEFAULT_DIR")).expanduser()
+    if _env("EV_FILE_DEFAULT_DIR")
+    else USER_DIRS["documents"]
+)
+
+# Extension buckets for "organise my Downloads folder".
+FILE_CATEGORIES: dict[str, tuple[str, ...]] = {
+    "Images": (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".heic", ".tiff"),
+    "Documents": (".pdf", ".doc", ".docx", ".txt", ".rtf", ".odt", ".md", ".epub"),
+    "Spreadsheets": (".xls", ".xlsx", ".csv", ".ods"),
+    "Presentations": (".ppt", ".pptx", ".odp"),
+    "Audio": (".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".wma"),
+    "Video": (".mp4", ".mkv", ".avi", ".mov", ".wmv", ".webm", ".flv"),
+    "Archives": (".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz"),
+    "Installers": (".exe", ".msi", ".dmg", ".deb", ".rpm", ".appimage"),
+    "Code": (".py", ".js", ".ts", ".java", ".c", ".cpp", ".cs", ".go", ".rs", ".rb", ".sh", ".ps1"),
+}
 
 
 # Friendly aliases mapped to what the OS actually needs to launch.
@@ -331,6 +438,11 @@ you are about to do. Do it, then say it is done.
 - Never say "Certainly", "Of course", "I'd be happy to", "Let me", or "As an \
 AI". No apologising for things that are not your fault.
 - Vary your acknowledgements. Not every reply is "Done."
+- Your reply is fed straight to a speech synthesiser and read aloud \
+exactly as written. Never prefix it with a label of any kind: no "Spoke:", \
+no "E.V.:", no "Response:", "Reply:", "Answer:" or "Assistant:". No quote \
+marks wrapped around the whole reply, no JSON, no stage directions. Just \
+the words you want said.
 
 TONE EXAMPLES - match this register
 User: "open chrome and find me a gaming mouse"
@@ -353,8 +465,14 @@ TOOL RULES
 - One tool per turn unless the request genuinely needs a chain.
 - "open Chrome and search for X" is ONE web_search call with the browser \
 argument set. Not two calls.
-- terminal_command is the last resort. Never use it to launch a GUI app or \
-open a web page - that is what open_app and web_search are for.
+- terminal_command is the last resort. Never use it to launch a GUI app, \
+open a web page, or touch a file - that is what open_app, web_search and \
+file_manager are for.
+- Anything involving a file or folder goes through file_manager: creating, \
+reading, listing, copying, moving, renaming, deleting, searching, tidying. \
+When asked to create a file with content, write the real content out in \
+full in the content argument - never promise to do it later, and never \
+hand back a placeholder.
 - Never invent a file path. If the user named no directory, omit the argument \
 and let the default apply.
 - Chit-chat, questions, opinions, and anything needing no machine action go \

@@ -6,13 +6,21 @@ Every blocking piece (microphone reads, subprocess launches, keystroke
 automation) is pushed onto a worker thread, so a slow tool never stalls the
 loop and Ctrl+C always lands.
 
-Two things make this feel like an assistant rather than a request/response
+Three things make this feel like an assistant rather than a request/response
 toy:
 
 * **Control phrases are matched locally.** "E.V., take five" never touches the
   network, so it lands instantly - including while E.V. is mid-sentence.
 * **The microphone never stops.** A background reader thread keeps capturing
   while E.V. talks, so the user can talk over it.
+* **Speech starts mid-generation.** A `chat` reply is streamed out of the
+  model and spoken a sentence at a time, so the gap between the user finishing
+  and E.V. starting is the time to generate one sentence, not a whole reply.
+
+The terminal UI lives entirely in `ev.ui` and is a strict dead end: it renders
+labels, panels and spinners, and none of it can reach `Speaker.say`, which is
+handed the reply text on a separate path. That is what keeps E.V. from reading
+its own chrome aloud.
 
 Run it:
     python ev_core.py             # voice
@@ -44,20 +52,23 @@ from ev.session import (
     response_for,
 )
 from ev.stt import Transcriber, TranscriptionError
-from ev.tts import Speaker, clean_for_speech
+from ev.tts import Speaker, SpeechStream, clean_for_speech
+from ev.ui import UI
 from tools import ToolResult, dispatch
 from tools.safety import is_affirmative, is_negative
 
 log = logging.getLogger("ev")
 
-BANNER = """
-  ============================================
-    E.V.  -  Everyday Virtual Assistant
-    cloud brain, local hands
-    {provider}
-    voice: {voice}
-  ============================================
-"""
+
+def _describe(call: ToolCall) -> str:
+    """One-line summary of a tool call, for the terminal only."""
+    interesting = ("app", "query", "url", "action", "path", "command", "directory")
+    parts = [
+        f"{key}={value}"
+        for key, value in call.arguments.items()
+        if key in interesting and str(value).strip()
+    ]
+    return "  ".join(parts)[:100]
 
 
 class EV:
@@ -65,6 +76,7 @@ class EV:
 
     def __init__(self, text_mode: bool = False) -> None:
         self.text_mode = text_mode or config.TEXT_MODE
+        self.ui = UI()
         # One HTTP client for both the brain and STT: connection reuse cuts a
         # full TLS handshake off every single utterance.
         self._http = httpx.AsyncClient(
@@ -90,8 +102,8 @@ class EV:
             if not self.text_mode:
                 self.mic = Microphone()
                 await asyncio.to_thread(self.mic.open)
-                print("Calibrating to room noise, stay quiet for a second...")
-                await asyncio.to_thread(self.mic.calibrate)
+                with self.ui.status("Calibrating to room noise..."):
+                    await asyncio.to_thread(self.mic.calibrate)
         finally:
             await warmup
             try:
@@ -99,7 +111,7 @@ class EV:
             except BrainError as exc:
                 # A bad model name is fatal, but the message tells the user
                 # exactly which models they can use instead.
-                print(f"\n{exc}\n", file=sys.stderr)
+                self.ui.error(str(exc))
                 raise
         self._running = True
 
@@ -125,20 +137,32 @@ class EV:
         """One transcript from the microphone, or an empty string."""
         if self.mic is None:
             return ""
-        utterance = await asyncio.to_thread(
-            self.mic.listen, wait_s, lambda: not self._running
-        )
+
+        # The spinner is only shown on the blocking idle wait. While a
+        # conversation is open this polls every couple of seconds, and a
+        # spinner that tears down and rebuilds that often just flickers.
+        if wait_s is None:
+            with self.ui.status("Listening..."):
+                utterance = await asyncio.to_thread(
+                    self.mic.listen, wait_s, lambda: not self._running
+                )
+        else:
+            utterance = await asyncio.to_thread(
+                self.mic.listen, wait_s, lambda: not self._running
+            )
         if utterance is None:
             return ""
+
         try:
-            return await self.transcriber.transcribe(utterance.wav)
+            with self.ui.status("Transcribing..."):
+                return await self.transcriber.transcribe(utterance.wav)
         except TranscriptionError as exc:
             log.warning("Transcription failed: %s", exc)
-            print(f"[E.V.] Couldn't transcribe that: {exc}")
+            self.ui.warn(f"Couldn't transcribe that: {exc}")
             return ""
 
     async def _next_typed(self) -> str:
-        prompt = "standby > " if self.session.in_standby else "you > "
+        prompt = self.ui.prompt(self.session.engaged, self.session.in_standby)
         try:
             return (await asyncio.to_thread(input, prompt)).strip()
         except (EOFError, KeyboardInterrupt):
@@ -146,23 +170,35 @@ class EV:
             return ""
 
     # -- output -----------------------------------------------------------
-    async def say(self, text: str) -> None:
-        """Print and speak a reply, interruptible by the user talking over it."""
-        spoken = clean_for_speech(text)
-        if not spoken:
-            return
-        print(f"E.V. > {spoken}")
-
+    @contextlib.asynccontextmanager
+    async def _barge_in(self):
+        """Watch for the user talking over E.V. for the duration of a block."""
         monitor = None
         if self.mic is not None and config.TTS_BARGE_IN:
             monitor = asyncio.create_task(self._watch_for_barge_in())
         try:
-            await self.speaker.say(spoken)
+            yield
         finally:
             if monitor is not None:
                 monitor.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await monitor
+
+    async def say(self, text: str) -> None:
+        """Print and speak a reply, interruptible by the user talking over it.
+
+        `spoken` is computed once and used for both the panel and the speaker.
+        The UI is handed the finished string and adds its decoration on its own
+        side, so no label the terminal draws can ever reach synthesis.
+        """
+        spoken = clean_for_speech(text)
+        if not spoken:
+            return
+        self.ui.speech(spoken)
+
+        async with self._barge_in():
+            await self.speaker.say(spoken)
+
         # Replying keeps the conversation open, so the user's next sentence
         # needs no wake phrase.
         self.session.mark_exchange()
@@ -190,18 +226,22 @@ class EV:
         model = (
             config.GROQ_MODEL if config.LLM_PROVIDER == "groq" else config.GEMINI_MODEL
         )
-        print(BANNER.format(provider=f"{config.LLM_PROVIDER}: {model}", voice=config.TTS_VOICE))
+        self.ui.header(
+            provider=f"{config.LLM_PROVIDER}  {model}",
+            voice=config.TTS_VOICE,
+            mode="text" if self.text_mode else "voice",
+        )
 
         if self.text_mode:
-            print("Text mode. Type a command, or 'quit' to exit.\n")
+            self.ui.hint("Text mode. Type a command, or 'quit' to exit.\n")
         else:
             hint = (
                 f"Say '{config.WAKE_PHRASES[0]}' to start."
                 if config.WAKE_REQUIRED
                 else "Wake phrase off - just talk."
             )
-            print(f"Listening. {hint} Ctrl+C to quit.")
-            print(
+            self.ui.hint(f"{hint}  Ctrl+C to quit.")
+            self.ui.hint(
                 f"Once we're talking you can drop the name for "
                 f"{int(config.CONVERSATION_WINDOW_S)}s. Say 'take five' to pause me.\n"
             )
@@ -232,10 +272,7 @@ class EV:
             return
 
         if not self.text_mode:
-            # A dot marks an open conversation, so it is obvious at a glance
-            # whether the name is needed for the next sentence.
-            marker = "." if self.session.engaged else " "
-            print(f"you {marker}> {transcript}")
+            self.ui.user(transcript, engaged=self.session.engaged)
 
         if self.text_mode and transcript.lower() in {"quit", "exit"}:
             self.request_stop()
@@ -260,7 +297,7 @@ class EV:
             command = await self._next_utterance(wait_s=6.0)
             if not command:
                 return
-            print(f"you  > {command}")
+            self.ui.user(command, engaged=True)
             follow_up = match_intent(command, self.session.mode)
             if follow_up is not None:
                 await self._handle_intent(follow_up)
@@ -292,8 +329,8 @@ class EV:
         # Near-misses are reported rather than ignored. Silence here is what
         # makes a voice assistant feel dead.
         if wake.heard_something_like_a_name(transcript):
-            print(
-                f"[E.V.] Heard something close to my name but wasn't sure. "
+            self.ui.note(
+                f"Heard something close to my name but wasn't sure. "
                 f"Try starting with '{config.WAKE_PHRASES[0]}'."
             )
         else:
@@ -307,7 +344,7 @@ class EV:
         if intent is Intent.STANDBY:
             self.session.enter_standby()
             await self.say(response_for(intent))
-            print("[E.V.] Standing by. Say 'wake up' or 'E.V., wake up' to resume.")
+            self.ui.note("Standing by. Say 'wake up' or 'E.V., wake up' to resume.")
             return
 
         if intent is Intent.RESUME:
@@ -327,39 +364,99 @@ class EV:
 
         await self.say(response_for(intent))
 
+    # -- acting -----------------------------------------------------------
+    @property
+    def _streaming(self) -> bool:
+        """Streamed speech is only worth the machinery when there is audio."""
+        return config.LLM_STREAMING and self.speaker.enabled
+
     async def handle(self, command: str) -> None:
         """Route one command: confirmation reply, or a fresh model turn."""
         if self.session.pending is not None:
             await self._resolve_pending(command)
             return
 
+        # A `chat` reply starts playing while the model is still writing it.
+        # The stream is created on the first sentence rather than up front, so
+        # a tool call never leaves an idle stream holding the speaker lock.
+        stream: SpeechStream | None = None
+
+        def on_sentence(sentence: str) -> None:
+            nonlocal stream
+            if stream is None:
+                stream = self.speaker.stream()
+            stream.feed(sentence)
+
         try:
-            call = await self.brain.decide(command)
+            with self.ui.status("Thinking..."):
+                call = await self.brain.decide(
+                    command, on_sentence=on_sentence if self._streaming else None
+                )
         except BrainError as exc:
+            if stream is not None:
+                stream.cancel()
             log.warning("Brain error: %s", exc)
             await self.say(str(exc))
             return
 
         log.info("tool=%s args=%s", call.name, call.arguments)
+        self.ui.action(call.name, _describe(call))
+
+        if stream is not None:
+            if call.name == "chat":
+                await self._finish_streamed(command, call, stream)
+                return
+            # Only `chat` streams, so this should not happen - but an
+            # abandoned stream would hold the speaker lock forever.
+            stream.cancel()
+
         await self._execute(command, call)
+
+    async def _finish_streamed(
+        self, command: str, call: ToolCall, stream: SpeechStream
+    ) -> None:
+        """Show the reply and wait for the audio already in flight to finish."""
+        reply = clean_for_speech(str(call.arguments.get("reply", "")))
+        # Drawn now, while the earlier sentences are still playing, so the
+        # text and the voice land together rather than one after the other.
+        self.ui.speech(reply or stream.spoken)
+
+        async with self._barge_in():
+            spoken = await stream.finish()
+
+        self.session.mark_exchange()
+        self.brain.remember(command, spoken or reply)
 
     async def _execute(self, command: str, call: ToolCall) -> None:
         # Tools block on subprocesses and the OS, so they run off the loop.
-        result: ToolResult = await asyncio.to_thread(dispatch, call.name, call.arguments)
+        with self.ui.status("Executing..."):
+            result: ToolResult = await asyncio.to_thread(
+                dispatch, call.name, call.arguments
+            )
 
         if result.needs_confirmation:
-            self.session.pending = {"command": command, "args": dict(result.data)}
+            # The tool name is held too: file deletes and shell commands both
+            # come through here, and resuming the wrong one would be worse
+            # than dropping it.
+            self.session.pending = {
+                "command": command,
+                "tool": call.name,
+                "args": dict(result.data),
+            }
             await self.say(result.speech)
             if not self.text_mode:
                 # Confirmation has a short fuse; silence means no.
                 reply = await self._next_utterance(wait_s=8.0)
                 if reply:
-                    print(f"you  > {reply}")
+                    self.ui.user(reply, engaged=True)
                 await self._resolve_pending(reply)
             return
 
         await self.say(result.speech)
-        self.brain.remember(command, result.detail or result.speech)
+        # Speech and observation go to different channels. Putting the machine
+        # detail in the assistant role is what taught the model to say
+        # "Spoke:" out loud - see `ev.brain`.
+        self.brain.remember(command, result.speech, result.detail)
 
     async def _resolve_pending(self, reply: str) -> None:
         pending = self.session.pending
@@ -373,6 +470,7 @@ class EV:
             # it as a "no" and leaving them wondering where their command went.
             self.brain.remember(
                 pending["command"],
+                "Never mind.",
                 "The user did not answer the confirmation and asked for "
                 "something else; the command was not run.",
             )
@@ -382,15 +480,19 @@ class EV:
         if not reply or not is_affirmative(reply):
             await self.say("Cancelled.")
             self.brain.remember(
-                pending["command"], "The user declined to confirm; the command was not run."
+                pending["command"],
+                "Cancelled.",
+                "The user declined to confirm; the command was not run.",
             )
             return
 
+        tool = pending.get("tool", "terminal_command")
         args = {**pending["args"], "confirmed": True}
         args.pop("reason", None)
-        result: ToolResult = await asyncio.to_thread(dispatch, "terminal_command", args)
+        with self.ui.status("Executing..."):
+            result: ToolResult = await asyncio.to_thread(dispatch, tool, args)
         await self.say(result.speech)
-        self.brain.remember(pending["command"], result.detail or result.speech)
+        self.brain.remember(pending["command"], result.speech, result.detail)
 
     # -- one-shot ---------------------------------------------------------
     async def run_once(self, command: str) -> None:
@@ -472,6 +574,11 @@ def check_config() -> int:
     else:
         problems.append(f"MISS brain: {key_name} is not set")
 
+    notes.append(
+        f"OK   streaming: {'on' if config.LLM_STREAMING else 'off'} "
+        "(speech starts on the first finished sentence)"
+    )
+
     if config.STT_PROVIDER == "groq" and not config.GROQ_API_KEY:
         problems.append("MISS stt: groq backend needs GROQ_API_KEY")
     else:
@@ -480,8 +587,10 @@ def check_config() -> int:
     for module, label, required in (
         ("edge_tts", "edge-tts (voice output)", config.TTS_ENABLED),
         ("sounddevice", "sounddevice (microphone)", True),
-        ("pyautogui", "pyautogui (dev_workflow keystrokes)", False),
         ("httpx", "httpx (API calls)", True),
+        ("rich", "rich (terminal UI)", False),
+        ("pyautogui", "pyautogui (dev_tools keystrokes)", False),
+        ("send2trash", "send2trash (recoverable deletes)", False),
     ):
         if importlib.util.find_spec(module) is not None:
             notes.append(f"OK   {label}")
@@ -514,6 +623,13 @@ def check_config() -> int:
             notes.append(f"OK   {label} ({binary})")
         else:
             notes.append(f"WARN {label} '{binary}' not on PATH - dev_workflow degrades")
+
+    # File roots decide what `file_manager` is allowed to touch, so they are
+    # worth stating plainly rather than leaving in a config file.
+    for root in config.FILE_ROOTS:
+        state = "OK  " if root.is_dir() else "WARN"
+        notes.append(f"{state} files: {root} {'' if root.is_dir() else '(missing)'}")
+    notes.append(f"OK   files: new files default to {config.FILE_DEFAULT_DIR}")
 
     print("\nE.V. configuration check\n" + "-" * 44)
     for line in notes:

@@ -14,7 +14,8 @@ from typing import Any, Callable
 from tools.app_launcher import open_app
 from tools.base import ToolResult
 from tools.browser import web_search
-from tools.dev_workflow import dev_workflow
+from tools.dev_tools import dev_workflow
+from tools.file_manager import file_manager
 from tools.schemas import TOOL_NAMES, TOOL_SPECS, to_gemini_tools, to_openai_tools
 from tools.terminal import terminal_command
 
@@ -22,11 +23,18 @@ log = logging.getLogger("ev.tools")
 
 
 def chat(reply: str = "", **_: object) -> ToolResult:
-    """Conversational fallback: say something, touch nothing."""
+    """Conversational fallback: say something, touch nothing.
+
+    `detail` deliberately equals `speech`. It used to be f"Spoke: {text}",
+    which the core loop stored as an assistant turn - so the model read its
+    own past replies as being prefixed with a label, learned the pattern, and
+    started emitting "Spoke:" in text that went straight to the speaker. Chat
+    has no side effect to report, so there is nothing to add here.
+    """
     text = (reply or "").strip()
     if not text:
         return ToolResult.success("I've got nothing on that one.")
-    return ToolResult.success(text, f"Spoke: {text}")
+    return ToolResult.success(text)
 
 
 REGISTRY: dict[str, Callable[..., ToolResult]] = {
@@ -34,6 +42,7 @@ REGISTRY: dict[str, Callable[..., ToolResult]] = {
     "web_search": web_search,
     "dev_workflow": dev_workflow,
     "terminal_command": terminal_command,
+    "file_manager": file_manager,
     "chat": chat,
 }
 
@@ -43,7 +52,10 @@ _ALLOWED_ARGS: dict[str, set[str]] = {
     spec["name"]: set(spec["parameters"].get("properties", {}))
     for spec in TOOL_SPECS
 }
-_ALLOWED_ARGS["terminal_command"].add("confirmed")
+# `confirmed` is injected by the core loop after a spoken yes, so it is
+# never something the model can set for itself.
+for _gated in ("terminal_command", "file_manager"):
+    _ALLOWED_ARGS[_gated].add("confirmed")
 
 
 def dispatch(name: str, arguments: dict[str, Any] | None = None) -> ToolResult:
@@ -72,7 +84,7 @@ def dispatch(name: str, arguments: dict[str, Any] | None = None) -> ToolResult:
     for key, value in list(kwargs.items()):
         if isinstance(value, bool) or value is None:
             continue
-        if key in {"start_claude", "background", "confirmed"}:
+        if key in {"start_claude", "background", "confirmed", "recursive"}:
             kwargs[key] = str(value).strip().lower() in {"true", "1", "yes"}
         elif not isinstance(value, str):
             kwargs[key] = str(value)

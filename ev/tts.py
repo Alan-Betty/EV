@@ -17,7 +17,9 @@ broken:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
+import json
 import logging
 import os
 import re
@@ -42,18 +44,96 @@ _WHITESPACE = re.compile(r"\s+")
 # or on the initials in "E.V." itself.
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9])")
 
+# Meta-labels: the names of channels, roles and UI chrome, which are never
+# speech. Three separate things produce them and all three reach this module:
+#
+# * the model, after seeing its own past replies stored with a "Spoke: "
+#   prefix (fixed at source in `ev.brain`, but a model can always improvise),
+# * terminal chrome such as "E.V. >" or "[E.V.]" echoed back into a reply,
+# * a raw tool observation ("$ git status", "exit=0") reaching the wrong field.
+#
+# Saying any of them out loud is the most obviously broken thing a voice
+# assistant can do, so this is a hard boundary rather than a tidy-up.
+_LABEL = r"""(?:
+      spoke|spoken|speaking|speech|said|saying|says
+    | response|responds?|responding|repl(?:y|ies|ying)
+    | answers?|answering|outputs?|results?|details?
+    | assistant|ai|bot|system|user|you|me|transcript|message|text
+    | notes?|actions?|tool(?:\ call)?|command|status|thought|thinking
+    | e\s*\.?\s*v\s*\.?
+)"""
+# "[E.V.]", "(assistant)", "<system>" - with or without a trailing separator.
+_META_BRACKETED = re.compile(
+    rf"^\s*[\[(<]\s*{_LABEL}\s*[\])>]\s*[:>\-\u2013\u2014]?\s*",
+    re.IGNORECASE | re.VERBOSE,
+)
+# "Spoke:", "E.V. >", "Response:". The separator is required, so an ordinary
+# sentence that merely opens with one of these words is left alone.
+_META_BARE = re.compile(rf"^\s*{_LABEL}\s*[:>]+\s*", re.IGNORECASE | re.VERBOSE)
+# Occasionally a whole tool-call envelope arrives where the reply should be.
+_JSON_REPLY = re.compile(
+    r'^\s*\{.*?"(?:reply|text|speech|content|message|response)"\s*:\s*"(.*?)"\s*[,}]',
+    re.DOTALL,
+)
+# A leaked command echo is a transcript of a command, not speech, so the
+# whole line goes - stripping only the "$" would still read it aloud.
+_SHELL_ECHO = re.compile(r"^[ \t]*(?:\$|PS\s+[A-Za-z]:\[^>\n]*>)[ \t]+.*$", re.MULTILINE)
+_EXIT_CODE = re.compile(r"^[ \t]*exit\s*=\s*-?\d+[ \t]*$", re.MULTILINE | re.IGNORECASE)
+_QUOTE_PAIRS = {'"': '"', "'": "'", "\u201c": "\u201d", "\u2018": "\u2019"}
+
+
+def strip_meta_labels(text: str) -> str:
+    """Remove role labels and channel prefixes from a would-be spoken string.
+
+    Deliberately strict about the separator: "Spoke: hi" is a label, but
+    "Spoke to your mother" is a sentence. Only the former is touched.
+    """
+    spoken = (text or "").strip()
+    if not spoken:
+        return ""
+
+    envelope = _JSON_REPLY.match(spoken)
+    if envelope:
+        try:
+            spoken = json.loads(f'"{envelope.group(1)}"')
+        except ValueError:
+            spoken = envelope.group(1)
+        spoken = spoken.strip()
+
+    spoken = _EXIT_CODE.sub(" ", spoken)
+    spoken = _SHELL_ECHO.sub(" ", spoken)
+
+    # Labels stack ("Spoke: E.V.: hi"), so peel until nothing more comes off.
+    for _ in range(4):
+        peeled = _META_BARE.sub("", _META_BRACKETED.sub("", spoken, count=1), count=1)
+        peeled = peeled.strip()
+        if peeled == spoken:
+            break
+        spoken = peeled
+
+    # Models like to hand back the whole reply wrapped in quotes.
+    if len(spoken) >= 2 and _QUOTE_PAIRS.get(spoken[0]) == spoken[-1]:
+        spoken = spoken[1:-1].strip()
+    return spoken
+
 
 def clean_for_speech(text: str) -> str:
     """Make arbitrary model output safe to read aloud.
 
     This normalises only. It never shortens - see `split_for_speech`.
+
+    Label stripping runs first, because removing markdown would delete the
+    ">" that makes "E.V. > hi" recognisable as chrome in the first place.
     """
-    spoken = _URL.sub("that link", text or "")
+    spoken = strip_meta_labels(text)
+    spoken = _URL.sub("that link", spoken)
     spoken = _MARKDOWN.sub("", spoken)
     # Bare paths read terribly character by character.
-    spoken = re.sub(r"\b[A-Za-z]:\\[^\s]+", "that path", spoken)
+    spoken = re.sub(r"\b[A-Za-z]:\[^\s]+", "that path", spoken)
     spoken = _WHITESPACE.sub(" ", spoken).strip()
-    return spoken
+    # Peel again: stripping markdown can uncover a label that was hidden
+    # behind it, as in "**E.V.:** hi".
+    return strip_meta_labels(spoken)
 
 
 def split_for_speech(text: str, limit: int | None = None) -> list[str]:
@@ -357,6 +437,16 @@ class Speaker:
             self._store(text, path)
         return path
 
+    def stream(self) -> "SpeechStream":
+        """Open a stream that speaks sentences as they are handed over.
+
+        This is what removes the dead air after the user stops talking. The
+        old path waited for the whole reply, then synthesised, then played.
+        Here the first sentence is already playing while the model is still
+        writing the second.
+        """
+        return SpeechStream(self)
+
     def stop(self) -> None:
         """Cut playback short, for barge-in or shutdown."""
         self._cancel = True
@@ -366,6 +456,126 @@ class Speaker:
             except Exception as exc:
                 log.debug("Stop failed: %s", exc)
         self._speaking = False
+
+
+class SpeechStream:
+    """A speech pipeline fed one sentence at a time.
+
+    Sentences are queued as they arrive and played in order. While one plays,
+    the next is already being synthesised, so the seam between them is
+    inaudible - the same overlap `Speaker._speak_chunks` uses, but driven by a
+    producer that has not finished writing yet.
+
+    `feed` never blocks the caller, which matters because the caller is the
+    SSE read loop: stalling it would stall the very generation being spoken.
+    """
+
+    def __init__(self, speaker: Speaker) -> None:
+        self._speaker = speaker
+        self._queue: asyncio.Queue[str | None] = asyncio.Queue()
+        self._spoken: list[str] = []
+        self._closed = False
+        self._task: asyncio.Task | None = None
+        if speaker.enabled and speaker._player is not None:
+            self._task = asyncio.ensure_future(self._run())
+
+    @property
+    def spoken(self) -> str:
+        """Everything handed to this stream, as one string."""
+        return " ".join(self._spoken).strip()
+
+    def feed(self, sentence: str) -> None:
+        """Queue one sentence. Non-blocking, and safe to call from a hook."""
+        spoken = clean_for_speech(sentence)
+        if not spoken or self._closed:
+            return
+        self._spoken.append(spoken)
+        if self._task is not None:
+            self._queue.put_nowait(spoken)
+
+    def close(self) -> None:
+        """Signal that no more sentences are coming."""
+        if self._closed:
+            return
+        self._closed = True
+        if self._task is not None:
+            self._queue.put_nowait(None)
+
+    async def finish(self) -> str:
+        """Close the stream and wait for everything queued to finish playing."""
+        self.close()
+        if self._task is not None:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._task
+        return self.spoken
+
+    def cancel(self) -> None:
+        """Abandon playback, for barge-in or shutdown."""
+        self._closed = True
+        if self._task is not None:
+            self._queue.put_nowait(None)
+            self._task.cancel()
+
+    async def _run(self) -> None:
+        speaker = self._speaker
+        async with speaker._lock:
+            speaker._speaking = True
+            speaker._cancel = False
+            synth: asyncio.Future | None = None
+            path: str | None = None
+            try:
+                while not speaker._cancel:
+                    if synth is None:
+                        text = await self._queue.get()
+                        if text is None:
+                            break
+                        synth = asyncio.ensure_future(speaker._synthesise(text))
+
+                    try:
+                        path = await synth
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        speaker._report_failure(exc)
+                        synth = None
+                        if self._closed and self._queue.empty():
+                            break
+                        continue
+                    synth = None
+
+                    # If the next sentence has already landed, start
+                    # synthesising it now so it overlaps with this playback.
+                    if not self._queue.empty():
+                        nxt = self._queue.get_nowait()
+                        if nxt is None:
+                            self._closed = True
+                        else:
+                            synth = asyncio.ensure_future(speaker._synthesise(nxt))
+
+                    if speaker._cancel:
+                        break
+
+                    try:
+                        await asyncio.to_thread(
+                            speaker._player.play, path, True, config.TTS_TIMEOUT_S + 30
+                        )
+                    except Exception as exc:
+                        speaker._report_failure(exc)
+                        break
+                    finally:
+                        _unlink(path)
+                        path = None
+
+                    if self._closed and synth is None and self._queue.empty():
+                        break
+            finally:
+                speaker._speaking = False
+                _unlink(path)
+                if synth is not None:
+                    synth.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        leftover = await synth
+                        _unlink(leftover)
 
 
 def _unlink(path: str | None) -> None:

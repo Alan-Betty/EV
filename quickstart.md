@@ -91,6 +91,50 @@ closes after you have actually stopped talking for a while. Tune it with
 
 ---
 
+## The terminal UI
+
+E.V. renders in a sci-fi console built on `rich`: an ASCII header, colour-coded
+turns, and an animated status line that tells you which stage it is in.
+
+```
+ ███████╗    ██╗   ██╗
+ ██╔════╝    ██║   ██║
+ █████╗      ██║   ██║
+ ██╔══╝      ╚██╗ ██╔╝
+ ███████╗██╗  ╚████╔╝ ██╗
+ ╚══════╝╚═╝   ╚═══╝  ╚═╝
+   EVERYDAY VIRTUAL ASSISTANT
+   cloud brain, local hands
+
+   brain  groq  llama-3.3-70b-versatile
+   voice  en-US-GuyNeural
+   mode   voice
+```
+
+| Colour | Means |
+|---|---|
+| dim `you >` + bright white | what you said |
+| cyan panel | what E.V. is saying |
+| amber `⚙ tool_name` | a tool actually running |
+| dim `·` | a note from E.V. about itself |
+| red `✗` | something failed |
+
+The status line cycles through `Listening...`, `Transcribing...`,
+`Thinking...`, `Executing...` as the turn progresses.
+
+**The UI cannot change what E.V. says.** This is structural, not a convention:
+every function in `ev/ui.py` returns `None`, so there is no path by which a
+label it draws could be handed to the speaker. The reply text reaches
+`Speaker.say` on a completely separate line in `ev_core.py`. A test asserts
+the `None` return for every renderer, so it stays true.
+
+If `rich` is not installed, stdout is redirected to a file, or you set
+`EV_UI_PLAIN=true`, the whole thing degrades to plain text automatically. Set
+`EV_UI_SPINNERS=false` to keep the colour but drop the animation.
+
+---
+
+
 ## Other ways to run it
 
 ```bash
@@ -119,6 +163,45 @@ start debugging a microphone.
 - "E.V., look up async context managers on Stack Overflow"
 - "Hey E.V., find me the Rust book on GitHub"
 - "E.V., pull up YouTube and search for lockpicking tutorials"
+
+**File control**
+
+E.V. has real access to your files, scoped to your user folders. Say the
+folder name the way you would to a person — "Documents", "my Downloads
+folder", "the Desktop".
+
+- "E.V., create a txt file in Documents with the 10 most visited places"
+- "E.V., copy report.pdf from Downloads to Documents"
+- "E.V., what's in my Downloads folder"
+- "E.V., organise my Downloads folder"
+- "E.V., rename that to quarterly-notes.txt"
+- "E.V., find anything with 'invoice' in Downloads"
+- "E.V., make a folder called screenshots on my Desktop"
+- "E.V., read me the top of my todo file"
+- "E.V., delete the old zip in Downloads"   ← asks first
+
+Creating a file writes the *actual* content you asked for, not a placeholder:
+
+```
+you  > E.V., create a txt file in Documents called places with the 10 most visited
+  ⚙ file_manager  action=create  path=Documents/places.txt
+E.V. > Made places.txt in Documents.
+```
+
+Deleting and organising always ask before they run:
+
+```
+you  > E.V., delete the old zip in Downloads
+E.V. > That'll delete archive.zip in Downloads. Sure?
+you  > yeah
+E.V. > archive.zip in Downloads is in the Recycle Bin.
+```
+
+Two things keep this safe. Everything resolves inside `EV_FILE_ROOTS` (your
+user profile by default), so a misheard word cannot reach `C:\Windows`. And
+deletes go to the Recycle Bin when `send2trash` is installed, so a mistaken
+"yes" is recoverable.
+
 
 **Developer workflow**
 - "E.V., launch VS Code and start Claude Code"
@@ -220,11 +303,39 @@ trip to Microsoft's voice service. Three things already cut it down:
   is still synthesising.
 * The Windows MP3 decoder is loaded at startup rather than on your first reply.
 
-If you want to go further, shorten replies — `EV_TTS_FIRST_CHUNK_CHARS` sets how
-much E.V. synthesises before starting to talk.
+**Where the time actually goes.** Measured on this setup against the live APIs,
+for one short spoken reply:
 
-**Change the voice.** The default is `en-US-AvaMultilingualNeural` — female,
-conversational, and the most natural of the current Edge voices.
+| Stage | Cost | Notes |
+|---|---|---|
+| Groq, first token | 1.1 – 1.45s | dominant, and essentially fixed |
+| Groq, rest of the reply | ~0.03s | generation is not the bottleneck |
+| edge-tts synthesis | ~0.7s + 0.004s/char | 12 ch 0.88s · 45 ch 1.06s · 90 ch 1.23s · 180 ch 1.41s |
+| edge-tts, cache hit | 0.002s | a file copy |
+
+Two things follow from this, and they are worth knowing before you spend time
+tuning the wrong knob:
+
+* **The cache is the biggest win by far**, which is why every stock reply is
+  pre-synthesised at startup. A cached reply is ~400× faster than a fresh one.
+* **Shortening the first chunk helps, but modestly.** Dropping
+  `EV_TTS_FIRST_CHUNK_CHARS` from 90 to 60 buys about 0.2s before the first
+  word. It is set to 60 by default for that reason. Single long sentences are
+  never split mid-sentence — the seam would cost more than the wait.
+
+**About LLM streaming.** `EV_LLM_STREAMING=true` makes E.V. start speaking on
+the first finished sentence rather than the last token. Be aware of what this
+does and does not buy you: **on Groq function calls it currently buys nothing**,
+because Groq delivers the whole tool-call argument blob in a single SSE frame
+(measured: 1 delta, 0.0s spread). It does help when the model answers with
+prose instead of a tool call, where content streams in ~19 frames. It costs
+nothing when it does not help, and falls back to a plain request on any error,
+so it is left on. If a future model streams tool arguments incrementally, the
+machinery is already in place.
+
+
+**Change the voice.** The default is `en-US-GuyNeural` — male,
+conversational, and quick enough to carry E.V.'s deadpan.
 
 ```bash
 python -m ev.tts_voices                                 # list English voices
@@ -288,6 +399,57 @@ calibrates.
 
 ## Troubleshooting
 
+**E.V. reads a label out loud** — "Spoke: Chrome's up", "E.V.: Chrome's up".
+This was a real bug and it is fixed in two independent places, so it should not
+come back:
+
+* *The cause.* The `chat` tool used to report its result as `Spoke: <text>`,
+  and the core loop stored that string as an **assistant** turn. The model then
+  saw its own previous replies prefixed with a label, treated it as the house
+  style, and started writing `Spoke:` into text that went straight to the
+  speaker. Tool results now travel in a separate `observation` field that is
+  replayed in an input role, never as something E.V. said.
+* *The backstop.* `clean_for_speech` strips role labels, UI chrome, shell
+  echoes and JSON envelopes from anything on its way to synthesis, however it
+  got there. It is deliberately strict about the separator, so "Spoke: hi"
+  is stripped and "Spoke to your mother" is not.
+
+If you ever hear one, it means something produced a label shape the stripper
+does not know. Add it to `_LABEL` in `ev/tts.py` and add a case to
+`tests/test_speech_purity.py`.
+
+**The UI looks like plain text.** `rich` is not installed
+(`pip install rich`), stdout is being redirected, or `EV_UI_PLAIN=true`. None
+of these affect behaviour — only appearance.
+
+**"Documents" is not the folder I expected.** On a profile backed by OneDrive,
+`C:\Users\you\Documents` and `C:\Users\you\OneDrive\Documents` can both exist,
+and only the second is the one Explorer shows you. E.V. reads the real location
+from the Windows known-folder registry, so "Documents" and "Desktop" resolve to
+wherever your profile actually points — OneDrive included. Check what it
+resolved to:
+
+```bash
+python -c "import config; [print(k, v) for k, v in config.USER_DIRS.items()]"
+```
+
+Override any of them with `EV_FILE_DEFAULT_DIR`, or widen `EV_FILE_ROOTS` if
+your folders live somewhere unusual.
+
+
+**"That's outside the folders I'm allowed to touch."** `file_manager` refused a
+path outside `EV_FILE_ROOTS`, which defaults to your user profile. This is the
+guard that stops a misheard word reaching system files. If you genuinely want
+E.V. working elsewhere, add the root explicitly in `.env`:
+
+```bash
+EV_FILE_ROOTS=C:\Users\you;D:\Projects
+```
+
+**Deletes are permanent.** Install `send2trash` and they go to the Recycle Bin
+instead: `pip install send2trash`. Check with `python ev_core.py --check`.
+
+
 **`GROQ_API_KEY is not set`** — you copied `.env.example` but did not paste a
 key, or you have a `.env.example` where `.env` should be.
 
@@ -337,8 +499,20 @@ keystrokes rather than risk typing into whatever else was on screen.
 ## Running the tests
 
 ```bash
-python tests/test_smoke.py    # tools, safety, wake phrase — no network
-python tests/test_brain.py    # API wire formats, event loop — mocked, no key
+python -m pytest tests/ -q                      # all 130
+python -m pytest tests/test_speech_purity.py -q  # the no-labels guarantee
+python -m pytest tests/test_file_manager.py -q   # file ops + root containment
 ```
 
-Both run fully offline and open no windows.
+| Suite | Covers |
+|---|---|
+| `test_smoke.py` | tools, safety classifier, wake phrase |
+| `test_brain.py` | Groq and Gemini wire formats, history bounds |
+| `test_speech_purity.py` | no label ever reaches the speaker, from either cause |
+| `test_file_manager.py` | file operations, and paths outside the roots being refused |
+| `test_streaming_and_ui.py` | partial-JSON reply parsing, UI/speech separation |
+| `test_stream_integration.py` | SSE frames in, spoken sentences out |
+
+All of them run fully offline, need no API key, and open no windows. The file
+tests redirect `FILE_ROOTS` at a temporary tree, so a bug in the tool cannot
+reach the machine running the suite.

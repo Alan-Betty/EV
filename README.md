@@ -69,13 +69,13 @@ The design goes further than just picking cloud services:
                                      ▼                 ▼
                               safety classifier     chat
                                      │
-                          ┌──────────┼──────────┬──────────────┐
-                          ▼          ▼          ▼              ▼
-                      open_app   web_search  dev_workflow  terminal_command
-                          │          │          │              │
-                          └──────────┴─────┬────┴──────────────┘
-                                           ▼
-                                      edge-tts ──► winmm ──► speakers
+                ┌──────────┬──────────┼────────────┬────────────┐
+                ▼          ▼          ▼            ▼            ▼
+            open_app  web_search  file_manager  dev_workflow  terminal_command
+                │          │           │            │            │
+                └──────────┴─────┬─────┴────────────┴────────────┘
+                                 ▼
+                             edge-tts ──► winmm ──► speakers
 ```
 
 The model never emits free text that gets executed. It selects a tool and fills
@@ -89,13 +89,14 @@ schema actually declares before anything runs.
 ev_core.py            async event loop: capture, transcribe, decide, act, speak
 config.py             all configuration, environment-overridable
 .env.example          annotated template — copy to .env
-requirements.txt      six packages
+requirements.txt      seven packages
 quickstart.md         setup, sample commands, tuning, troubleshooting
 
 ev/
   brain.py            Groq + Gemini over raw HTTP, returns a tool call
   stt.py              speech to text: Groq Whisper, Google, or whisper.cpp
-  tts.py              edge-tts synthesis and playback
+  tts.py              edge-tts synthesis, playback, and the no-labels boundary
+  ui.py               rich terminal UI — renders only, returns nothing speakable
   audio.py            microphone capture with VAD, MP3 playback via winmm
   wake.py             fuzzy wake-phrase matching
   session.py          conversation state and local control phrases
@@ -108,13 +109,18 @@ tools/
   base.py             process launching, executable and path resolution
   app_launcher.py     open_app
   browser.py          web_search
-  dev_workflow.py     VS Code + integrated terminal + Claude Code
+  file_manager.py     file_manager — root-scoped file and folder control
+  dev_tools.py        VS Code + integrated terminal + Claude Code
   terminal.py         terminal_command
   window.py           Win32 focus helpers, so keystrokes never go astray
 
 tests/
-  test_smoke.py       tools, safety, wake phrase — offline
-  test_brain.py       provider wire formats, event loop — mocked
+  test_smoke.py              tools, safety, wake phrase — offline
+  test_brain.py              provider wire formats, event loop — mocked
+  test_speech_purity.py      no label ever reaches the speaker
+  test_file_manager.py       file operations and root containment
+  test_streaming_and_ui.py   partial-JSON parsing, UI/speech separation
+  test_stream_integration.py SSE frames in, spoken sentences out
 ```
 
 ## Tools
@@ -123,6 +129,7 @@ tests/
 |---|---|
 | `open_app` | Launches desktop apps. Fuzzy-matches misheard names, resolves through PATH and the Windows App Paths registry. |
 | `web_search` | Opens a search or a URL, in a named browser or the default. |
+| `file_manager` | Creates, reads, lists, copies, moves, renames, deletes, searches and organises files. Scoped to `EV_FILE_ROOTS`; deletes and reorganises always ask first and go to the Recycle Bin. |
 | `dev_workflow` | Opens VS Code on a project, spawns an integrated terminal, starts Claude Code, optionally types an opening prompt. |
 | `terminal_command` | Runs shell commands, gated by the safety classifier. Foreground with output captured, or detached into its own window. |
 | `chat` | Speaks a reply when no action is called for. |
@@ -152,17 +159,31 @@ typing into whatever happened to be on screen.
 ## Tests
 
 ```bash
-python tests/test_smoke.py    # 20 tests
-python tests/test_brain.py    # 10 tests
+python -m pytest tests/ -q    # 130 tests
 ```
 
-Both run offline with no API key and open no windows.
+All of them run offline with no API key, open no windows, and touch no real
+user directory — the file tests redirect `FILE_ROOTS` at a temporary tree.
+
+Two suites are load-bearing rather than incidental:
+
+* `test_speech_purity.py` is the regression suite for E.V. reading labels
+  aloud. It covers both the structural cause (a tool observation stored as an
+  assistant turn) and the boundary that strips labels regardless of origin.
+  Its keep-cases matter as much as its strip-cases: a stripper aggressive
+  enough to eat "Spoke to your mother" would be its own bug.
+* `test_file_manager.py` pins the containment guarantee. A path that escapes
+  `FILE_ROOTS` must be refused, never silently retargeted.
 
 ## Requirements
 
 Python 3.10+, a microphone, and a free API key from
 [Groq](https://console.groq.com/keys) or
 [Google AI Studio](https://aistudio.google.com/apikey).
+
+`rich` gives the terminal UI its panels and spinners; without it everything
+still works and simply renders as plain text. `send2trash` is strongly
+recommended, because it is what makes a confirmed delete recoverable.
 
 Windows is the primary target. The core loop, brain, STT and TTS are portable;
 `dev_workflow`'s integrated-terminal path and the `winmm` player are

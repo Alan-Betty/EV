@@ -25,6 +25,7 @@ import httpx  # noqa: E402
 
 import config  # noqa: E402
 from ev.brain import Brain, BrainError  # noqa: E402
+from tools.schemas import TOOL_NAMES, TOOL_SPECS  # noqa: E402
 
 CAPTURED: list[httpx.Request] = []
 
@@ -107,36 +108,38 @@ def test_groq_request_shape_and_tool_parsing():
     assert body["messages"][0]["role"] == "system"
     assert "E.V." in body["messages"][0]["content"]
     names = {tool["function"]["name"] for tool in body["tools"]}
-    assert names == {"open_app", "web_search", "dev_workflow", "terminal_command", "chat"}
+    assert names == set(TOOL_NAMES)
 
 
 def test_gemini_request_shape_and_function_call_parsing():
     CAPTURED.clear()
     config.LLM_PROVIDER = "gemini"
+    try:
 
-    async def go():
-        client = _client(
-            lambda r: _gemini_tool_response("web_search", {"query": "gaming mouse"})
-        )
-        brain = Brain(client)
-        brain.provider = "gemini"
-        call = await brain.decide("find me a gaming mouse")
-        await client.aclose()
-        return call
+        async def go():
+            client = _client(
+                lambda r: _gemini_tool_response("web_search", {"query": "gaming mouse"})
+            )
+            brain = Brain(client)
+            brain.provider = "gemini"
+            call = await brain.decide("find me a gaming mouse")
+            await client.aclose()
+            return call
 
-    call = _run(go())
-    assert call.name == "web_search"
-    assert call.arguments == {"query": "gaming mouse"}
+        call = _run(go())
+        assert call.name == "web_search"
+        assert call.arguments == {"query": "gaming mouse"}
 
-    request = CAPTURED[-1]
-    assert ":generateContent" in str(request.url)
-    assert request.headers["x-goog-api-key"] == "test-gemini-key"
-    body = json.loads(request.content)
-    assert body["toolConfig"]["functionCallingConfig"]["mode"] == "ANY"
-    assert "systemInstruction" in body
-    assert len(body["tools"][0]["functionDeclarations"]) == 5
+        request = CAPTURED[-1]
+        assert ":generateContent" in str(request.url)
+        assert request.headers["x-goog-api-key"] == "test-gemini-key"
+        body = json.loads(request.content)
+        assert body["toolConfig"]["functionCallingConfig"]["mode"] == "ANY"
+        assert "systemInstruction" in body
+        assert len(body["tools"][0]["functionDeclarations"]) == len(TOOL_SPECS)
 
-    config.LLM_PROVIDER = "groq"
+    finally:
+        config.LLM_PROVIDER = "groq"
 
 
 def test_history_is_sent_and_stays_bounded():

@@ -1,4 +1,6 @@
-"""`dev_workflow` - open VS Code on a project, spawn a terminal, start Claude Code.
+"""Developer macros.
+
+`dev_workflow` - open VS Code on a project, spawn a terminal, start Claude Code.
 
 Two strategies:
 

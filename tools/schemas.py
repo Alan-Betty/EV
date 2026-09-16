@@ -174,6 +174,86 @@ TOOL_SPECS: list[ToolSpec] = [
         },
     },
     {
+        "name": "file_manager",
+        "description": (
+            "Create, read, list, copy, move, rename, delete, search and "
+            "organise files and folders in the user's own directories "
+            "(Desktop, Downloads, Documents, Pictures and so on). Use this for "
+            "anything about files: 'make a text file in Documents with my top "
+            "ten places', 'copy report.pdf from Downloads to Documents', "
+            "'organise my Downloads folder', 'what's in my Desktop', 'rename "
+            "that to notes.txt', 'delete the old zip'. Prefer this over "
+            "terminal_command for every file operation - it is safer and it "
+            "asks before deleting."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": (
+                        "What to do. 'create' writes a new file (put the text "
+                        "in 'content'). 'append' adds to an existing file. "
+                        "'read' returns the contents. 'list' shows a folder. "
+                        "'copy'/'move'/'rename' need 'destination'. 'delete' "
+                        "removes a file or folder. 'makedir' creates a folder. "
+                        "'find' searches by name using 'pattern'. 'organize' "
+                        "sorts loose files in a folder into type subfolders."
+                    ),
+                    "enum": [
+                        "create",
+                        "append",
+                        "read",
+                        "list",
+                        "copy",
+                        "move",
+                        "rename",
+                        "delete",
+                        "makedir",
+                        "find",
+                        "organize",
+                    ],
+                },
+                "path": {
+                    "type": "string",
+                    "description": (
+                        "The file or folder to act on. A spoken folder name "
+                        "('Downloads', 'Desktop'), a relative path "
+                        "('Documents/notes.txt'), or a full path. For a new "
+                        "file, include the filename and extension. If the user "
+                        "named no folder, just give the filename and it lands "
+                        "in Documents."
+                    ),
+                },
+                "destination": {
+                    "type": "string",
+                    "description": (
+                        "Where it goes, for copy, move and rename. A folder "
+                        "name to move into, or a full new filename to rename "
+                        "to. Omit for every other action."
+                    ),
+                },
+                "content": {
+                    "type": "string",
+                    "description": (
+                        "The full text to write, for create and append. Write "
+                        "the actual content the user asked for - if they want "
+                        "a list of ten places, write all ten out here. Plain "
+                        "text, with real newlines between lines."
+                    ),
+                },
+                "pattern": {
+                    "type": "string",
+                    "description": (
+                        "Name or glob to search for, used only by 'find', "
+                        "e.g. 'invoice' or '*.pdf'."
+                    ),
+                },
+            },
+            "required": ["action"],
+        },
+    },
+    {
         "name": "chat",
         "description": (
             "Speak a reply with no machine action. Use for questions, banter, "

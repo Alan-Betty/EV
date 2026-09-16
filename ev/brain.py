@@ -3,14 +3,27 @@
 Deliberately no vendor SDK. `httpx` is already needed for the STT upload, and
 both providers are a single JSON POST, so skipping the SDKs saves roughly
 40 MB of resident memory and a pile of transitive dependencies.
+
+Two rules here exist because breaking either one is audible:
+
+* **The assistant channel carries speech and nothing else.** Tool observations
+  ("exit=0", "Launched chrome.exe") go in a separate field and are replayed in
+  an input role. Storing them as assistant turns teaches the model, by
+  example, to prefix its own replies with labels - which is exactly how E.V.
+  ended up saying "Spoke:" out loud.
+* **Speech starts before the model finishes.** With streaming on, the `chat`
+  reply is pulled out of the partial tool-call JSON and handed to the speaker
+  a sentence at a time, so the first word plays while the rest is still
+  being generated.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -18,6 +31,9 @@ import config
 from tools.schemas import to_gemini_tools, to_openai_tools
 
 log = logging.getLogger("ev.brain")
+
+# Called with each complete sentence of a streamed `chat` reply.
+SentenceHook = Callable[[str], None]
 
 
 class BrainError(RuntimeError):
@@ -32,10 +48,16 @@ class ToolCall:
 
 @dataclass
 class Turn:
-    """One exchange, kept in the rolling history."""
+    """One exchange, kept in the rolling history.
+
+    `assistant` is only ever what E.V. said out loud. `observation` is what the
+    tool actually did, replayed to the model as input rather than as its own
+    words - see the module docstring.
+    """
 
     user: str
     assistant: str
+    observation: str = ""
 
 
 def _coerce_arguments(raw: Any) -> dict[str, Any]:
@@ -53,6 +75,96 @@ def _coerce_arguments(raw: Any) -> dict[str, Any]:
             return {}
         return parsed if isinstance(parsed, dict) else {}
     return {}
+
+
+# -- streaming helpers -------------------------------------------------------
+
+_REPLY_KEY = re.compile(r'"reply"\s*:\s*"')
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+")
+_ESCAPES = {
+    "n": "\n",
+    "t": "\t",
+    "r": "\r",
+    "b": "\b",
+    "f": "\f",
+    '"': '"',
+    "\\": "\\",
+    "/": "/",
+}
+
+
+def partial_reply(buffer: str) -> str:
+    """Decode the `reply` string out of a half-written tool-call JSON blob.
+
+    `json.loads` is useless mid-stream because the object has no closing brace
+    yet, so this walks the value by hand and stops wherever the buffer runs
+    out. An escape sequence split across two chunks is left for the next chunk
+    rather than being decoded wrongly.
+    """
+    match = _REPLY_KEY.search(buffer)
+    if not match:
+        return ""
+
+    out: list[str] = []
+    index = match.end()
+    while index < len(buffer):
+        char = buffer[index]
+        if char == "\\":
+            if index + 1 >= len(buffer):
+                break  # escape split across chunks; wait for more
+            nxt = buffer[index + 1]
+            if nxt == "u":
+                if index + 6 > len(buffer):
+                    break
+                try:
+                    out.append(chr(int(buffer[index + 2 : index + 6], 16)))
+                except ValueError:
+                    pass
+                index += 6
+                continue
+            out.append(_ESCAPES.get(nxt, nxt))
+            index += 2
+            continue
+        if char == '"':
+            break  # closing quote: the value is complete
+        out.append(char)
+        index += 1
+    return "".join(out)
+
+
+class _SentenceEmitter:
+    """Feeds complete sentences to a hook as a streamed reply grows.
+
+    Holds back anything shorter than `TTS_STREAM_MIN_CHARS`, because "E.V."
+    looks exactly like a finished sentence and synthesising four characters
+    costs a full round trip for a fragment nobody wants to hear on its own.
+    """
+
+    def __init__(self, hook: SentenceHook | None) -> None:
+        self._hook = hook
+        self._emitted = 0
+
+    def feed(self, text: str) -> None:
+        if self._hook is None or len(text) <= self._emitted:
+            return
+        remainder = text[self._emitted :]
+        breaks = list(_SENTENCE_BREAK.finditer(remainder))
+        if not breaks:
+            return
+        chunk = remainder[: breaks[-1].start()].strip()
+        if len(chunk) < config.TTS_STREAM_MIN_CHARS:
+            return
+        self._emitted += breaks[-1].end()
+        self._hook(chunk)
+
+    def flush(self, text: str) -> None:
+        """Emit whatever is left once generation has finished."""
+        if self._hook is None:
+            return
+        tail = text[self._emitted :].strip()
+        if tail:
+            self._emitted = len(text)
+            self._hook(tail)
 
 
 class Brain:
@@ -135,8 +247,15 @@ class Brain:
         )
 
     # -- history ----------------------------------------------------------
-    def remember(self, user: str, assistant: str) -> None:
-        self.history.append(Turn(user, assistant))
+    def remember(self, user: str, assistant: str, observation: str = "") -> None:
+        """Record one exchange.
+
+        `assistant` must be the spoken reply only. Anything machine-flavoured
+        belongs in `observation`, which never enters the assistant role.
+        """
+        self.history.append(
+            Turn(user, assistant, (observation or "")[: config.HISTORY_OBSERVATION_CHARS])
+        )
         if len(self.history) > config.HISTORY_TURNS:
             del self.history[: -config.HISTORY_TURNS]
 
@@ -144,8 +263,17 @@ class Brain:
         self.history.clear()
 
     # -- inference --------------------------------------------------------
-    async def decide(self, transcript: str, extra_context: str = "") -> ToolCall:
+    async def decide(
+        self,
+        transcript: str,
+        extra_context: str = "",
+        on_sentence: SentenceHook | None = None,
+    ) -> ToolCall:
         """Pick a tool for one user utterance.
+
+        `on_sentence`, when given alongside a streaming-capable provider, is
+        called with each complete sentence of a `chat` reply as it arrives, so
+        playback can begin before generation ends.
 
         Falls back to a `chat` call rather than raising, because a voice
         assistant that goes silent on a malformed response is worse than one
@@ -153,6 +281,19 @@ class Brain:
         """
         if self.provider == "gemini":
             return await self._decide_gemini(transcript, extra_context)
+
+        if config.LLM_STREAMING and on_sentence is not None:
+            try:
+                return await self._decide_groq_streamed(
+                    transcript, extra_context, on_sentence
+                )
+            except BrainError:
+                raise
+            except Exception as exc:
+                # Streaming is an optimisation, never a dependency. A malformed
+                # SSE frame must not cost the user their answer.
+                log.warning("Streaming failed (%s); falling back to a plain call", exc)
+
         return await self._decide_groq(transcript, extra_context)
 
     def _system_prompt(self, extra_context: str) -> str:
@@ -168,36 +309,55 @@ class Brain:
         except httpx.HTTPError as exc:
             raise BrainError(f"Network error reaching the model: {exc}") from exc
 
-        if response.status_code == 401:
-            raise BrainError("API key rejected. Check the key in your .env file.")
-        if response.status_code == 429:
-            raise BrainError("Rate limited. Give it a few seconds.")
-        if response.status_code >= 400:
-            raise BrainError(f"Model returned {response.status_code}: {response.text[:200]}")
+        self._raise_for_status(response.status_code, response.text)
 
         try:
             return response.json()
         except ValueError as exc:
             raise BrainError("The model sent back something that was not JSON.") from exc
 
+    @staticmethod
+    def _raise_for_status(status: int, body: str) -> None:
+        if status == 401:
+            raise BrainError("API key rejected. Check the key in your .env file.")
+        if status == 429:
+            raise BrainError("Rate limited. Give it a few seconds.")
+        if status >= 400:
+            raise BrainError(f"Model returned {status}: {body[:200]}")
+
     # -- Groq (OpenAI-compatible) ----------------------------------------
-    async def _decide_groq(self, transcript: str, extra_context: str) -> ToolCall:
+    def _groq_messages(self, transcript: str, extra_context: str) -> list[dict[str, Any]]:
+        """Build the message list, keeping the assistant role speech-only."""
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": self._system_prompt(extra_context)}
         ]
         for turn in self.history:
             messages.append({"role": "user", "content": turn.user})
             messages.append({"role": "assistant", "content": turn.assistant})
+            if turn.observation:
+                # An input-role note, so the model reads it as something that
+                # happened rather than as a template for its own next reply.
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": f"Result of that action: {turn.observation}",
+                    }
+                )
         messages.append({"role": "user", "content": transcript})
+        return messages
 
-        payload = {
+    def _groq_payload(self, transcript: str, extra_context: str) -> dict[str, Any]:
+        return {
             "model": config.GROQ_MODEL,
-            "messages": messages,
+            "messages": self._groq_messages(transcript, extra_context),
             "tools": to_openai_tools(),
             "tool_choice": "required",
             "temperature": config.LLM_TEMPERATURE,
             "max_tokens": config.LLM_MAX_TOKENS,
         }
+
+    async def _decide_groq(self, transcript: str, extra_context: str) -> ToolCall:
+        payload = self._groq_payload(transcript, extra_context)
         headers = {"Authorization": f"Bearer {config.GROQ_API_KEY}"}
 
         try:
@@ -233,12 +393,100 @@ class Brain:
         log.info("Groq answered with prose instead of a tool call")
         return ToolCall("chat", {"reply": text or "I didn't catch that."})
 
+    async def _decide_groq_streamed(
+        self, transcript: str, extra_context: str, on_sentence: SentenceHook
+    ) -> ToolCall:
+        """Stream the completion, speaking each sentence of a `chat` reply.
+
+        Only `chat` may start early: every other tool has a side effect, and
+        announcing "Chrome's up" before Chrome is up would be a lie. For those,
+        the stream is still consumed - it just yields the tool call at the end,
+        exactly as the non-streaming path does.
+        """
+        payload = {**self._groq_payload(transcript, extra_context), "stream": True}
+        headers = {"Authorization": f"Bearer {config.GROQ_API_KEY}"}
+
+        name = ""
+        arguments = ""
+        prose: list[str] = []
+        emitter = _SentenceEmitter(on_sentence)
+
+        try:
+            async with self._client.stream(
+                "POST",
+                f"{config.GROQ_BASE_URL}/chat/completions",
+                json=payload,
+                headers=headers,
+            ) as response:
+                if response.status_code >= 400:
+                    body = (await response.aread()).decode("utf-8", "replace")
+                    self._raise_for_status(response.status_code, body)
+
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    chunk = line[5:].strip()
+                    if not chunk or chunk == "[DONE]":
+                        continue
+                    try:
+                        event = json.loads(chunk)
+                    except json.JSONDecodeError:
+                        continue
+
+                    choices = event.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta") or {}
+
+                    if delta.get("content"):
+                        prose.append(delta["content"])
+
+                    for call in delta.get("tool_calls") or []:
+                        function = call.get("function") or {}
+                        if function.get("name"):
+                            name = function["name"]
+                        if function.get("arguments"):
+                            arguments += function["arguments"]
+
+                    # Speaking starts here, mid-generation. This is the whole
+                    # point of the streaming path.
+                    if name == "chat" and arguments:
+                        emitter.feed(partial_reply(arguments))
+        except httpx.TimeoutException as exc:
+            raise BrainError("The model timed out.") from exc
+        except httpx.HTTPError as exc:
+            raise BrainError(f"Network error reaching the model: {exc}") from exc
+
+        if name:
+            parsed = _coerce_arguments(arguments)
+            if name == "chat":
+                reply = str(parsed.get("reply", "") or partial_reply(arguments)).strip()
+                emitter.flush(reply)
+                return ToolCall("chat", {"reply": reply or "I didn't catch that."})
+            return ToolCall(name, parsed)
+
+        text = "".join(prose).strip()
+        log.info("Groq streamed prose instead of a tool call")
+        emitter.flush(text)
+        return ToolCall("chat", {"reply": text or "I didn't catch that."})
+
     # -- Gemini -----------------------------------------------------------
     async def _decide_gemini(self, transcript: str, extra_context: str) -> ToolCall:
         contents: list[dict[str, Any]] = []
         for turn in self.history:
             contents.append({"role": "user", "parts": [{"text": turn.user}]})
             contents.append({"role": "model", "parts": [{"text": turn.assistant}]})
+            if turn.observation:
+                # Gemini has no mid-conversation system role, so observations
+                # ride in the user channel. What matters is only that they stay
+                # out of the model role, where they would be read as a pattern
+                # for E.V.'s own replies.
+                contents.append(
+                    {
+                        "role": "user",
+                        "parts": [{"text": f"Result of that action: {turn.observation}"}],
+                    }
+                )
         contents.append({"role": "user", "parts": [{"text": transcript}]})
 
         payload = {
@@ -251,9 +499,7 @@ class Brain:
                 "maxOutputTokens": config.LLM_MAX_TOKENS,
             },
         }
-        url = (
-            f"{config.GEMINI_BASE_URL}/models/{config.GEMINI_MODEL}:generateContent"
-        )
+        url = f"{config.GEMINI_BASE_URL}/models/{config.GEMINI_MODEL}:generateContent"
         headers = {"x-goog-api-key": config.GEMINI_API_KEY}
 
         data = await self._post(url, payload, headers)
