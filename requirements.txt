@@ -1,0 +1,27 @@
+# E.V. dependencies - kept deliberately small.
+# Total resident footprint is roughly 60-90 MB, because the LLM, the speech
+# recogniser and the voice all run in the cloud. No torch, no transformers,
+# no vendor SDKs.
+
+# --- required ---------------------------------------------------------------
+httpx>=0.27,<1.0          # Groq/Gemini/Whisper calls; async, one pooled client
+edge-tts>=6.1.9           # Microsoft Edge neural voices, server-side synthesis
+sounddevice>=0.4.6        # PortAudio mic capture; ships wheels for Python 3.13
+numpy>=1.24               # sounddevice dependency; also used for buffer handling
+
+# --- OS automation ----------------------------------------------------------
+pyautogui>=0.9.54         # keystrokes for the VS Code integrated terminal
+pynput>=1.7.6             # global push-to-talk hotkey
+
+# --- optional, uncomment as needed ------------------------------------------
+# python-dotenv>=1.0       # config.py has its own .env parser; this is nicer
+# SpeechRecognition>=3.10  # only for EV_STT_PROVIDER=google (keyless fallback)
+# PyAudio>=0.2.14          # alternative mic backend if sounddevice misbehaves
+
+# Notes
+# -----
+# * Audio playback needs no package at all on Windows: E.V. drives the OS
+#   MP3 decoder through winmm/ctypes. On Linux or macOS install ffmpeg
+#   (for ffplay) or mpv.
+# * whisper.cpp (EV_STT_PROVIDER=whispercpp) is an external binary, not a
+#   pip package. Only add it if you want fully offline speech recognition.

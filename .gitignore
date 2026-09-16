@@ -1,0 +1,23 @@
+# Secrets — never commit a real key
+.env
+.env.local
+
+# Generated speech cache (regenerable)
+.cache/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# whisper.cpp models, if used
+models/*.bin
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
