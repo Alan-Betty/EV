@@ -12,10 +12,12 @@ import logging
 from typing import Any, Callable
 
 from tools.app_launcher import open_app
-from tools.base import ToolResult
+from tools.backlog import backlog
+from tools.base import CancelToken, ToolResult
 from tools.browser import web_search
 from tools.dev_tools import dev_workflow
 from tools.file_manager import file_manager
+from tools.memory import remember
 from tools.schemas import TOOL_NAMES, TOOL_SPECS, to_gemini_tools, to_openai_tools
 from tools.terminal import terminal_command
 
@@ -43,6 +45,8 @@ REGISTRY: dict[str, Callable[..., ToolResult]] = {
     "dev_workflow": dev_workflow,
     "terminal_command": terminal_command,
     "file_manager": file_manager,
+    "backlog": backlog,
+    "remember": remember,
     "chat": chat,
 }
 
@@ -54,12 +58,31 @@ _ALLOWED_ARGS: dict[str, set[str]] = {
 }
 # `confirmed` is injected by the core loop after a spoken yes, so it is
 # never something the model can set for itself.
-for _gated in ("terminal_command", "file_manager"):
+for _gated in ("terminal_command", "file_manager", "backlog"):
     _ALLOWED_ARGS[_gated].add("confirmed")
 
+# Tools that can be stopped part-way through, at a point where stopping is
+# safe. Everything else runs to completion, and `ev_core` says so rather than
+# pretending otherwise - a "stopped it" that did not stop anything is worse
+# than an honest "can't".
+#
+# `cancel` is deliberately absent from `_ALLOWED_ARGS`: it is attached after
+# the model's arguments have been filtered, so the model can neither set it
+# nor clear it.
+CANCELLABLE: frozenset[str] = frozenset({"terminal_command", "file_manager"})
 
-def dispatch(name: str, arguments: dict[str, Any] | None = None) -> ToolResult:
-    """Run a tool by name. Always returns a ToolResult, never raises."""
+
+def dispatch(
+    name: str,
+    arguments: dict[str, Any] | None = None,
+    cancel: "CancelToken | None" = None,
+) -> ToolResult:
+    """Run a tool by name. Always returns a ToolResult, never raises.
+
+    `cancel` is a cooperative stop signal from the core loop. It is attached
+    after argument filtering and type coercion, so it cannot be spoofed by the
+    model and cannot be mangled into a string on the way through.
+    """
     handler = REGISTRY.get(name)
     if handler is None:
         log.warning("Model asked for unknown tool %r", name)
@@ -90,6 +113,11 @@ def dispatch(name: str, arguments: dict[str, Any] | None = None) -> ToolResult:
             kwargs[key] = str(value)
     kwargs = {key: ("" if value is None else value) for key, value in kwargs.items()}
 
+    # After coercion, so the token arrives as an object rather than as the
+    # string "<tools.base.CancelToken object at 0x...>".
+    if cancel is not None and name in CANCELLABLE:
+        kwargs["cancel"] = cancel
+
     try:
         return handler(**kwargs)
     except TypeError as exc:
@@ -103,6 +131,8 @@ def dispatch(name: str, arguments: dict[str, Any] | None = None) -> ToolResult:
 
 
 __all__ = [
+    "CANCELLABLE",
+    "CancelToken",
     "REGISTRY",
     "TOOL_SPECS",
     "TOOL_NAMES",

@@ -184,7 +184,10 @@ TOOL_SPECS: list[ToolSpec] = [
             "'organise my Downloads folder', 'what's in my Desktop', 'rename "
             "that to notes.txt', 'delete the old zip'. Prefer this over "
             "terminal_command for every file operation - it is safer and it "
-            "asks before deleting."
+            "asks before deleting. It also does whole-batch work in one call: "
+            "'copy every invoice from Downloads to Documents', 'move all the "
+            "screenshots off my Desktop', 'rename these photos to holiday'. "
+            "Prefer one batch action over a stream of single-file calls."
         ),
         "parameters": {
             "type": "object",
@@ -198,7 +201,11 @@ TOOL_SPECS: list[ToolSpec] = [
                         "'copy'/'move'/'rename' need 'destination'. 'delete' "
                         "removes a file or folder. 'makedir' creates a folder. "
                         "'find' searches by name using 'pattern'. 'organize' "
-                        "sorts loose files in a folder into type subfolders."
+                        "sorts loose files in a folder into type subfolders. "
+                        "'batch_copy' and 'batch_move' take every file in the "
+                        "'path' folder matching 'pattern' and put it in "
+                        "'destination'. 'batch_rename' renames every match in "
+                        "'path' to 'new_name', numbered, keeping extensions."
                     ),
                     "enum": [
                         "create",
@@ -212,6 +219,9 @@ TOOL_SPECS: list[ToolSpec] = [
                         "makedir",
                         "find",
                         "organize",
+                        "batch_copy",
+                        "batch_move",
+                        "batch_rename",
                     ],
                 },
                 "path": {
@@ -228,7 +238,8 @@ TOOL_SPECS: list[ToolSpec] = [
                 "destination": {
                     "type": "string",
                     "description": (
-                        "Where it goes, for copy, move and rename. A folder "
+                        "Where it goes, for copy, move and rename, and the "
+                        "target folder for batch_copy and batch_move. A folder "
                         "name to move into, or a full new filename to rename "
                         "to. Omit for every other action."
                     ),
@@ -245,8 +256,98 @@ TOOL_SPECS: list[ToolSpec] = [
                 "pattern": {
                     "type": "string",
                     "description": (
-                        "Name or glob to search for, used only by 'find', "
-                        "e.g. 'invoice' or '*.pdf'."
+                        "Name fragment or glob, used by 'find' and by the "
+                        "batch actions, e.g. 'invoice' or '*.pdf'. For a batch "
+                        "action this picks which files in 'path' are affected; "
+                        "omit it to mean all of them."
+                    ),
+                },
+                "new_name": {
+                    "type": "string",
+                    "description": (
+                        "Base name for 'batch_rename', e.g. 'holiday' turns the "
+                        "matches into 'holiday 1', 'holiday 2' and so on. Give "
+                        "the name only - each file keeps its own extension."
+                    ),
+                },
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "backlog",
+        "description": (
+            "The running list of things left unfinished - commands that were "
+            "interrupted, actions that failed, and reminders the user asked to "
+            "keep. E.V. adds to it automatically; use this tool when the user "
+            "asks about it. Handles 'what's still outstanding', 'add a "
+            "reminder to back up the photos', 'that one's done', 'clear the "
+            "list', 'go ahead and retry the first one'."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": (
+                        "'list' reads back what is outstanding. 'add' stores a "
+                        "new reminder from 'text'. 'done' and 'drop' remove the "
+                        "item named by 'item'. 'clear' empties the whole list. "
+                        "'run' retries the stored command for an item."
+                    ),
+                    "enum": ["list", "add", "done", "drop", "clear", "run"],
+                },
+                "text": {
+                    "type": "string",
+                    "description": (
+                        "What to add, for 'add'. One short line, as the user "
+                        "would say it back to themselves."
+                    ),
+                },
+                "item": {
+                    "type": "string",
+                    "description": (
+                        "Which item to act on, for done, drop and run. A "
+                        "position as the user said it ('1', 'first', 'last') or "
+                        "a few words from the item itself."
+                    ),
+                },
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "remember",
+        "description": (
+            "Keep a small fact about the user between sessions, or look one up "
+            "again. Use for 'remember that I take my coffee black', 'my main "
+            "project is the API repo', 'what do you know about me', 'forget "
+            "what I said about the editor'. Facts are short and survive a "
+            "reboot. Not for conversation history, which E.V. keeps anyway."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": (
+                        "'set' stores key and value. 'get' looks a key up. "
+                        "'forget' drops one. 'list' reads back everything."
+                    ),
+                    "enum": ["set", "get", "forget", "list"],
+                },
+                "key": {
+                    "type": "string",
+                    "description": (
+                        "What the fact is about, in one or two words: 'coffee', "
+                        "'editor', 'main project', 'name'."
+                    ),
+                },
+                "value": {
+                    "type": "string",
+                    "description": (
+                        "The fact itself, for 'set'. Short: 'black', 'VS Code', "
+                        "'the API repo'."
                     ),
                 },
             },

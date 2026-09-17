@@ -162,6 +162,35 @@ _RESPONSES: dict[Intent, tuple[str, ...]] = {
 }
 
 
+# Words that mean "come back" when E.V. is asleep. Matched loosely, unlike
+# everything above.
+_RESUME_HINTS = (
+    "wake", "awake", "you there", "you up", "back to work", "resume",
+    "listen up", "start listening", "come back", "unmute", "rise and shine",
+    "break's over", "breaks over", "time's up", "times up", "i'm back",
+    "im back", "we're back", "were back", "ready when you are",
+)
+# Longer than this and it is a conversation happening in the room, not someone
+# trying to wake E.V. up. "Wake up" is two words; nobody needs seven.
+_RESUME_MAX_WORDS = 6
+
+
+def is_resume_phrase(text: str) -> bool:
+    """Loose match for coming out of standby.
+
+    `match_intent` is deliberately exact, because mistaking "stop the server"
+    for a cancel would drop a real request on the floor. That risk does not
+    exist here: standby has exactly two exits and no real commands, so there
+    is nothing a loose match could swallow. What it fixes is the opposite
+    failure - "hey, wake up" and "EV, you awake?" being silently ignored,
+    which leaves the user with no way back in and no clue why.
+    """
+    normalised = _normalise(text)
+    if not normalised or len(normalised.split()) > _RESUME_MAX_WORDS:
+        return False
+    return any(hint in normalised for hint in _RESUME_HINTS)
+
+
 def response_for(intent: Intent) -> str:
     return random.choice(_RESPONSES[intent])
 

@@ -32,7 +32,7 @@ E.V. runs none of them locally:
 
 | Component | Where | Local footprint |
 |---|---|---|
-| LLM — `llama-3.3-70b-versatile` | Groq Cloud | one HTTPS request |
+| LLM — best model on your Groq account | Groq Cloud | one HTTPS request |
 | Speech recognition — Whisper | Groq Cloud | one HTTPS upload |
 | Speech synthesis — Edge Neural | Microsoft | one WebSocket, a temp MP3 |
 | Audio playback | Windows `winmm`, via `ctypes` | none |
@@ -68,6 +68,8 @@ The design goes further than just picking cloud services:
                                      ┌────────┴────────┐
                                      ▼                 ▼
                               safety classifier     chat
+                                     │              backlog
+                                     │              remember
                                      │
                 ┌──────────┬──────────┼────────────┬────────────┐
                 ▼          ▼          ▼            ▼            ▼
@@ -100,6 +102,8 @@ ev/
   audio.py            microphone capture with VAD, MP3 playback via winmm
   wake.py             fuzzy wake-phrase matching
   session.py          conversation state and local control phrases
+  memory.py           preferences and runtime state, atomic JSON on disk
+  backlog.py          what the last session never finished
   tts_voices.py       list and audition Edge voices
 
 tools/
@@ -112,6 +116,8 @@ tools/
   file_manager.py     file_manager — root-scoped file and folder control
   dev_tools.py        VS Code + integrated terminal + Claude Code
   terminal.py         terminal_command
+  backlog.py          backlog — read back, tick off, retry
+  memory.py           remember — store and recall small facts
   window.py           Win32 focus helpers, so keystrokes never go astray
 
 tests/
@@ -119,7 +125,13 @@ tests/
   test_brain.py              provider wire formats, event loop — mocked
   test_speech_purity.py      no label ever reaches the speaker
   test_file_manager.py       file operations and root containment
+  test_file_batch.py         whole-folder operations, still contained
+  test_memory.py             state that survives a reboot or a power cut
+  test_backlog.py            unfinished work, and never pre-approving it
+  test_acknowledgement.py    "stand by" runs alongside the work, not before
   test_streaming_and_ui.py   partial-JSON parsing, UI/speech separation
+  test_standby_and_stt.py    waking up, app lookup, recognition confidence
+  test_cancel.py             stopping work already underway, safely
   test_stream_integration.py SSE frames in, spoken sentences out
 ```
 
@@ -127,16 +139,42 @@ tests/
 
 | Tool | Does |
 |---|---|
-| `open_app` | Launches desktop apps. Fuzzy-matches misheard names, resolves through PATH and the Windows App Paths registry. |
+| `open_app` | Launches desktop apps. Fuzzy-matches misheard names, and resolves through PATH, the Windows App Paths registry, and an index of every Start Menu shortcut — so it finds programs that were never added to PATH and were never listed in config. |
 | `web_search` | Opens a search or a URL, in a named browser or the default. |
-| `file_manager` | Creates, reads, lists, copies, moves, renames, deletes, searches and organises files. Scoped to `EV_FILE_ROOTS`; deletes and reorganises always ask first and go to the Recycle Bin. |
+| `file_manager` | Creates, reads, lists, copies, moves, renames, deletes, searches and organises files, singly or by the folderful. Scoped to `EV_FILE_ROOTS`; deletes, reorganises, batch moves and batch renames always ask first, and deletes go to the Recycle Bin. |
 | `dev_workflow` | Opens VS Code on a project, spawns an integrated terminal, starts Claude Code, optionally types an opening prompt. |
 | `terminal_command` | Runs shell commands, gated by the safety classifier. Foreground with output captured, or detached into its own window. |
+| `backlog` | Reads back, ticks off, or retries what the last session left unfinished. |
+| `remember` | Keeps a small fact about you between sessions, or looks one up. |
 | `chat` | Speaks a reply when no action is called for. |
 
 Control phrases ("take five", "wake up", "stop", "goodbye") are matched in
 [ev/session.py](ev/session.py) before the model is consulted, so they respond
-instantly and work even while E.V. is talking.
+instantly and work even while E.V. is talking. In standby, waking up is matched
+loosely — "hey, wake up" and "you awake?" both work — and anything that does
+not match draws an on-screen reminder rather than nothing at all.
+
+Saying "stop" while something is already running now actually stops it. A
+shell command is killed mid-run; a batch file operation finishes the file it
+is on and leaves the rest alone, then tells you exactly how many went. What it
+will not do is pretend: a program that has already launched cannot be
+un-launched, and E.V. says so rather than claiming otherwise. Anything you say
+over a running tool that *wasn't* "stop" is kept and treated as your next
+command.
+
+Whisper reports how confident it was in every transcript, and E.V. acts on
+that: a bad one becomes *"Didn't catch that"* instead of a confidently wrong
+action, and a borderline one is passed to the model with a note that the words
+may be off. The decoding prompt is built from your own machine — installed
+programs, your folders, what you just said — which is the cheapest accuracy
+fix there is.
+
+Anything slower than a moment gets an immediate "on it, stand by" — spoken
+from a background task while the work is already running, so it costs the
+action nothing. Anything that does not finish ends up on the backlog and is
+read back on the next boot: *"we have two backlog items remaining from your
+previous session."* Retrying one puts it through the same confirmation it
+faced the first time.
 
 ## Safety
 
@@ -172,8 +210,13 @@ Two suites are load-bearing rather than incidental:
   assistant turn) and the boundary that strips labels regardless of origin.
   Its keep-cases matter as much as its strip-cases: a stripper aggressive
   enough to eat "Spoke to your mother" would be its own bug.
-* `test_file_manager.py` pins the containment guarantee. A path that escapes
-  `FILE_ROOTS` must be refused, never silently retargeted.
+* `test_file_manager.py` and `test_file_batch.py` pin the containment
+  guarantee. A path that escapes `FILE_ROOTS` must be refused, never silently
+  retargeted — and a batch action checks every file it touches, not just the
+  folder it was pointed at.
+* `test_backlog.py` pins the rule that keeps a saved command from becoming a
+  standing permission: a replayed item drops its confirmation, so a delete
+  declined on Monday is asked about again on Tuesday.
 
 ## Requirements
 

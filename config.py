@@ -138,6 +138,29 @@ STT_VOCABULARY = _env(
     "commit, repo, terminal, directory, standby, take five.",
 )
 
+# Whisper reports how sure it was of every segment, and until E.V. asked for
+# it that was thrown away. The cost of ignoring it is not a wrong word on
+# screen - it is a wrong *action*, because a garbled transcript still gets
+# handed to the model, which picks a tool and runs it. With the gate on, a bad
+# transcript becomes "Didn't catch that" instead.
+#
+# Scale: clear speech lands around -0.15 to -0.45. Below -0.6 is worth
+# flagging to the model; below -1.0 is not worth acting on at all.
+# Extend the prompt above with names from this machine: installed programs,
+# user folders, open backlog items, and the previous utterance. A fixed list
+# cannot know what was installed last week; this can. Whisper's prompt window
+# is about 224 tokens, so the total is capped.
+STT_DYNAMIC_PROMPT = _env_bool("EV_STT_DYNAMIC_PROMPT", True)
+STT_PROMPT_MAX_CHARS = _env_int("EV_STT_PROMPT_MAX_CHARS", 700)
+
+STT_CONFIDENCE_GATE = _env_bool("EV_STT_CONFIDENCE_GATE", True)
+STT_MIN_LOGPROB = _env_float("EV_STT_MIN_LOGPROB", -1.0)
+STT_UNCERTAIN_LOGPROB = _env_float("EV_STT_UNCERTAIN_LOGPROB", -0.6)
+# Whisper's own estimate that the audio was not speech at all.
+STT_MAX_NO_SPEECH = _env_float("EV_STT_MAX_NO_SPEECH", 0.6)
+# Text that compresses this well is Whisper looping a phrase, not a sentence.
+STT_MAX_COMPRESSION = _env_float("EV_STT_MAX_COMPRESSION", 2.4)
+
 # whisper.cpp backend, only used when EV_STT_PROVIDER=whispercpp
 WHISPER_CPP_BIN = _env("EV_WHISPER_CPP_BIN", "whisper-cli")
 WHISPER_CPP_MODEL = _env("EV_WHISPER_CPP_MODEL", "models/ggml-tiny.en.bin")
@@ -189,6 +212,10 @@ CONVERSATION_WINDOW_S = _env_float(
 FOLLOWUP_WINDOW_S = CONVERSATION_WINDOW_S  # backwards-compatible alias
 PUSH_TO_TALK_ENABLED = _env_bool("EV_PUSH_TO_TALK_ENABLED", True)
 PUSH_TO_TALK_KEY = _env("EV_PUSH_TO_TALK_KEY", "<ctrl>+<alt>+e")
+# While in standby, anything longer than this is a conversation happening in
+# the room, not someone saying "wake up" - so it is dropped before it costs a
+# transcription call. "E.V., wake up" is comfortably under two seconds.
+STANDBY_MAX_UTTERANCE_S = _env_float("EV_STANDBY_MAX_UTTERANCE_S", 4.0)
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +271,28 @@ SHELL_CONFIRM_DESTRUCTIVE = _env_bool("EV_SHELL_CONFIRM_DESTRUCTIVE", True)
 SHELL_CONFIRM_ALL = _env_bool("EV_SHELL_CONFIRM_ALL", False)
 SHELL_TIMEOUT_S = _env_float("EV_SHELL_TIMEOUT_S", 30.0)
 SHELL_OUTPUT_CHARS = _env_int("EV_SHELL_OUTPUT_CHARS", 1200)
+# How often a running command is checked for "are we still wanted". A cancel
+# also wakes the wait early, so this is the worst case, not the usual one.
+SHELL_POLL_S = _env_float("EV_SHELL_POLL_S", 0.1)
+# Grace between asking a process to stop and killing it outright.
+SHELL_KILL_GRACE_S = _env_float("EV_SHELL_KILL_GRACE_S", 2.0)
+
+
+# ---------------------------------------------------------------------------
+# Cancelling a running command
+# ---------------------------------------------------------------------------
+# "Stop" used to do nothing once a tool was already running: the work sits on
+# a worker thread, and a thread cannot be killed from outside. Cancellation is
+# therefore cooperative - the tool agrees to stop at a point where stopping is
+# safe, between two files or two polls of a subprocess, never mid-write.
+#
+# While a cancellable tool runs, E.V. keeps listening for the usual cancel
+# phrases ("stop", "cancel", "never mind"). Anything else heard in that window
+# is held and handled as the next command rather than thrown away.
+CANCEL_ENABLED = _env_bool("EV_CANCEL_ENABLED", True)
+# Tools faster than this never get a listener; spinning up the microphone for
+# something that returns in a quarter of a second is pure overhead.
+CANCEL_LISTEN_AFTER_S = _env_float("EV_CANCEL_LISTEN_AFTER_S", 0.8)
 
 DEFAULT_BROWSER = _env("EV_DEFAULT_BROWSER", "")  # "", chrome, edge, firefox, brave
 DEFAULT_SEARCH_ENGINE = _env("EV_DEFAULT_SEARCH_ENGINE", "google")
@@ -260,6 +309,67 @@ TERMINAL_SPAWN_S = _env_float("EV_TERMINAL_SPAWN_S", 2.5)
 # ---------------------------------------------------------------------------
 LOG_LEVEL = _env("EV_LOG_LEVEL", "INFO").upper()
 TEXT_MODE = _env_bool("EV_TEXT_MODE", False)  # typed input instead of microphone
+
+
+# ---------------------------------------------------------------------------
+# Immediate acknowledgement ("stand by")
+# ---------------------------------------------------------------------------
+# A tool that launches an app, walks a folder tree or drives VS Code can take
+# seconds. Silence for those seconds reads as "it didn't hear me", and the
+# user repeats themselves. So E.V. says something first.
+#
+# The acknowledgement is spoken from a background task, never awaited before
+# the tool runs, so it costs the action nothing. It is also delayed slightly:
+# a tool that finishes in 200ms needs no "stand by", and speaking over its own
+# result would be worse than saying nothing at all.
+ACK_ENABLED = _env_bool("EV_ACK_ENABLED", True)
+ACK_DELAY_S = _env_float("EV_ACK_DELAY_S", 0.35)
+ACK_PHRASES = [
+    phrase.strip()
+    for phrase in _env(
+        "EV_ACK_PHRASES",
+        "On it, stand by.|Working on it.|On it.|Give me a second.|Stand by.",
+    ).split("|")
+    if phrase.strip()
+]
+
+
+# ---------------------------------------------------------------------------
+# Persistent state: memory and backlog
+# ---------------------------------------------------------------------------
+# Both are small JSON files written atomically, so a power cut mid-write
+# leaves the previous version intact rather than an unparseable one.
+STATE_DIR = Path(_env("EV_STATE_DIR") or (BASE_DIR / ".cache" / "state"))
+MEMORY_FILE = Path(_env("EV_MEMORY_FILE") or (STATE_DIR / "memory.json"))
+BACKLOG_FILE = Path(_env("EV_BACKLOG_FILE") or (STATE_DIR / "backlog.json"))
+
+MEMORY_ENABLED = _env_bool("EV_MEMORY_ENABLED", True)
+# Preferences and profile facts ride in the system prompt, so they cost tokens
+# on every turn. This cap is what stops that growing without bound.
+MEMORY_MAX_ENTRIES = _env_int("EV_MEMORY_MAX_ENTRIES", 40)
+# How often "still alive" is written while running. Bounds how much of a
+# session an unclean exit can lose, without writing a file per sentence.
+MEMORY_TOUCH_INTERVAL_S = _env_float("EV_MEMORY_TOUCH_INTERVAL_S", 30.0)
+# Gaps shorter than this are not worth a "welcome back" - restarting E.V.
+# twice in a minute should not be greeted like a homecoming.
+MEMORY_MIN_GAP_S = _env_float("EV_MEMORY_MIN_GAP_S", 900.0)
+
+# Index every Start Menu shortcut, so E.V. can launch programs that were never
+# added to PATH and were never written into APP_ALIASES. Cached in STATE_DIR
+# and refreshed once a day; a name that misses triggers one rescan, so
+# something installed an hour ago is still findable.
+APP_INDEX_ENABLED = _env_bool("EV_APP_INDEX_ENABLED", True)
+APP_INDEX_TTL_S = _env_float("EV_APP_INDEX_TTL_S", 86400.0)
+# A name that misses rescans, but no more often than this - otherwise a name
+# that genuinely does not exist walks the Start Menu on every attempt.
+APP_INDEX_RESCAN_S = _env_float("EV_APP_INDEX_RESCAN_S", 60.0)
+
+BACKLOG_ENABLED = _env_bool("EV_BACKLOG_ENABLED", True)
+BACKLOG_MAX_ITEMS = _env_int("EV_BACKLOG_MAX_ITEMS", 50)
+# Log failed and abandoned actions automatically, so the list fills itself.
+BACKLOG_AUTOLOG = _env_bool("EV_BACKLOG_AUTOLOG", True)
+# Clearing the whole list asks first, like every other destructive action.
+BACKLOG_CONFIRM_CLEAR = _env_bool("EV_BACKLOG_CONFIRM_CLEAR", True)
 
 
 # ---------------------------------------------------------------------------

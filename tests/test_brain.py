@@ -27,6 +27,13 @@ import config  # noqa: E402
 from ev.brain import Brain, BrainError  # noqa: E402
 from tools.schemas import TOOL_NAMES, TOOL_SPECS  # noqa: E402
 
+# The environment variables above only reach `config` if this module is the
+# first one to import it, which depends on the order pytest happens to collect
+# files in. The wire-format assertions below check the exact key that is sent,
+# so pin the values here too rather than relying on collection order.
+config.GROQ_API_KEY = "test-groq-key"
+config.GEMINI_API_KEY = "test-gemini-key"
+
 CAPTURED: list[httpx.Request] = []
 
 
@@ -319,11 +326,13 @@ def test_core_loop_executes_after_an_affirmative():
         ran: list[dict] = []
         original = tools.dispatch
 
-        def spy(name, arguments=None):
+        # `cancel` is the cooperative stop token the core loop now threads
+        # through every dispatch; it is passed positionally.
+        def spy(name, arguments=None, cancel=None):
             if name == "terminal_command" and (arguments or {}).get("confirmed"):
                 ran.append(arguments)
                 return tools.ToolResult.success("Done.")
-            return original(name, arguments)
+            return original(name, arguments, cancel)
 
         ev_core.dispatch = spy
         try:

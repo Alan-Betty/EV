@@ -175,6 +175,15 @@ class Brain:
     latency to a voice loop.
     """
 
+    # Standing facts for this run: how long the user was away, what is still
+    # on the backlog, what they have asked E.V. to remember. Set once at
+    # startup by the core loop, unlike `extra_context`, which describes the
+    # last action. Kept short - it costs tokens on every single turn.
+    #
+    # A class attribute rather than an instance one so that a `Brain` built
+    # without `__init__` still has it.
+    session_context: str = ""
+
     def __init__(self, client: httpx.AsyncClient | None = None) -> None:
         self.provider = config.LLM_PROVIDER
         self._owns_client = client is None
@@ -297,9 +306,12 @@ class Brain:
         return await self._decide_groq(transcript, extra_context)
 
     def _system_prompt(self, extra_context: str) -> str:
-        if not extra_context:
-            return config.SYSTEM_PROMPT
-        return f"{config.SYSTEM_PROMPT}\n\nCONTEXT FROM THE LAST ACTION\n{extra_context}"
+        prompt = config.SYSTEM_PROMPT
+        if self.session_context:
+            prompt = f"{prompt}\n\nWHAT YOU ALREADY KNOW\n{self.session_context}"
+        if extra_context:
+            prompt = f"{prompt}\n\nCONTEXT FROM THE LAST ACTION\n{extra_context}"
+        return prompt
 
     async def _post(self, url: str, payload: dict, headers: dict) -> dict:
         try:

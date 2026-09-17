@@ -27,7 +27,7 @@ from datetime import datetime
 from pathlib import Path
 
 import config
-from tools.base import ToolResult
+from tools.base import CancelToken, ToolResult, was_cancelled
 
 log = logging.getLogger("ev.tools.files")
 
@@ -382,7 +382,7 @@ def _category(suffix: str) -> str:
     return "Other"
 
 
-def _organize(path: Path) -> ToolResult:
+def _organize(path: Path, cancel: CancelToken | None = None) -> ToolResult:
     """Sort loose files in a folder into per-type subfolders."""
     if not path.is_dir():
         return ToolResult.failure(
@@ -400,7 +400,11 @@ def _organize(path: Path) -> ToolResult:
 
     moved: dict[str, int] = {}
     failures: list[str] = []
+    stopped_early = False
     for item in loose:
+        if was_cancelled(cancel):
+            stopped_early = True
+            break
         bucket = _category(item.suffix)
         target_dir = path / bucket
         try:
@@ -420,13 +424,221 @@ def _organize(path: Path) -> ToolResult:
     detail = f"Organised {path}: {summary}."
     if failures:
         detail += f" {len(failures)} failed:\n" + "\n".join(failures[:10])
+    if stopped_early:
+        remaining = len(loose) - total - len(failures)
+        return ToolResult.stopped(
+            f"Stopped. Sorted {total} before you called it.",
+            f"{detail} Cancelled with {remaining} still loose in {path}.",
+            remaining=remaining,
+        )
     return ToolResult.success(
         f"Sorted {total} files into {len(moved)} folders.", detail
     )
 
 
+# -- batch actions -----------------------------------------------------------
+# "Copy every invoice from Downloads into Documents" is one spoken sentence and
+# used to be impossible: the model had to guess filenames it had never seen.
+# These take a pattern instead, and each individual source and destination is
+# still resolved through `_check`, so a symlink planted inside an allowed root
+# cannot be used to walk out of it halfway through a sweep.
+def _batch_matches(folder: Path, pattern: str) -> list[Path]:
+    """Files in `folder` matching a name fragment or glob.
+
+    Deliberately not recursive. `rglob` on a home directory is both slow and
+    far more reach than "the PDFs in Downloads" ever asked for.
+    """
+    text = (pattern or "").strip() or "*"
+    glob = text if any(c in text for c in "*?[") else f"*{text}*"
+    try:
+        hits = sorted(
+            (p for p in folder.glob(glob) if p.is_file()),
+            key=lambda p: p.name.lower(),
+        )
+    except OSError as exc:
+        log.warning("Batch match failed in %s: %s", folder, exc)
+        return []
+    return hits[: config.FILE_MAX_BATCH]
+
+
+def _stopped_batch(
+    past: str,
+    done: list[str],
+    matches: list[Path],
+    failures: list[str],
+    source_dir: Path,
+    destination: Path,
+) -> ToolResult:
+    """What to say when a sweep was called off part-way.
+
+    The count matters more than the names. "Stopped" on its own leaves the
+    user wondering whether anything happened at all, and the whole reason
+    cancellation is cooperative is so the answer is always exact: the files
+    that moved, moved.
+    """
+    remaining = len(matches) - len(done) - len(failures)
+    detail = (
+        f"{past} {len(done)} of {len(matches)} files from {source_dir} to "
+        f"{destination} before the user said stop; {remaining} left untouched."
+    )
+    if done:
+        detail += " Done: " + ", ".join(done[:20])
+    if failures:
+        detail += f"\n{len(failures)} failed:\n" + "\n".join(failures[:10])
+    return ToolResult.stopped(
+        f"Stopped. {past} {len(done)} before you called it.",
+        detail,
+        done=len(done),
+        remaining=remaining,
+    )
+
+
+def _batch_transfer(
+    source_dir: Path,
+    destination: Path,
+    pattern: str,
+    move: bool,
+    cancel: CancelToken | None = None,
+) -> ToolResult:
+    """Copy or move every file in `source_dir` matching `pattern`."""
+    verb, past = ("move", "Moved") if move else ("copy", "Copied")
+    if not source_dir.is_dir():
+        return ToolResult.failure(
+            f"{source_dir.name} isn't a folder.", f"Not a directory: {source_dir}"
+        )
+    if destination.exists() and not destination.is_dir():
+        return ToolResult.failure(
+            f"{destination.name} isn't a folder.",
+            f"Batch {verb} needs a destination folder, got a file: {destination}",
+        )
+    if destination == source_dir:
+        return ToolResult.failure(
+            "That's the same folder.", f"Source and destination are both {source_dir}"
+        )
+
+    matches = _batch_matches(source_dir, pattern)
+    if not matches:
+        return ToolResult.failure(
+            f"Nothing matching {pattern} in {source_dir.name}.",
+            f"No files matched '{pattern}' in {source_dir}",
+        )
+
+    try:
+        destination.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return ToolResult.failure(
+            "Couldn't make that folder.", f"mkdir failed for {destination}: {exc}"
+        )
+
+    done: list[str] = []
+    failures: list[str] = []
+    for source in matches:
+        # Checked here and not inside the copy: a file is either moved or it
+        # is not, and stopping half way through one would be worse than not
+        # stopping at all.
+        if was_cancelled(cancel):
+            return _stopped_batch(past, done, matches, failures, source_dir, destination)
+        try:
+            target = _check(_unique(destination / source.name))
+        except PathRefused as exc:
+            failures.append(f"{source.name}: {exc}")
+            continue
+        try:
+            if move:
+                shutil.move(str(source), str(target))
+            else:
+                shutil.copy2(source, target)
+        except OSError as exc:
+            failures.append(f"{source.name}: {exc}")
+            continue
+        done.append(source.name)
+
+    if not done:
+        return ToolResult.failure(
+            f"Couldn't {verb} any of them.",
+            f"All {len(failures)} {verb}s failed:\n" + "\n".join(failures[:10]),
+        )
+
+    detail = f"{past} {len(done)} files from {source_dir} to {destination}: " + ", ".join(
+        done[:20]
+    )
+    if failures:
+        detail += f"\n{len(failures)} failed:\n" + "\n".join(failures[:10])
+    trailing = f" {len(failures)} wouldn't go." if failures else ""
+    return ToolResult.success(
+        f"{past} {len(done)} files to {friendly(destination)}.{trailing}", detail
+    )
+
+
+def _batch_rename(
+    folder: Path, pattern: str, new_name: str, cancel: CancelToken | None = None
+) -> ToolResult:
+    """Rename every match to `new_name`, numbered, keeping each extension."""
+    if not folder.is_dir():
+        return ToolResult.failure(
+            f"{folder.name} isn't a folder.", f"Not a directory: {folder}"
+        )
+    # The model often supplies "holiday.jpg" when it means "holiday": each file
+    # keeps its own extension, so any extension given here is dropped.
+    base = Path((new_name or "").strip().strip("\"'")).stem
+    if not base:
+        return ToolResult.failure(
+            "You didn't say what to call them.",
+            "'batch_rename' needs a new_name argument.",
+        )
+
+    matches = _batch_matches(folder, pattern)
+    if not matches:
+        return ToolResult.failure(
+            f"Nothing matching {pattern} in {folder.name}.",
+            f"No files matched '{pattern}' in {folder}",
+        )
+
+    width = len(str(len(matches)))
+    renamed: list[str] = []
+    failures: list[str] = []
+    for index, source in enumerate(matches, 1):
+        if was_cancelled(cancel):
+            return _stopped_batch("Renamed", renamed, matches, failures, folder, folder)
+        stem = base if len(matches) == 1 else f"{base} {index:0{width}d}"
+        try:
+            target = _check(_unique(folder / f"{stem}{source.suffix}"))
+        except PathRefused as exc:
+            failures.append(f"{source.name}: {exc}")
+            continue
+        try:
+            source.rename(target)
+        except OSError as exc:
+            failures.append(f"{source.name}: {exc}")
+            continue
+        renamed.append(f"{source.name} -> {target.name}")
+
+    if not renamed:
+        return ToolResult.failure(
+            "Couldn't rename any of them.",
+            f"All {len(failures)} renames failed:\n" + "\n".join(failures[:10]),
+        )
+
+    detail = f"Renamed {len(renamed)} files in {folder}:\n" + "\n".join(
+        f"  {line}" for line in renamed[:20]
+    )
+    if failures:
+        detail += f"\n{len(failures)} failed:\n" + "\n".join(failures[:10])
+    return ToolResult.success(
+        f"Renamed {len(renamed)} files to {base}.", detail
+    )
+
+
 # -- dispatch ----------------------------------------------------------------
-_NEEDS_CONFIRMATION = {"delete", "organize"}
+_NEEDS_CONFIRMATION = {"delete", "organize", "batch_move", "batch_rename"}
+
+# How each gated action is described in the spoken confirmation question.
+_CONFIRM_PHRASING = {
+    "delete": "delete",
+    "organize": "reorganise",
+    "batch_move": "move files out of",
+    "batch_rename": "rename files in",
+}
 
 
 def file_manager(
@@ -435,7 +647,9 @@ def file_manager(
     destination: str = "",
     content: str = "",
     pattern: str = "",
+    new_name: str = "",
     confirmed: bool = False,
+    cancel: CancelToken | None = None,
     **_: object,
 ) -> ToolResult:
     """Single entry point for every file operation. Never raises."""
@@ -461,6 +675,14 @@ def file_manager(
         "sort": "organize",
         "mkdir": "makedir",
         "folder": "makedir",
+        "copy_all": "batch_copy",
+        "copy_many": "batch_copy",
+        "batch_copy_files": "batch_copy",
+        "move_all": "batch_move",
+        "move_many": "batch_move",
+        "rename_all": "batch_rename",
+        "rename_many": "batch_rename",
+        "batch_rename_files": "batch_rename",
     }.get(verb, verb)
 
     try:
@@ -476,7 +698,7 @@ def file_manager(
     # Destructive actions are held for a spoken yes. `confirmed` only ever
     # arrives from the core loop, never from the model.
     if verb in _NEEDS_CONFIRMATION and config.FILE_CONFIRM_DELETE and not confirmed:
-        what = "delete" if verb == "delete" else "reorganise"
+        what = _CONFIRM_PHRASING.get(verb, verb)
         return ToolResult.confirm(
             f"That'll {what} {friendly(target)}. Sure?",
             f"Awaiting confirmation to {verb} {target}.",
@@ -485,6 +707,7 @@ def file_manager(
             destination=str(other) if other else "",
             content=content,
             pattern=pattern,
+            new_name=new_name,
         )
 
     if verb == "create":
@@ -500,9 +723,20 @@ def file_manager(
     if verb == "delete":
         return _delete(target)
     if verb == "organize":
-        return _organize(target)
+        return _organize(target, cancel)
     if verb == "find":
         return _find(target, pattern or content or "*")
+    if verb == "batch_rename":
+        return _batch_rename(target, pattern or "*", new_name or destination, cancel)
+    if verb in {"batch_copy", "batch_move"}:
+        if other is None:
+            return ToolResult.failure(
+                "You didn't say where to put them.",
+                f"'{verb}' needs a destination folder.",
+            )
+        return _batch_transfer(
+            target, other, pattern or "*", move=verb == "batch_move", cancel=cancel
+        )
     if verb in {"copy", "move", "rename"}:
         if other is None:
             return ToolResult.failure(
@@ -516,5 +750,6 @@ def file_manager(
     return ToolResult.failure(
         "I don't know that file operation.",
         f"Unknown action '{action}'. Valid: create, append, read, list, copy, "
-        "move, rename, delete, makedir, find, organize.",
+        "move, rename, delete, makedir, find, organize, batch_copy, "
+        "batch_move, batch_rename.",
     )

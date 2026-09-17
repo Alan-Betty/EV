@@ -35,26 +35,31 @@ import argparse
 import asyncio
 import contextlib
 import logging
+import random
 import signal
 import sys
+import threading
 
 import httpx
 
 import config
 from ev import wake
 from ev.audio import AudioError, Microphone
+from ev.backlog import get_backlog
 from ev.brain import Brain, BrainError, ToolCall
+from ev.memory import StartupReport, get_memory
 from ev.session import (
     Intent,
     Session,
     all_responses,
+    is_resume_phrase,
     match_intent,
     response_for,
 )
 from ev.stt import Transcriber, TranscriptionError
 from ev.tts import Speaker, SpeechStream, clean_for_speech
 from ev.ui import UI
-from tools import ToolResult, dispatch
+from tools import CANCELLABLE, CancelToken, ToolResult, dispatch
 from tools.safety import is_affirmative, is_negative
 
 log = logging.getLogger("ev")
@@ -69,6 +74,28 @@ def _describe(call: ToolCall) -> str:
         if key in interesting and str(value).strip()
     ]
     return "  ".join(parts)[:100]
+
+
+# Handed to the model when Whisper flagged the transcript as unclear. It is
+# advice, not an instruction to stop: most fuzzy transcripts are perfectly
+# actionable, and refusing every one of them would be worse than the guessing.
+_UNCLEAR_AUDIO = (
+    "The speech recognition was unsure about that transcript, so some words "
+    "may be wrong. If the request is clear enough to act on, act on it. If a "
+    "misheard word would make you do the wrong thing, use chat to ask the "
+    "user to repeat it instead of guessing."
+)
+
+
+def _acknowledgement() -> str:
+    """A short "still here, working on it" line. Plain speech, no labels."""
+    return random.choice(config.ACK_PHRASES) if config.ACK_PHRASES else "On it."
+
+
+def _summarise_call(call: ToolCall) -> str:
+    """How a backlog entry should read when it is handed back tomorrow."""
+    described = _describe(call)
+    return f"{call.name}: {described}" if described else call.name
 
 
 class EV:
@@ -87,10 +114,85 @@ class EV:
         self.transcriber = Transcriber(self._http)
         self.speaker = Speaker()
         self.session = Session()
+        # Both survive a reboot. `memory` carries preferences and how long E.V.
+        # was off; `backlog` carries what the last session never finished.
+        self.memory = get_memory()
+        self.backlog = get_backlog()
         self.mic: Microphone | None = None
         self._running = False
+        self._boot_report: StartupReport | None = None
+        # Something the user said over a running tool that was not a cancel.
+        # Held rather than dropped: it is almost always the next command.
+        self._queued_utterance: str | None = None
+        # Set when "stop" was heard for a tool that cannot honour it.
+        self._cancel_refused: str | None = None
 
     # -- lifecycle --------------------------------------------------------
+    def _boot(self) -> StartupReport:
+        """Open the persisted session and hand the model what it should know.
+
+        Idempotent, because `--say` reaches the loop by a different route than
+        the interactive run and both need the state loaded.
+
+        The reads are two small JSON files, so this stays on the event loop
+        rather than going through `asyncio.to_thread`: the thread hop would
+        cost more than the read.
+        """
+        if self._boot_report is not None:
+            return self._boot_report
+
+        report = self.memory.begin_session()
+        self._boot_report = report
+
+        # One standing block, assembled once. It is in the system prompt on
+        # every turn, so each piece has to earn its tokens.
+        pieces = [report.context, self.memory.context(), self.backlog.context()]
+        self.brain.session_context = " ".join(piece for piece in pieces if piece)
+
+        self.transcriber.set_hints(self._stt_hints())
+        return report
+
+    def _stt_hints(self) -> list[str]:
+        """Proper nouns this machine is likely to hear, for the STT prompt.
+
+        Ordered by how badly the recogniser mangles them without help.
+        Program names are the worst offenders - they are proper nouns that
+        sound like ordinary words, so "open Brave" becomes "open brave" and
+        "run OBS" becomes "run obese". The curated aliases come first because
+        they are the names people actually say; the indexed Start Menu entries
+        follow, shortest first, since a long shortcut name is rarely spoken
+        aloud in full.
+        """
+        from tools.app_launcher import app_index
+
+        words = [name.title() for name in config.APP_ALIASES]
+        words += sorted(
+            (name.title() for name in app_index().apps()), key=lambda n: (len(n), n)
+        )
+        words += [name.title() for name in config.USER_DIRS]
+        words += [item.text for item in self.backlog.pending()[:5]]
+        return words
+
+    async def _report_state(self) -> None:
+        """Say what carried over from last time, if anything did.
+
+        Spoken, because the whole point of a backlog is being told about it
+        rather than having to go and look. Silent on a clean, recent restart -
+        being greeted every time you restart a process gets old fast.
+        """
+        report = self._boot_report
+        if report is None:
+            return
+
+        greeting = report.greeting
+        if greeting:
+            await self.say(greeting)
+
+        summary = self.backlog.summary()
+        if summary:
+            await self.say(summary)
+            self.ui.note(self.backlog.listing())
+
     async def start(self) -> None:
         # Warm the TTS stack while the microphone calibrates, so neither cost
         # lands on the user's first command.
@@ -98,6 +200,7 @@ class EV:
         # Confirm the model exists before the user starts talking to it, not
         # on every command afterwards.
         verify = asyncio.create_task(self.brain.verify_model())
+        self._boot()
         try:
             if not self.text_mode:
                 self.mic = Microphone()
@@ -118,7 +221,14 @@ class EV:
         # Cache the stock replies in the background. "Standing by." should not
         # cost a network round trip when the intent behind it costs nothing.
         if not self.text_mode:
-            asyncio.create_task(self.speaker.prewarm(all_responses() + ["Yeah?"]))
+            # The acknowledgements are in here for the same reason: "On it,
+            # stand by." has to land immediately or it is not an
+            # acknowledgement, it is an interruption.
+            asyncio.create_task(
+                self.speaker.prewarm(
+                    all_responses() + ["Yeah?"] + list(config.ACK_PHRASES)
+                )
+            )
 
     async def stop(self) -> None:
         self._running = False
@@ -126,6 +236,9 @@ class EV:
         if self.mic is not None:
             await asyncio.to_thread(self.mic.close)
             self.mic = None
+        # Marks the shutdown clean, which is what keeps the next start from
+        # reporting a crash that did not happen.
+        self.memory.end_session(clean=True)
         await self._http.aclose()
 
     def request_stop(self) -> None:
@@ -153,9 +266,22 @@ class EV:
         if utterance is None:
             return ""
 
+        # In standby the only thing worth hearing is a couple of words. A
+        # cough or a passing sentence is not, and transcribing it costs a Groq
+        # call for something that is going to be dropped anyway.
+        if self.session.in_standby and utterance.duration_s > config.STANDBY_MAX_UTTERANCE_S:
+            log.debug("Ignoring %.1fs of room noise while in standby", utterance.duration_s)
+            return ""
+
         try:
             with self.ui.status("Transcribing..."):
-                return await self.transcriber.transcribe(utterance.wav)
+                transcript = await self.transcriber.transcribe(utterance.wav)
+            # Feeds the next utterance's decoding prompt: names and jargon
+            # carry across a conversation, and Whisper reads the prompt as
+            # text immediately preceding the audio.
+            if transcript and not transcript.rejected:
+                self.transcriber.note_transcript(transcript)
+            return transcript
         except TranscriptionError as exc:
             log.warning("Transcription failed: %s", exc)
             self.ui.warn(f"Couldn't transcribe that: {exc}")
@@ -202,6 +328,9 @@ class EV:
         # Replying keeps the conversation open, so the user's next sentence
         # needs no wake phrase.
         self.session.mark_exchange()
+        # Throttled internally, so this is a no-op on most turns. It bounds
+        # how much of a session a power cut can erase.
+        self.memory.touch()
 
     async def _watch_for_barge_in(self) -> None:
         """Cut playback the moment the user starts talking over E.V.
@@ -246,6 +375,9 @@ class EV:
                 f"{int(config.CONVERSATION_WINDOW_S)}s. Say 'take five' to pause me.\n"
             )
 
+        # Brand new day: how long we were down, and what is still open.
+        await self._report_state()
+
         while self._running:
             try:
                 await self._tick()
@@ -259,6 +391,16 @@ class EV:
 
     async def _tick(self) -> None:
         """One pass: get input, route it, act on it."""
+        # Something said over a running tool that turned out not to be a
+        # cancel. It was already heard and already echoed, so it skips the
+        # microphone entirely rather than making the user repeat themselves.
+        if self._queued_utterance is not None:
+            queued, self._queued_utterance = self._queued_utterance, None
+            command = self._extract_command(queued)
+            if command is not None:
+                await self._route(queued, command)
+            return
+
         transcript = (
             await self._next_typed()
             if self.text_mode
@@ -282,6 +424,24 @@ class EV:
         if command is None:
             return
 
+        await self._route(transcript, command)
+
+    async def _route(self, transcript: str, command: str) -> None:
+        """Decide what one addressed utterance means, and act on it.
+
+        Split out of `_tick` so an utterance heard *during* a running tool can
+        take exactly the same path afterwards. Anything held that way has
+        already been transcribed and echoed; re-listening for it would make
+        the user say it twice.
+        """
+        # Checked only once E.V. knows it was being spoken to. A rejected
+        # transcript from across the room should stay silent, exactly like any
+        # other utterance that was not addressed here.
+        if getattr(transcript, "rejected", False):
+            self.ui.warn(f"Didn't catch that clearly ({transcript.why()}).")
+            await self.say("Didn't catch that. Say it again?")
+            return
+
         # Control phrases resolve locally, with no network round trip.
         intent = match_intent(command or transcript, self.session.mode)
         if intent is not None:
@@ -289,6 +449,19 @@ class EV:
             return
 
         if self.session.in_standby:
+            # `match_intent` above is exact, so "hey, wake up" and "EV, you
+            # awake?" both fall through it. A second, looser pass catches
+            # them: standby has no real commands, so nothing can be swallowed.
+            if is_resume_phrase(command or transcript):
+                await self._handle_intent(Intent.RESUME)
+                return
+            # Drawn, never spoken - answering aloud would defeat standby. But
+            # echoing the user's words and then saying nothing at all is what
+            # makes this look broken rather than asleep.
+            self.ui.note(
+                f"Still in standby. Say 'wake up', or "
+                f"'{config.WAKE_PHRASES[0]}, wake up', to bring me back."
+            )
             return  # asleep; that was not for us
 
         if not command:
@@ -303,7 +476,7 @@ class EV:
                 await self._handle_intent(follow_up)
                 return
 
-        await self.handle(command)
+        await self.handle(command, uncertain=getattr(transcript, "uncertain", False))
 
     def _extract_command(self, transcript: str) -> str | None:
         """Strip the wake phrase. None means "this was not addressed to E.V."."""
@@ -370,8 +543,14 @@ class EV:
         """Streamed speech is only worth the machinery when there is audio."""
         return config.LLM_STREAMING and self.speaker.enabled
 
-    async def handle(self, command: str) -> None:
-        """Route one command: confirmation reply, or a fresh model turn."""
+    async def handle(self, command: str, uncertain: bool = False) -> None:
+        """Route one command: confirmation reply, or a fresh model turn.
+
+        `uncertain` means Whisper was not confident in the transcript. It is
+        passed to the model as context rather than acted on here: E.V. cannot
+        tell whether a fuzzy transcript is ambiguous, but the model reading it
+        alongside the request can, and can ask instead of guessing.
+        """
         if self.session.pending is not None:
             await self._resolve_pending(command)
             return
@@ -390,7 +569,9 @@ class EV:
         try:
             with self.ui.status("Thinking..."):
                 call = await self.brain.decide(
-                    command, on_sentence=on_sentence if self._streaming else None
+                    command,
+                    extra_context=_UNCLEAR_AUDIO if uncertain else "",
+                    on_sentence=on_sentence if self._streaming else None,
                 )
         except BrainError as exc:
             if stream is not None:
@@ -427,12 +608,179 @@ class EV:
         self.session.mark_exchange()
         self.brain.remember(command, spoken or reply)
 
+    # -- immediate acknowledgement ----------------------------------------
+    def _start_ack(self, call: ToolCall) -> asyncio.Task | None:
+        """Tell the user E.V. heard them, without making them wait for it.
+
+        Launching an app or walking a folder tree takes seconds, and silence
+        for those seconds reads as "it didn't hear me" - so the user repeats
+        themselves and now there are two commands in flight.
+
+        Two things keep this from costing anything:
+
+        * It is a background task. The tool call is already running on its own
+          thread by the time the first syllable comes out, so the
+          acknowledgement never delays the work it is announcing.
+        * It waits `ACK_DELAY_S` first. A tool that finishes in 200ms needs no
+          "stand by", and `_finish_ack` cancels the task before it ever
+          speaks.
+
+        `chat` is excluded: it has no side effect to wait on, and it is
+        already streaming its real reply out sentence by sentence.
+        """
+        if not config.ACK_ENABLED or call.name == "chat":
+            return None
+
+        phrase = _acknowledgement()
+        self.ui.note(phrase)  # visual half lands immediately, drawn only
+        # `create_task` rather than `ensure_future`: this is only ever called
+        # from inside the loop, and it should say so loudly if that changes.
+        return asyncio.create_task(self._speak_ack(phrase))
+
+    async def _speak_ack(self, phrase: str) -> None:
+        await asyncio.sleep(config.ACK_DELAY_S)
+        await self.speaker.say(phrase)
+
+    async def _finish_ack(self, ack: asyncio.Task | None) -> None:
+        """Retire the acknowledgement before the real answer is spoken.
+
+        Cancelled outright while it is still waiting, which is the common
+        case. Once it is actually speaking it is left to finish: cancelling an
+        `asyncio.to_thread` playback does not stop the OS thread, so cutting in
+        here would put E.V. on top of itself.
+        """
+        if ack is None:
+            return
+        if not self.speaker.speaking:
+            ack.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await ack
+
+    def _log_backlog(
+        self, command: str, call: ToolCall, kind: str, note: str = ""
+    ) -> None:
+        """Record something E.V. started and did not finish.
+
+        The tool and its arguments ride along so `backlog run` can replay it -
+        minus `confirmed`, which `ev.backlog` strips on the way in, so a gated
+        command is gated again on the retry.
+        """
+        if not config.BACKLOG_AUTOLOG or call.name == "chat":
+            return
+        entry = self.backlog.add(
+            command.strip() or _summarise_call(call),
+            kind=kind,
+            tool=call.name,
+            args=dict(call.arguments),
+            note=note,
+        )
+        if entry is not None:
+            self.ui.note(f"Backlogged: {entry.describe()}")
+
+    # -- cancelling a running tool ----------------------------------------
+    async def _run_tool(
+        self, call: ToolCall, arguments: dict | None = None
+    ) -> ToolResult:
+        """Dispatch one tool, staying interruptible while it runs.
+
+        Two things happen at once here. The tool goes to a worker thread, and
+        a listener keeps the microphone open so "stop" can still land - which
+        it could not before, because the loop was blocked awaiting the thread.
+
+        Cancellation is cooperative: the token is a request the tool honours
+        at a safe point, not a kill. Tools outside `CANCELLABLE` ignore it,
+        and `_watch_for_cancel` tells the user so rather than letting them
+        believe a launch was called off when it was not.
+        """
+        token = CancelToken()
+        watcher = self._start_cancel_watch(call, token)
+        try:
+            with self.ui.status("Executing..."):
+                return await asyncio.to_thread(
+                    dispatch,
+                    call.name,
+                    call.arguments if arguments is None else arguments,
+                    token,
+                )
+        finally:
+            await self._stop_cancel_watch(watcher)
+
+    def _start_cancel_watch(self, call: ToolCall, token: CancelToken):
+        """Listen for "stop" for as long as the tool runs, or return None."""
+        if not config.CANCEL_ENABLED or self.mic is None or call.name == "chat":
+            return None
+        stop_watching = threading.Event()
+        task = asyncio.create_task(
+            self._watch_for_cancel(call, token, stop_watching)
+        )
+        return task, stop_watching
+
+    async def _stop_cancel_watch(self, watcher) -> None:
+        if watcher is None:
+            return
+        task, stop_watching = watcher
+        # Set before cancelling: `mic.listen` polls this every frame, so the
+        # worker thread unwinds in milliseconds instead of running on to its
+        # own timeout and eating the user's next sentence.
+        stop_watching.set()
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+
+    async def _watch_for_cancel(
+        self, call: ToolCall, token: CancelToken, stop_watching: threading.Event
+    ) -> None:
+        """Hear one utterance while a tool runs, and act on it.
+
+        Anything that is not a cancel is *kept*, not discarded. The user
+        talking over a slow tool is usually giving the next command, and
+        throwing it away would be its own bug.
+        """
+        cancellable = call.name in CANCELLABLE
+        # A tool that returns almost immediately never needs this; opening the
+        # microphone for it is pure overhead.
+        await asyncio.sleep(config.CANCEL_LISTEN_AFTER_S)
+
+        while not stop_watching.is_set() and self._running:
+            utterance = await asyncio.to_thread(
+                self.mic.listen,
+                2.0,
+                lambda: stop_watching.is_set() or not self._running,
+            )
+            if utterance is None:
+                continue
+            if stop_watching.is_set():
+                return
+
+            heard = await self.transcriber.transcribe(utterance.wav)
+            if not heard or getattr(heard, "rejected", False):
+                continue
+
+            self.ui.user(str(heard), engaged=True)
+            if match_intent(heard, self.session.mode) is not Intent.CANCEL:
+                # Held for `_tick`, which uses it instead of listening again.
+                self._queued_utterance = heard
+                return
+
+            if not cancellable:
+                # Honest beats fake. The work is already underway and cannot
+                # be unwound, so say that instead of claiming a stop.
+                self.ui.warn(f"{call.name} can't be stopped once it's started.")
+                self._cancel_refused = call.name
+                return
+
+            token.cancel()
+            self.speaker.stop()
+            self.ui.warn("Stopping...")
+            return
+
     async def _execute(self, command: str, call: ToolCall) -> None:
         # Tools block on subprocesses and the OS, so they run off the loop.
-        with self.ui.status("Executing..."):
-            result: ToolResult = await asyncio.to_thread(
-                dispatch, call.name, call.arguments
-            )
+        ack = self._start_ack(call)
+        try:
+            result: ToolResult = await self._run_tool(call)
+        finally:
+            await self._finish_ack(ack)
 
         if result.needs_confirmation:
             # The tool name is held too: file deletes and shell commands both
@@ -458,11 +806,31 @@ class EV:
         # "Spoke:" out loud - see `ev.brain`.
         self.brain.remember(command, result.speech, result.detail)
 
+        if result.cancelled:
+            # The half that did not run is exactly the kind of thing the
+            # backlog exists for: stopped on purpose, still unfinished.
+            self._log_backlog(command, call, "interrupted", result.detail)
+        elif not result.ok:
+            # A failure the user heard about is still a thing left undone.
+            # Tomorrow it gets read back instead of quietly evaporating.
+            self._log_backlog(command, call, "failed", result.detail)
+
+        if self._cancel_refused:
+            # Heard "stop" for something that could not honour it. Said out
+            # loud rather than left as a silent no-op, because the user is
+            # standing there expecting it to have stopped.
+            self._cancel_refused = None
+            await self.say("That one was already gone. Couldn't call it back.")
+
     async def _resolve_pending(self, reply: str) -> None:
         pending = self.session.pending
         self.session.pending = None
         if pending is None:
             return
+
+        held = ToolCall(
+            pending.get("tool", "terminal_command"), dict(pending.get("args", {}))
+        )
 
         if reply and not is_affirmative(reply) and not is_negative(reply):
             # Not an answer at all - the user moved on. Drop the held command
@@ -473,6 +841,15 @@ class EV:
                 "Never mind.",
                 "The user did not answer the confirmation and asked for "
                 "something else; the command was not run.",
+            )
+            # An unanswered confirmation is the textbook interrupted action,
+            # so it goes on the list rather than being lost between two
+            # sentences.
+            self._log_backlog(
+                pending["command"],
+                held,
+                "interrupted",
+                "Confirmation went unanswered; never ran.",
             )
             await self.handle(reply)
             return
@@ -486,17 +863,24 @@ class EV:
             )
             return
 
-        tool = pending.get("tool", "terminal_command")
-        args = {**pending["args"], "confirmed": True}
+        args = {**held.arguments, "confirmed": True}
         args.pop("reason", None)
-        with self.ui.status("Executing..."):
-            result: ToolResult = await asyncio.to_thread(dispatch, tool, args)
+        ack = self._start_ack(held)
+        try:
+            result: ToolResult = await self._run_tool(held, args)
+        finally:
+            await self._finish_ack(ack)
         await self.say(result.speech)
         self.brain.remember(pending["command"], result.speech, result.detail)
+        if not result.ok:
+            self._log_backlog(pending["command"], held, "failed", result.detail)
 
     # -- one-shot ---------------------------------------------------------
     async def run_once(self, command: str) -> None:
         self._running = True
+        # One-shot mode skips `start`, but it still wants the user's stored
+        # preferences and the open backlog in context.
+        self._boot()
         try:
             intent = match_intent(command, self.session.mode)
             if intent is not None:
@@ -522,7 +906,10 @@ def _configure_logging(verbose: bool) -> None:
 def check_config() -> int:
     """Print a readiness report. Returns a shell exit code."""
     import importlib.util
+    import os
     import shutil
+
+    from tools.app_launcher import app_index as get_app_index
 
     problems: list[str] = []
     notes: list[str] = []
@@ -583,6 +970,31 @@ def check_config() -> int:
         problems.append("MISS stt: groq backend needs GROQ_API_KEY")
     else:
         notes.append(f"OK   stt: {config.STT_PROVIDER} ({config.GROQ_STT_MODEL})")
+        if config.STT_PROVIDER == "groq":
+            notes.append(
+                f"OK   stt gate: {'on' if config.STT_CONFIDENCE_GATE else 'off'} "
+                f"(re-ask below {config.STT_MIN_LOGPROB:.2f} logprob, "
+                f"flag below {config.STT_UNCERTAIN_LOGPROB:.2f})"
+            )
+        else:
+            notes.append(
+                f"WARN stt gate: {config.STT_PROVIDER} reports no confidence; "
+                "the gate has nothing to act on"
+            )
+
+    # A shortcut index is what lets E.V. launch programs that were never added
+    # to PATH and were never written into APP_ALIASES.
+    if config.APP_INDEX_ENABLED:
+        indexed = len(get_app_index().apps())
+        if indexed:
+            notes.append(f"OK   apps: {indexed} Start Menu shortcuts indexed")
+        else:
+            notes.append(
+                "WARN apps: no Start Menu shortcuts indexed; only APP_ALIASES "
+                "and PATH will resolve"
+            )
+    else:
+        notes.append("WARN apps: Start Menu index disabled (EV_APP_INDEX_ENABLED=false)")
 
     for module, label, required in (
         ("edge_tts", "edge-tts (voice output)", config.TTS_ENABLED),
@@ -630,6 +1042,46 @@ def check_config() -> int:
         state = "OK  " if root.is_dir() else "WARN"
         notes.append(f"{state} files: {root} {'' if root.is_dir() else '(missing)'}")
     notes.append(f"OK   files: new files default to {config.FILE_DEFAULT_DIR}")
+
+    # Persisted state is the thing that makes a restart feel continuous, so a
+    # directory E.V. cannot write to is worth saying out loud rather than
+    # discovering as a silently forgetful assistant.
+    if config.MEMORY_ENABLED or config.BACKLOG_ENABLED:
+        try:
+            config.STATE_DIR.mkdir(parents=True, exist_ok=True)
+            writable = os.access(config.STATE_DIR, os.W_OK)
+        except OSError as exc:
+            writable = False
+            notes.append(f"WARN state: could not create {config.STATE_DIR} ({exc})")
+        if writable:
+            notes.append(f"OK   state: {config.STATE_DIR}")
+        else:
+            problems.append(
+                f"MISS state: {config.STATE_DIR} is not writable - memory and "
+                "backlog will not survive a restart"
+            )
+
+    if config.MEMORY_ENABLED:
+        memory = get_memory()
+        facts = len(memory.preferences) + len(memory.profile)
+        notes.append(
+            f"OK   memory: {config.MEMORY_FILE.name} ({facts} stored fact(s))"
+        )
+    else:
+        notes.append("WARN memory: disabled (EV_MEMORY_ENABLED=false)")
+
+    if config.BACKLOG_ENABLED:
+        outstanding = len(get_backlog().pending())
+        notes.append(
+            f"OK   backlog: {config.BACKLOG_FILE.name} ({outstanding} item(s) open)"
+        )
+    else:
+        notes.append("WARN backlog: disabled (EV_BACKLOG_ENABLED=false)")
+
+    notes.append(
+        f"OK   acknowledgement: {'on' if config.ACK_ENABLED else 'off'} "
+        f"(spoken after {config.ACK_DELAY_S:.2f}s on a slow tool)"
+    )
 
     print("\nE.V. configuration check\n" + "-" * 44)
     for line in notes:

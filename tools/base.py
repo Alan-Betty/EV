@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,49 @@ from typing import Any
 log = logging.getLogger("ev.tools")
 
 IS_WINDOWS = sys.platform == "win32"
+
+
+class CancelToken:
+    """Cooperative "drop what you are doing" signal for a running tool.
+
+    Tools run on a worker thread, and a thread cannot be killed from outside -
+    so stopping one has to be something the tool agrees to. Every cancellable
+    tool checks this at a point where stopping is *safe*: between two files,
+    or between two polls of a subprocess. Never mid-write.
+
+    That restraint is the whole design. A voice assistant hearing "stop" must
+    not leave a half-copied file behind, and it must not claim to have stopped
+    something it could not. Tools that cannot honour it say so, and E.V.
+    repeats that to the user rather than pretending.
+
+    Backed by `threading.Event` because the setter is the event loop and the
+    reader is a worker thread.
+    """
+
+    __slots__ = ("_event",)
+
+    def __init__(self) -> None:
+        self._event = threading.Event()
+
+    def cancel(self) -> None:
+        self._event.set()
+
+    @property
+    def cancelled(self) -> bool:
+        return self._event.is_set()
+
+    def __bool__(self) -> bool:
+        """True while the tool should keep going."""
+        return not self._event.is_set()
+
+    def wait(self, timeout: float) -> bool:
+        """Sleep up to `timeout`, waking early if cancelled."""
+        return self._event.wait(timeout)
+
+
+def was_cancelled(token: "CancelToken | None") -> bool:
+    """True when a token exists and has been tripped."""
+    return token is not None and token.cancelled
 
 
 @dataclass
@@ -41,6 +85,21 @@ class ToolResult:
     @classmethod
     def confirm(cls, speech: str, detail: str = "", **data: Any) -> "ToolResult":
         return cls(False, speech, detail or speech, data, needs_confirmation=True)
+
+    @classmethod
+    def stopped(cls, speech: str, detail: str = "", **data: Any) -> "ToolResult":
+        """A tool that was cancelled part-way through.
+
+        Counts as a success, because the part that ran really did run: the
+        files that moved stayed moved. `cancelled` in the data is what tells
+        the core loop to put the remainder on the backlog instead of treating
+        the job as finished.
+        """
+        return cls(True, speech, detail or speech, {**data, "cancelled": True})
+
+    @property
+    def cancelled(self) -> bool:
+        return bool(self.data.get("cancelled"))
 
 
 def popen_detached(args: list[str] | str, cwd: str | None = None, shell: bool = False) -> subprocess.Popen:
