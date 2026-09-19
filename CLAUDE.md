@@ -13,7 +13,7 @@ python ev_core.py --text           # typed input, same brain and tools
 python ev_core.py --say "open notepad"   # one command, then exit
 python ev_core.py -v               # debug logging
 
-python -m pytest tests/ -q                       # full suite, 317 tests, offline
+python -m pytest tests/ -q                       # full suite, 419 tests, offline
 python -m pytest tests/test_file_manager.py -q   # one file
 python -m pytest tests/test_smoke.py -k safety   # one test or group
 
@@ -35,6 +35,28 @@ One async loop in [ev_core.py](ev_core.py) owns everything: `listen → transcri
 
 The project's core constraint is resident memory (~90–160 MB). It runs no local model: the LLM and Whisper are HTTP calls, TTS is edge-tts, MP3 playback is Windows `winmm` over `ctypes`, and the wake word is a string match on the transcript. There are deliberately no vendor SDKs (`groq`, `google-generativeai`, `openai`) and no audio libraries (`pygame`, `pydub`, `ffmpeg`). Both providers are a single JSON POST built by hand in [ev/brain.py](ev/brain.py). Adding a heavyweight dependency undoes the whole design; reach for `httpx` and the stdlib first.
 
+Screen perception does not change that rule, it follows it. There is no local
+vision model: `mss` grabs the frame, Pillow downscales it and JPEGs it, and
+the result is posted to the same endpoint the brain already uses - ~95 KB at
+the 1280px a plain look uses, ~160 KB at the 1600px a screen task gets,
+because a step that is about to click is worth more pixels than one that is
+only being described. Both are imported lazily, so the ~15 MB they cost is
+paid from the first screenshot onwards and never in a session that only
+talks.
+
+Everything added since for accuracy has stayed inside the rule, and that was
+a constraint rather than a coincidence. The obvious way to make a desktop
+agent reliable on Windows is UI Automation, which means `comtypes` or
+`pywinauto` and the resident cost that comes with them. The window inventory
+in [tools/window.py](tools/window.py) gets most of that benefit - titles,
+focus, exact rectangles - from `ctypes` against user32 for nothing, and the
+coordinate ruler and the region zoom are Pillow calls on a frame that was
+already being encoded. No new package was added for any of it.
+
+Playwright is the one genuinely heavy dependency in the tree, which is why it
+is optional, imported inside `browser_task`, and torn down in a `finally`
+when the task ends - between tasks it costs an unused import path.
+
 ### The speech-purity boundary
 
 This is the most load-bearing invariant in the codebase, and it spans four files. E.V. once read "Spoke:" aloud, and the fix had two halves that must both stay intact:
@@ -51,6 +73,45 @@ This is the most load-bearing invariant in the codebase, and it spans four files
 `dispatch` in [tools/\_\_init\_\_.py](tools/__init__.py) is the only entry point. It filters arguments down to `_ALLOWED_ARGS`, which is derived from `TOOL_SPECS` so the two cannot drift, coerces the loose types LLMs emit, and never raises — a broken tool returns a failure `ToolResult` rather than killing the assistant.
 
 Adding a tool means: a spec in `TOOL_SPECS`, an implementation returning `ToolResult`, and an entry in `REGISTRY`. Nothing else, and nothing outside the schema will reach the function.
+
+### A launch that goes nowhere must not report success
+
+"Open File Explorer and go to my GitHub folder" used to do nothing visible,
+and the reason is worth keeping written down because it will recur.
+
+There was no tool for it. `file_manager` listed what was *in* a folder;
+nothing put one on screen. So the model routed it through `open_app` and
+invented an argument - `C:\Users\Alan\GitHub`, on a machine whose user is
+not called Alan. Explorer opens its **default location** for a path that does
+not exist and exits 0, so `open_app` reported a launch and E.V. said
+"Explorer, up." The user was looking at the wrong folder and the model, next
+turn, believed it had succeeded.
+
+Three things fix that shape of bug, and all three matter:
+
+- `file_manager` has an `open` action, so the capability exists to route to.
+  It checks existence *before* launching and names the folder when it is not
+  there, because Explorer at a bad path is indistinguishable from Explorer at
+  a good one.
+- `open_app` validates any path-shaped argument through
+  `file_manager.resolve_user_path` before it reaches a process. A wrong
+  absolute path is usually right about its last component, so the basename is
+  looked up before giving up; going through `file_manager` also means
+  `FILE_ROOTS` applies, so an app cannot be used to open a folder the file
+  tools would refuse. Switches (`-f`, `/select,`, `--profile=x`) are
+  deliberately not path-checked.
+- The failure `detail` names the tool to use instead. Without that the model
+  retries the same guess with different spelling.
+
+`open` on a *file* reads it out; `open` on a folder reveals it. Same word
+from the user, different job, and the path decides rather than the verb.
+
+The sibling case is `web_search`: "open my email" had nowhere to go, so the
+model asked which provider instead of acting. `SEARCH_ENGINES` now holds
+destinations as well as searches, and `_is_destination` tells them apart by
+whether the template contains `{q}` - so there is no second list to keep in
+step. A destination reached with a query still opens the destination, because
+an inbox has no search URL and a built one would 404.
 
 ### Confirmation and safety
 
@@ -69,6 +130,14 @@ The batch actions (`batch_copy`, `batch_move`, `batch_rename`) act on a whole fo
 
 With `LLM_STREAMING` on and audio enabled, `Brain._decide_groq_streamed` pulls the `chat` reply out of half-written tool-call JSON via `partial_reply()` (hand-rolled, because `json.loads` is useless mid-stream) and hands complete sentences to a `SpeechStream`. **Only `chat` streams** — every other tool has a side effect, and announcing "Chrome's up" before Chrome is up would be a lie. The stream is created lazily on the first sentence and must be `cancel()`ed if the call turns out not to be `chat`, or it holds the speaker lock forever. Streaming is an optimisation and never a dependency: any failure falls back to a plain call.
 
+Tool calls are accumulated **per `index`**, not into one buffer. A model answering "open notepad and type X" emits two calls in one completion, and concatenating their argument fragments produced `{...}{...}` — not valid JSON, so every argument was dropped and the tool ran on nothing. Only the first call is acted on, matching the non-streaming path.
+
+### When the model's own tool call is rejected
+
+Groq returns a 400 with code `tool_use_failed` when the model emits no tool call under `tool_choice: required`, or arguments that are not valid JSON. That is the model stumbling, not the request being wrong, so `BrainError.tool_failure` marks it and it is never surfaced on the first try. A request that mixes a question with an action ("open notepad and type the second largest word in the dictionary") triggers it reliably, and before the ladder below it ended the turn with nothing said and an empty terminal.
+
+Three rungs: `tool_choice: auto`, then `_plain_reply` with the tools stripped entirely (which turns the question into a spoken answer), and only then the error — which is phrased as English because it reaches a speech synthesiser. A raw JSON error body read aloud is the worst possible reply. The streamed path is a fourth case: Groq ends the stream with no frames at all rather than an error, so an empty stream falls back to the plain call instead of answering "I didn't catch that", which blamed the user for the model's stumble.
+
 ### Immediate acknowledgement
 
 A tool that launches an app or walks a folder tree takes seconds, and silence for those seconds reads as "it didn't hear me" — so the user repeats themselves and now there are two commands in flight. `EV._start_ack` draws an acknowledgement immediately and speaks one from a **background task**, so the dispatch is already running on its own thread before a syllable comes out. Awaiting the speech before the tool would make every command a second slower and defeat the whole thing.
@@ -84,6 +153,211 @@ It is also delayed by `ACK_DELAY_S`: a tool that returns in 200ms needs no "stan
 While a cancellable tool runs, `EV._watch_for_cancel` keeps the microphone open. Two rules there: an utterance that is **not** a cancel is held in `_queued_utterance` and handled by `_route` afterwards rather than discarded — talking over a slow tool is usually the next command — and a cancel aimed at a tool outside `CANCELLABLE` sets `_cancel_refused`, which E.V. says out loud. `open_app` has already launched the program; reporting a stop that did not happen would be worse than admitting it cannot.
 
 A cancelled tool returns `ToolResult.stopped`, which is `ok=True` (the files that moved really did move) carrying `cancelled` in its data. The core loop reads that and backlogs the remainder as `interrupted`.
+
+### Screen perception and computer use
+
+[tools/computer_use.py](tools/computer_use.py) is E.V.'s eyes and hands, and
+[tools/browser_automation.py](tools/browser_automation.py) is the faster route
+for anything on a web page. Five tools: `take_screenshot`, `mouse_action`,
+`keyboard_action`, `screen_task` and `browser_task`.
+
+**Coordinates are fractions, never pixels.** The model is shown a frame
+downscaled to `VISION_MAX_WIDTH`, so a pixel coordinate from it would be wrong
+by whatever the scale factor happened to be that time. `_coordinate` reads 0-1
+as a fraction of the real screen and anything larger as a pixel, with one
+exception worth knowing about: a non-integer just over 1, like `1.02`, is a
+fraction that overshot, and reading it as "pixel number one" would put the
+click in the top-left corner - the one place on screen where a stray click can
+do real damage.
+
+**Three things make a fraction accurate, and none of them is a better
+model.** Asked for a coordinate from a bare screenshot, a model estimates one
+by eye and lands a few percent out; a few percent of 1920px is a different
+menu item.
+
+- `_draw_ruler` overlays a labelled grid before the frame is sent, so the
+  model reads a number off the nearest line instead of guessing at one. The
+  lines are blended at low alpha on a layer of their own - a solid grid buys
+  coordinate accuracy by spending text accuracy, since it sits directly on
+  top of the file names it is there to help click.
+- `capture_screen(region=...)` crops *before* the downscale. A dialog 400px
+  wide on a 4K display reaches the model as 400 real pixels instead of the
+  130 that survive squeezing the desktop to 1280. The ruler on a zoomed frame
+  is still labelled in **whole-screen fractions**, so a coordinate read off a
+  zoom means the same thing as one read off a full frame. That is deliberate:
+  the alternative is asking the model to rescale its own answer, which is the
+  arithmetic it is worst at.
+- `window.list_windows` hands over what the window manager already knows -
+  which applications are open, which one has focus, and the exact rectangle
+  each owns. A screenshot shows an editor; the inventory says it is VS Code,
+  that it is focused, and where it is. It is pure `ctypes`, it costs nothing,
+  and it removes the inference the model is least reliable at. Cloaked
+  windows and shell furniture (`Progman`, `WorkerW`) are filtered out: they
+  are real handles that are not on the screen, and offering one to something
+  about to click is worse than offering nothing.
+
+**The loop is the point.** `screen_task` is capture, parse, act, look again.
+A single screenshot tells the model where a button is *now*, and by the time
+the click lands the screen has moved on, so the second look is what verifies
+the first step rather than being an optimisation. Two ceilings bound it:
+`SCREEN_TASK_MAX_STEPS` stops a run clicking forever on a page that never
+changes, and `SCREEN_TASK_TIMEOUT_S` stops one where each step is merely slow.
+Steps are executed by calling `mouse_action` and `keyboard_action`, not by
+touching pyautogui directly, so the loop cannot route around their checks.
+`launch` and `focus` go through `open_app` and `tools/window.py` for the same
+reason - a path-shaped launch argument still meets `FILE_ROOTS` on the way
+past.
+
+**A batch may only contain actions whose effect is already known.** The model
+may return several actions in one reply, up to `SCREEN_TASK_MAX_BATCH`, which
+is what lets "open Notepad and type hello" cost one vision call rather than
+four. But `_step_actions` cuts the batch after `launch` or `focus`, and this
+is not tidiness. That exact request was planned - correctly - as launch, wait,
+type, and on a machine where Notepad was already open on a page of the user's
+own notes the "hello" landed in the middle of them. Launching something tells
+you it is running. It tells you nothing about what is *in* it, and typing into
+a window nobody has looked at is writing into the dark. A trailing `wait` may
+ride along, because waiting is how a launch finishes rather than a new thing
+being done. The same episode is why the step prompt says to open a new
+document when the app comes up showing work that is already there.
+
+**A screen that does not change is information.** `Frame.fingerprint` is a
+12x12 average hash, compared with a tolerance of two squares. A model cannot
+tell from one frame that it is clicking a dead button, because a dead button
+looks exactly like the one it just clicked, so it will click until the step
+budget runs out. Comparing consecutive frames is the only place that fact
+exists. The coarseness is the design: an exact comparison of two screenshots
+is always "different" - a caret, a clock, a hover state - so it would answer
+a question nobody asked. One unchanged frame nudges the model; two in a row
+ends the run and says so.
+
+**Text is typed, or pasted when typing cannot work.** `pyautogui.write`
+presses one key per character against the current layout, so it silently
+drops any character that layout has no key for, and at one keystroke every
+few milliseconds a paragraph gives an autocomplete popup time to eat half of
+it. Over `COMPUTER_PASTE_THRESHOLD`, or with any non-ASCII in it, `_enter_text`
+goes through the clipboard instead and puts the user's own clipboard back
+afterwards. Typing stays the default for short plain strings: it is what
+applications expect, and some fields refuse a paste outright. The handle
+prototypes in `_clipboard_api` are not housekeeping - an undeclared
+`GetClipboardData` returns a HANDLE truncated to 32 bits and the `GlobalLock`
+on it takes the process down.
+
+**Confirmation is per-run for `browser_task` and per-step for `screen_task`,
+and that asymmetry is deliberate.** A DOM script is fully known before the
+first step, so a purchase buried at step five is asked about at step zero. A
+vision loop only discovers its next move by looking, so it asks when it gets
+there. Saying yes re-runs `screen_task` with the same goal, which is safe
+precisely because the loop is stateless: it re-reads the screen and carries on
+from wherever things actually got to, rather than replaying what it already
+did. Within one reply the whole batch is classified before any of it runs, on
+the same argument as `browser_task`.
+
+**Two classifiers, not one.** `tools/safety.py` gained `classify_gui`, which
+reads the *description* of an action - the button label, the text about to be
+typed, the goal of the run - because no regex over a command line will ever
+notice that the button under the pointer says "Place order". Nothing in it is
+BLOCKED; a GUI action has no equivalent of `format C:` that is never
+legitimate, so the job is to ask rather than to refuse. Typed text goes
+through `classify` *as well*, so a shell command typed into a focused terminal
+meets the same blocked patterns it would have met through `terminal_command` -
+arriving via the keyboard must not launder it. `classify_gui` is deliberately
+not used on shell commands: its REVIEW list would flag every sentence
+containing "move".
+
+Screenshots stay in memory. The single path that writes one to disk is
+`take_screenshot(save_as=...)`, and it resolves through
+`file_manager.resolve_user_path`, so `FILE_ROOTS` governs it like any other
+file E.V. writes.
+
+`ev_core.SCREEN_TOOLS` gets a different acknowledgement from the generic
+"stand by", spoken with no delay at all. The usual argument for waiting - that
+a fast tool needs no announcement - does not apply to something that is about
+to move the pointer under the user's hands.
+
+**Vision waits out a rate limit the way the brain does.** `_post_json` reads
+`retry-after` and sleeps once, up to `LLM_RATE_LIMIT_MAX_WAIT_S`. Vision needs
+this more than chat does, not less: a screen task is a dozen requests in a row
+against one per-minute budget, so it is both the likeliest thing to meet a 429
+and the worst thing to lose to one - it meets it half way through, with real
+work already done and the desktop left mid-job.
+
+**`browser_task` keeps a profile, or it is permanently logged out.**
+`launch_persistent_context` against `BROWSER_PROFILE_DIR` is what makes "open
+Gmail and summarise the important mail" reach an inbox instead of a sign-in
+page; Playwright's plain `launch` gives a blank browser with no cookies. The
+profile is E.V.'s own rather than the user's real Chrome one, for two
+reasons: Chrome locks its profile while it is running, so borrowing it would
+fail whenever a browser was open, and automating a live signed-in profile is
+a much bigger thing to hand a voice command. A locked or unwritable profile
+costs the logins, not the errand - it falls back to a fresh browser with a
+warning.
+
+A `read` step returns **every** match, capped by `BROWSER_READ_ITEMS`, because
+the interesting reads are lists: an inbox is thirty rows and a results page is
+twenty cards. `inner_text` returns the first and nothing else, which is how a
+summary of the important mail became a summary of one mail. What it reads goes
+in `detail` and never in `speech` - raw page text is navigation labels,
+timestamps and "1 of 47", and reading the first 180 characters of that aloud
+was the worst available answer to "what's in my inbox". The model gets the
+whole lot on the next turn, which is the compound-request machinery below
+doing its job.
+
+### Compound requests, and the token budget that shapes them
+
+"Open my mail and give me a summary of the important things" is two jobs. The
+model answers it with **one** tool call - it opens the mail, and the summary
+never becomes a call at all. E.V. said "Opening your mail." and went quiet on
+the only part the user was waiting for, which reads as being ignored. This is
+not the `tool_use_failed` ladder: the call was accepted and correct, it was
+just half the request.
+
+`ev.session.split_followup` finds the trailing clause and `EV._run_followup`
+takes one more turn for it. Three things keep that from being expensive or
+wrong:
+
+- **Only a trailing *question* qualifies.** An action followed by an action
+  ("open Chrome and search for X") is one call on purpose, and re-running the
+  tail of those would search twice. A question has no side effect to double,
+  so a false positive costs one round trip while a false negative costs the
+  user the answer.
+- **Depth one, always.** A follow-up cannot spawn a follow-up; that is a loop
+  with no ceiling, and the problem being solved is a request losing half of
+  itself, not E.V. needing to plan.
+- **Only after the first half actually finished.** A failed or cancelled
+  first half stops it. A confirmation *holds* it in `_pending_followup`, so
+  "tidy my desktop and tell me what moved" still answers after a spoken yes,
+  and `_resolve_pending` claims it on every exit path so it cannot leak onto
+  the next utterance.
+
+`CHAIN_SETTLE_S` is not politeness. The first tool has usually just launched
+something, and a screenshot taken before the window has drawn describes
+whatever was there before it.
+
+**The token budget is a real design constraint, not an implementation
+detail.** Groq's free tier meters 8000 tokens a minute, and every request
+carries the whole tool schema. At 13 tools that reached ~5046 tokens a
+request, which left room for roughly one command per minute - so the second
+turn of a compound request failed *by construction*. Trimming the schemas and
+the tool rules brought the floor to ~3885, which is what makes two turns fit.
+Keep new tool descriptions short for that reason: the cost is paid on every
+utterance, including the ones that will never use the tool.
+
+That floor is now ~3963 (~2876 of schema, ~1087 of prompt), and it is a
+ceiling as much as a measurement: two turns must stay under 8000, so there
+are about 35 tokens of slack. Teaching the model about `screen_task`'s new
+verbs cost more than that in the first draft and had to be paid for by
+compressing `mouse_action`'s field descriptions. Measure after any change
+here - `len(json.dumps(to_openai_tools()))//4` plus the same for
+`SYSTEM_PROMPT` - because going over does not fail loudly. It fails as the
+second half of a compound request quietly not happening.
+
+`Brain._post` also waits out a 429 once, using the delay named in the
+response headers (`retry-after`, or `x-ratelimit-reset-tokens` as `2m52.8s` /
+`547ms`) rather than a guessed backoff, and gives up if the window is longer
+than `LLM_RATE_LIMIT_MAX_WAIT_S` - nobody stands at a microphone for a
+minute. "Rate limited, give it a few seconds" is E.V. asking the user to do
+waiting it could have done itself.
 
 ### Persistent state: memory and backlog
 

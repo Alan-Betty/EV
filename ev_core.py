@@ -55,11 +55,13 @@ from ev.session import (
     is_resume_phrase,
     match_intent,
     response_for,
+    split_followup,
 )
 from ev.stt import Transcriber, TranscriptionError
 from ev.tts import Speaker, SpeechStream, clean_for_speech
 from ev.ui import UI
 from tools import CANCELLABLE, CancelToken, ToolResult, dispatch
+from tools.computer_use import close_vision_client
 from tools.safety import is_affirmative, is_negative
 
 log = logging.getLogger("ev")
@@ -67,7 +69,12 @@ log = logging.getLogger("ev")
 
 def _describe(call: ToolCall) -> str:
     """One-line summary of a tool call, for the terminal only."""
-    interesting = ("app", "query", "url", "action", "path", "command", "directory")
+    interesting = (
+        "app", "query", "url", "action", "path", "command", "directory",
+        # Computer use: the label and the goal are the whole story of
+        # what a click is about to do, so they belong on screen.
+        "label", "task", "question", "keys",
+    )
     parts = [
         f"{key}={value}"
         for key, value in call.arguments.items()
@@ -79,6 +86,19 @@ def _describe(call: ToolCall) -> str:
 # Handed to the model when Whisper flagged the transcript as unclear. It is
 # advice, not an instruction to stop: most fuzzy transcripts are perfectly
 # actionable, and refusing every one of them would be worse than the guessing.
+# Handed to the model on the second turn of a compound request. It has to be
+# explicit that the first half already ran: without it the model re-reads the
+# whole original request and opens the thing a second time.
+_FOLLOW_UP = (
+    "This is the second half of the request the user just made. The first "
+    "half has already been carried out - the result of it is in the "
+    "conversation above. Answer only what is left. If what just happened put "
+    "something on screen, take_screenshot is how you read it. If the request "
+    "has in fact already been handled in full, say so in one short line with "
+    "chat rather than doing anything again."
+)
+
+
 _UNCLEAR_AUDIO = (
     "The speech recognition was unsure about that transcript, so some words "
     "may be wrong. If the request is clear enough to act on, act on it. If a "
@@ -87,8 +107,20 @@ _UNCLEAR_AUDIO = (
 )
 
 
-def _acknowledgement() -> str:
+# Tools that take over the screen. They earn a different acknowledgement
+# from the generic "stand by": while one of these runs, the pointer moves on
+# its own and windows change under the user's hands. Being told that is about
+# to happen, before the first click rather than after it, is the difference
+# between "it's working" and "something has taken over my mouse".
+SCREEN_TOOLS: frozenset[str] = frozenset(
+    {"screen_task", "browser_task", "mouse_action", "keyboard_action"}
+)
+
+
+def _acknowledgement(tool: str = "") -> str:
     """A short "still here, working on it" line. Plain speech, no labels."""
+    if tool in SCREEN_TOOLS and config.ACK_SCREEN_PHRASE:
+        return config.ACK_SCREEN_PHRASE
     return random.choice(config.ACK_PHRASES) if config.ACK_PHRASES else "On it."
 
 
@@ -126,6 +158,10 @@ class EV:
         self._queued_utterance: str | None = None
         # Set when "stop" was heard for a tool that cannot honour it.
         self._cancel_refused: str | None = None
+        # The trailing question of a compound request, held while the first
+        # half runs. Survives a confirmation, so "open the drive and tell me
+        # what's in it" still answers after a spoken yes.
+        self._pending_followup: str = ""
 
     # -- lifecycle --------------------------------------------------------
     def _boot(self) -> StartupReport:
@@ -226,7 +262,10 @@ class EV:
             # acknowledgement, it is an interruption.
             asyncio.create_task(
                 self.speaker.prewarm(
-                    all_responses() + ["Yeah?"] + list(config.ACK_PHRASES)
+                    all_responses()
+                    + ["Yeah?"]
+                    + list(config.ACK_PHRASES)
+                    + ([config.ACK_SCREEN_PHRASE] if config.ACK_SCREEN_PHRASE else [])
                 )
             )
 
@@ -240,6 +279,9 @@ class EV:
         # reporting a crash that did not happen.
         self.memory.end_session(clean=True)
         await self._http.aclose()
+        # The vision client is opened lazily by the first screenshot and may
+        # never exist at all; closing it is a no-op when it does not.
+        close_vision_client()
 
     def request_stop(self) -> None:
         self._running = False
@@ -319,6 +361,14 @@ class EV:
         """
         spoken = clean_for_speech(text)
         if not spoken:
+            # Nothing left after cleaning. Silence here is what makes E.V.
+            # look dead rather than busy - the user said something, watched an
+            # empty terminal, and repeated themselves. Drawn, never spoken:
+            # inventing words to say would breach the speech boundary, but
+            # saying nothing *and* showing nothing is a bug, not a policy.
+            if text and text.strip():
+                log.warning("Reply was nothing but formatting: %.120s", text)
+                self.ui.warn("I had nothing to say to that.")
             return
         self.ui.speech(spoken)
 
@@ -543,17 +593,35 @@ class EV:
         """Streamed speech is only worth the machinery when there is audio."""
         return config.LLM_STREAMING and self.speaker.enabled
 
-    async def handle(self, command: str, uncertain: bool = False) -> None:
+    async def handle(
+        self,
+        command: str,
+        uncertain: bool = False,
+        extra_context: str = "",
+        allow_chain: bool = True,
+    ) -> None:
         """Route one command: confirmation reply, or a fresh model turn.
 
         `uncertain` means Whisper was not confident in the transcript. It is
         passed to the model as context rather than acted on here: E.V. cannot
         tell whether a fuzzy transcript is ambiguous, but the model reading it
         alongside the request can, and can ask instead of guessing.
+
+        `allow_chain` is false on the second turn of a compound request, so a
+        follow-up cannot spawn a follow-up of its own.
         """
         if self.session.pending is not None:
             await self._resolve_pending(command)
             return
+
+        # "Open my mail and give me a summary" is two jobs. Held now, while
+        # the words are still here to split - after the model has answered,
+        # all that is left is one tool call and no sign there was more.
+        followup = (
+            split_followup(command)
+            if allow_chain and config.CHAIN_ENABLED
+            else ""
+        )
 
         # A `chat` reply starts playing while the model is still writing it.
         # The stream is created on the first sentence rather than up front, so
@@ -570,7 +638,7 @@ class EV:
             with self.ui.status("Thinking..."):
                 call = await self.brain.decide(
                     command,
-                    extra_context=_UNCLEAR_AUDIO if uncertain else "",
+                    extra_context=self._context_for(uncertain, extra_context),
                     on_sentence=on_sentence if self._streaming else None,
                 )
         except BrainError as exc:
@@ -591,7 +659,13 @@ class EV:
             # abandoned stream would hold the speaker lock forever.
             stream.cancel()
 
-        await self._execute(command, call)
+        await self._execute(command, call, followup=followup)
+
+    @staticmethod
+    def _context_for(uncertain: bool, extra: str) -> str:
+        """Join the per-turn notes the model should read before deciding."""
+        pieces = [extra, _UNCLEAR_AUDIO if uncertain else ""]
+        return " ".join(piece for piece in pieces if piece)
 
     async def _finish_streamed(
         self, command: str, call: ToolCall, stream: SpeechStream
@@ -600,7 +674,9 @@ class EV:
         reply = clean_for_speech(str(call.arguments.get("reply", "")))
         # Drawn now, while the earlier sentences are still playing, so the
         # text and the voice land together rather than one after the other.
-        self.ui.speech(reply or stream.spoken)
+        # Both halves can be empty if the model produced nothing usable, and
+        # an empty panel reads as a crash.
+        self.ui.speech(reply or stream.spoken or "(nothing came back)")
 
         async with self._barge_in():
             spoken = await stream.finish()
@@ -631,14 +707,22 @@ class EV:
         if not config.ACK_ENABLED or call.name == "chat":
             return None
 
-        phrase = _acknowledgement()
+        phrase = _acknowledgement(call.name)
         self.ui.note(phrase)  # visual half lands immediately, drawn only
+        # A screen task is announced with no delay at all. The usual argument
+        # for waiting - that a fast tool needs no "stand by" - does not apply
+        # to something that is about to move the pointer.
+        delay = (
+            config.ACK_SCREEN_DELAY_S
+            if call.name in SCREEN_TOOLS
+            else config.ACK_DELAY_S
+        )
         # `create_task` rather than `ensure_future`: this is only ever called
         # from inside the loop, and it should say so loudly if that changes.
-        return asyncio.create_task(self._speak_ack(phrase))
+        return asyncio.create_task(self._speak_ack(phrase, delay))
 
-    async def _speak_ack(self, phrase: str) -> None:
-        await asyncio.sleep(config.ACK_DELAY_S)
+    async def _speak_ack(self, phrase: str, delay: float | None = None) -> None:
+        await asyncio.sleep(config.ACK_DELAY_S if delay is None else delay)
         await self.speaker.say(phrase)
 
     async def _finish_ack(self, ack: asyncio.Task | None) -> None:
@@ -774,7 +858,9 @@ class EV:
             self.ui.warn("Stopping...")
             return
 
-    async def _execute(self, command: str, call: ToolCall) -> None:
+    async def _execute(
+        self, command: str, call: ToolCall, followup: str = ""
+    ) -> None:
         # Tools block on subprocesses and the OS, so they run off the loop.
         ack = self._start_ack(call)
         try:
@@ -791,6 +877,9 @@ class EV:
                 "tool": call.name,
                 "args": dict(result.data),
             }
+            # Held across the question, so "open the drive and tell me what's
+            # in it" still answers the second half after a spoken yes.
+            self._pending_followup = followup
             await self.say(result.speech)
             if not self.text_mode:
                 # Confirmation has a short fuse; silence means no.
@@ -821,10 +910,34 @@ class EV:
             # standing there expecting it to have stopped.
             self._cancel_refused = None
             await self.say("That one was already gone. Couldn't call it back.")
+            return
+
+        if followup and result.ok and not result.cancelled:
+            await self._run_followup(followup)
+
+    async def _run_followup(self, question: str) -> None:
+        """Answer the trailing question of a compound request.
+
+        Depth one, always. A follow-up that could spawn its own follow-up is
+        a loop with no ceiling, and the thing being fixed here is a request
+        losing half of itself - not E.V. needing to plan.
+
+        The settle wait is not politeness: the first tool has usually just
+        launched something, and a screenshot taken before the window has
+        drawn describes whatever was there before it.
+        """
+        self.ui.note(f"Still to do: {question}")
+        if config.CHAIN_SETTLE_S > 0:
+            await asyncio.sleep(config.CHAIN_SETTLE_S)
+        await self.handle(question, extra_context=_FOLLOW_UP, allow_chain=False)
 
     async def _resolve_pending(self, reply: str) -> None:
         pending = self.session.pending
         self.session.pending = None
+        # Claimed here rather than read later: every path out of this method
+        # ends the exchange, and a leftover question would then surface on
+        # whatever the user said next.
+        followup, self._pending_followup = self._pending_followup, ""
         if pending is None:
             return
 
@@ -874,6 +987,10 @@ class EV:
         self.brain.remember(pending["command"], result.speech, result.detail)
         if not result.ok:
             self._log_backlog(pending["command"], held, "failed", result.detail)
+            return
+
+        if followup and not result.cancelled:
+            await self._run_followup(followup)
 
     # -- one-shot ---------------------------------------------------------
     async def run_once(self, command: str) -> None:
@@ -1001,8 +1118,11 @@ def check_config() -> int:
         ("sounddevice", "sounddevice (microphone)", True),
         ("httpx", "httpx (API calls)", True),
         ("rich", "rich (terminal UI)", False),
-        ("pyautogui", "pyautogui (dev_tools keystrokes)", False),
+        ("pyautogui", "pyautogui (keystrokes and mouse control)", False),
         ("send2trash", "send2trash (recoverable deletes)", False),
+        ("mss", "mss (fast screen capture)", False),
+        ("PIL", "Pillow (screenshot downscaling)", False),
+        ("playwright", "playwright (browser_task)", False),
     ):
         if importlib.util.find_spec(module) is not None:
             notes.append(f"OK   {label}")
@@ -1082,6 +1202,101 @@ def check_config() -> int:
         f"OK   acknowledgement: {'on' if config.ACK_ENABLED else 'off'} "
         f"(spoken after {config.ACK_DELAY_S:.2f}s on a slow tool)"
     )
+
+    # Screen control has no sandbox and no undo, so the readiness report says
+    # out loud what is armed rather than leaving it buried in a config file.
+    if config.COMPUTER_USE_ENABLED:
+        from tools.computer_use import screen_size
+
+        width, height = screen_size()
+        if width and height:
+            notes.append(f"OK   screen: {width}x{height}")
+        else:
+            notes.append("WARN screen: could not determine the desktop size")
+        if importlib.util.find_spec("mss") or importlib.util.find_spec("PIL"):
+            notes.append("OK   screen capture: available")
+        else:
+            problems.append(
+                "MISS screen capture: install mss (and Pillow) or take_screenshot "
+                "and screen_task cannot see anything"
+            )
+        if config.COMPUTER_CONFIRM_RISKY:
+            notes.append(
+                "OK   computer use: on, risky actions held for a spoken yes"
+            )
+        else:
+            problems.append(
+                "MISS computer use: EV_COMPUTER_CONFIRM_RISKY is false - "
+                "purchases, sends and deletes will run unasked"
+            )
+    else:
+        notes.append("WARN computer use: disabled (EV_COMPUTER_USE_ENABLED=false)")
+
+    if config.VISION_ENABLED:
+        provider = config.VISION_PROVIDER
+        vision_key = config.GROQ_API_KEY if provider == "groq" else config.GEMINI_API_KEY
+        if not vision_key:
+            problems.append(f"MISS vision: {provider} needs an API key")
+        elif provider != "groq":
+            notes.append(f"OK   vision: gemini ({config.GEMINI_VISION_MODEL})")
+        else:
+            # Groq's vision catalogue turns over faster than its chat one and
+            # differs per account, so naming the rung this machine will
+            # actually land on beats printing the configured default and
+            # letting the user find out at the first screenshot.
+            ladder = [config.GROQ_VISION_MODEL, *config.GROQ_VISION_FALLBACKS]
+            try:
+                import httpx as _httpx
+
+                catalogue = _httpx.get(
+                    f"{config.GROQ_BASE_URL}/models",
+                    headers={"Authorization": f"Bearer {vision_key}"},
+                    timeout=10.0,
+                )
+                names = (
+                    {item["id"] for item in catalogue.json().get("data", [])}
+                    if catalogue.status_code == 200
+                    else None
+                )
+            except Exception as exc:
+                names = None
+                notes.append(f"WARN vision: could not verify ({exc})")
+
+            if names is None:
+                notes.append(f"OK   vision: groq ({config.GROQ_VISION_MODEL}, unverified)")
+            else:
+                landing = next((name for name in ladder if name in names), None)
+                if landing == config.GROQ_VISION_MODEL:
+                    notes.append(f"OK   vision: groq ({landing})")
+                elif landing:
+                    notes.append(
+                        f"WARN vision: '{config.GROQ_VISION_MODEL}' unavailable; "
+                        f"will fall back to '{landing}'"
+                    )
+                else:
+                    problems.append(
+                        "MISS vision: none of "
+                        f"{', '.join(ladder)} exist on this account. Set "
+                        "EV_GROQ_VISION_MODEL to a vision model you do have."
+                    )
+    else:
+        notes.append("WARN vision: disabled (EV_VISION_ENABLED=false)")
+
+    if config.BROWSER_AUTOMATION_ENABLED:
+        if importlib.util.find_spec("playwright") is None:
+            notes.append(
+                "WARN browser_task: playwright not installed - "
+                "pip install playwright && python -m playwright install chromium"
+            )
+        else:
+            notes.append(
+                f"OK   browser_task: {config.BROWSER_ENGINE}, "
+                f"{'headless' if config.BROWSER_HEADLESS else 'headed'}"
+            )
+    else:
+        notes.append(
+            "WARN browser_task: disabled (EV_BROWSER_AUTOMATION_ENABLED=false)"
+        )
 
     print("\nE.V. configuration check\n" + "-" * 44)
     for line in notes:

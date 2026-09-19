@@ -27,7 +27,14 @@ from datetime import datetime
 from pathlib import Path
 
 import config
-from tools.base import CancelToken, ToolResult, was_cancelled
+from tools.base import (
+    IS_WINDOWS,
+    CancelToken,
+    ToolResult,
+    popen_detached,
+    resolve_executable,
+    was_cancelled,
+)
 
 log = logging.getLogger("ev.tools.files")
 
@@ -99,7 +106,16 @@ def resolve_user_path(raw: str, default: Path | None = None) -> Path:
         # A bare "notes.txt" belongs in the default folder, not in whatever
         # directory E.V. happens to have been started from.
         base = default if default is not None and default.is_dir() else config.FILE_DEFAULT_DIR
-        candidate = base / candidate
+        # Speech carries filler that a filesystem does not. "my github folder"
+        # is the same request as "github", and only the second one used to
+        # work - the first became a literal directory of that name. The
+        # stripped form is preferred only when it actually exists, so a real
+        # folder called "My Notes" is still found under its own name.
+        spoken = _normalise_dir_word(text)
+        if spoken and spoken != text.lower() and (base / spoken).exists():
+            candidate = base / spoken
+        else:
+            candidate = base / candidate
     return _check(candidate)
 
 
@@ -334,6 +350,52 @@ def _delete(path: Path) -> ToolResult:
     except OSError as exc:
         return ToolResult.failure("Couldn't delete that.", f"Delete failed: {exc}")
     return ToolResult.success(f"{label} is gone.", f"Permanently deleted {path}")
+
+
+def _reveal(path: Path) -> ToolResult:
+    """Show a folder, or a file's folder, in the file manager.
+
+    The capability that was missing entirely. "Open my GitHub folder" had no
+    tool to land on, so the model reached for `open_app` and handed it an
+    invented path - which Explorer silently ignores, opening its default
+    location while E.V. announced success.
+
+    Existence is checked *first* and the failure names the folder. Launching
+    Explorer at a path that is not there looks identical to launching it at
+    one that is, so without this check there is no way for either the user or
+    the model to find out it went wrong.
+    """
+    if not path.exists():
+        return ToolResult.failure(
+            f"There's no {path.name} folder where I looked.",
+            f"'{path}' does not exist, so nothing was opened. Do not retry "
+            "with an invented path; use find to locate it, or ask the user "
+            "where it is.",
+        )
+
+    target = path if path.is_dir() else path.parent
+    try:
+        if IS_WINDOWS:
+            # `explorer /select,` highlights a file inside its folder, which
+            # is what "show me that file" means. A folder just opens.
+            argument = str(target) if path.is_dir() else f"/select,{path}"
+            popen_detached(["explorer.exe", argument])
+        else:
+            opener = resolve_executable("xdg-open") or resolve_executable("open")
+            if not opener:
+                return ToolResult.failure(
+                    "I can't open a folder on this system.",
+                    "No xdg-open or open binary found.",
+                )
+            popen_detached([opener, str(target)])
+    except OSError as exc:
+        return ToolResult.failure(
+            "Couldn't get that folder open.", f"Failed to open {target}: {exc}"
+        )
+
+    return ToolResult.success(
+        f"{friendly(target)} is up.", f"Opened {target} in the file manager."
+    )
 
 
 def _mkdir(path: Path) -> ToolResult:
@@ -662,7 +724,6 @@ def file_manager(
         "write": "create",
         "new": "create",
         "make": "create",
-        "open": "read",
         "cat": "read",
         "ls": "list",
         "dir": "list",
@@ -673,6 +734,13 @@ def file_manager(
         "organise": "organize",
         "tidy": "organize",
         "sort": "organize",
+        "reveal": "open",
+        "show": "open",
+        "browse": "open",
+        "navigate": "open",
+        "explore": "open",
+        "go_to": "open",
+        "goto": "open",
         "mkdir": "makedir",
         "folder": "makedir",
         "copy_all": "batch_copy",
@@ -714,6 +782,10 @@ def file_manager(
         return _create(target, content, append=False)
     if verb == "append":
         return _create(target, content, append=True)
+    if verb == "open":
+        # "Open notes.txt" means read it out; "open Downloads" means show it.
+        # Both are the same word to a user, so the path decides, not the verb.
+        return _read(target) if target.is_file() else _reveal(target)
     if verb == "read":
         return _read(target)
     if verb == "list":

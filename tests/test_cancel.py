@@ -283,10 +283,23 @@ def test_an_uncancelled_command_still_returns_its_output():
 
 # -- dispatch contract -------------------------------------------------------
 def test_only_tools_that_can_stop_are_offered_the_token():
-    assert CANCELLABLE == frozenset({"terminal_command", "file_manager"})
+    assert CANCELLABLE == frozenset(
+        {
+            "terminal_command",
+            "file_manager",
+            # Both autonomous loops check between steps, which is a point
+            # where the work is coherent and nothing is half-written.
+            "screen_task",
+            "browser_task",
+        }
+    )
     # Launching a program cannot be undone, so it is deliberately absent.
     assert "open_app" not in CANCELLABLE
     assert "dev_workflow" not in CANCELLABLE
+    # A single click has no "between" to stop at: by the time the token
+    # could be read, the button is already pressed.
+    assert "mouse_action" not in CANCELLABLE
+    assert "keyboard_action" not in CANCELLABLE
 
 
 def test_a_tool_that_cannot_cancel_ignores_the_token_without_erroring():

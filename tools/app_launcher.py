@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 import os
 import random
+import re
 import shlex
 import time
 from difflib import get_close_matches
@@ -281,6 +282,59 @@ def _shell_open(target: str) -> bool:
     return ok
 
 
+# An argument that is trying to be a filesystem location rather than a flag.
+_PATHISH = re.compile(r"^(~|\.{1,2}[/\\]|[a-zA-Z]:[/\\]|[/\\]{1,2})")
+
+
+def _looks_like_path(text: str) -> bool:
+    """True for an argument the model meant as a folder or file.
+
+    Switches are the thing to avoid mistaking for one. `-f`, `/select,` and
+    `--profile=x` all contain characters a path contains; none of them are
+    somewhere on disk, and path-checking them would refuse a perfectly good
+    launch.
+    """
+    value = text.strip().strip('"')
+    if not value or value.startswith(("-", "/")):
+        return False
+    return bool(_PATHISH.match(value)) or "\\" in value or "/" in value
+
+
+def _repair_path(text: str) -> str | None:
+    """Resolve a path argument, or None if there is no such place.
+
+    The model will happily invent `C:\\Users\\Alan\\GitHub` for a machine whose
+    user is not called Alan. Explorer opens its default location for a path
+    that does not exist and exits 0, so without this the launch "succeeds",
+    E.V. says so, and the user is looking at the wrong folder wondering why
+    nothing happened.
+
+    A wrong absolute path is usually right about the *last* part, so the
+    basename is looked up the way a spoken folder name would be before giving
+    up. Resolution goes through `file_manager`, which means the roots apply:
+    an app cannot be used to open a folder that `file_manager` would refuse.
+    """
+    from tools.file_manager import PathRefused, resolve_user_path
+
+    direct = Path(os.path.expandvars(text.strip().strip('"'))).expanduser()
+    if direct.exists():
+        return str(direct)
+
+    # "C:/Users/Alan/GitHub" on a machine with no Alan: the tail is still the
+    # folder they meant.
+    for guess in (text, direct.name):
+        if not guess:
+            continue
+        try:
+            candidate = resolve_user_path(str(guess), default=config.FILE_DEFAULT_DIR)
+        except (PathRefused, ValueError, OSError):
+            continue
+        if candidate.exists():
+            log.info("Repaired app argument %r to %s", text, candidate)
+            return str(candidate)
+    return None
+
+
 def open_app(app: str = "", arguments: str = "", **_: object) -> ToolResult:
     if not app.strip():
         return ToolResult.failure("You didn't say which app.")
@@ -291,6 +345,24 @@ def open_app(app: str = "", arguments: str = "", **_: object) -> ToolResult:
             extra = shlex.split(arguments, posix=not IS_WINDOWS)
         except ValueError:
             extra = [arguments.strip()]
+
+        # Check any path argument before it is handed to a process. A program
+        # launched at a location that is not there looks, from the outside,
+        # exactly like one launched at a location that is.
+        for index, item in enumerate(extra):
+            if not _looks_like_path(item):
+                continue
+            repaired = _repair_path(item)
+            if repaired is None:
+                return ToolResult.failure(
+                    f"I can't find that folder, so I've left {app.strip()} alone.",
+                    f"'{item}' does not exist, so {app!r} was not launched - "
+                    "opening it there would have silently landed somewhere "
+                    "else. Never invent a path. Use file_manager with action "
+                    "'open' and the folder as the user said it, or 'find' to "
+                    "locate it first.",
+                )
+            extra[index] = repaired
 
     spoken = _normalise_name(app)
     pretty = (spoken or app.strip()).title()

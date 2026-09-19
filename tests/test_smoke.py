@@ -387,3 +387,47 @@ def _run() -> int:
 
 if __name__ == "__main__":
     sys.exit(_run())
+
+
+# ---------------------------------------------------------------------------
+# Argument names the model almost got right
+# ---------------------------------------------------------------------------
+def test_a_near_miss_argument_name_is_renamed_not_dropped():
+    """Groq answered "open gmail and summarise the important mail" with a
+    sensible browser_task whose only argument was called `goal`. Filtered
+    against the schema, that call would have arrived empty and browsed
+    nowhere."""
+    from tools.schemas import normalise_arguments
+
+    assert normalise_arguments("browser_task", {"goal": "Open Gmail"}) == {
+        "task": "Open Gmail"
+    }
+    assert normalise_arguments("open_app", {"application": "notepad"}) == {
+        "app": "notepad"
+    }
+
+
+def test_an_alias_never_overwrites_what_the_model_actually_declared():
+    from tools.schemas import normalise_arguments
+
+    assert normalise_arguments("screen_task", {"task": "real", "goal": "other"}) == {
+        "task": "real",
+        "goal": "other",
+    }
+
+
+def test_an_alias_that_is_itself_a_real_property_is_left_alone():
+    """`keys` is keyboard_action's own property; renaming `key` onto it must
+    not fire when the tool declares both meanings differently."""
+    from tools.schemas import normalise_arguments
+
+    result = normalise_arguments("keyboard_action", {"keys": "enter", "key": "x"})
+    assert result["keys"] == "enter"
+
+
+def test_an_unknown_argument_is_still_dropped_by_dispatch():
+    """Widening what a model can be understood to have meant must not widen
+    what a tool can be asked to do."""
+    from tools.schemas import normalise_arguments
+
+    assert normalise_arguments("screen_task", {"nonsense": "x"}) == {"nonsense": "x"}

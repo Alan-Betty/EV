@@ -15,10 +15,23 @@ from tools.app_launcher import open_app
 from tools.backlog import backlog
 from tools.base import CancelToken, ToolResult
 from tools.browser import web_search
+from tools.browser_automation import browser_task
+from tools.computer_use import (
+    keyboard_action,
+    mouse_action,
+    screen_task,
+    take_screenshot,
+)
 from tools.dev_tools import dev_workflow
 from tools.file_manager import file_manager
 from tools.memory import remember
-from tools.schemas import TOOL_NAMES, TOOL_SPECS, to_gemini_tools, to_openai_tools
+from tools.schemas import (
+    TOOL_NAMES,
+    TOOL_SPECS,
+    normalise_arguments,
+    to_gemini_tools,
+    to_openai_tools,
+)
 from tools.terminal import terminal_command
 
 log = logging.getLogger("ev.tools")
@@ -45,6 +58,11 @@ REGISTRY: dict[str, Callable[..., ToolResult]] = {
     "dev_workflow": dev_workflow,
     "terminal_command": terminal_command,
     "file_manager": file_manager,
+    "take_screenshot": take_screenshot,
+    "mouse_action": mouse_action,
+    "keyboard_action": keyboard_action,
+    "screen_task": screen_task,
+    "browser_task": browser_task,
     "backlog": backlog,
     "remember": remember,
     "chat": chat,
@@ -58,7 +76,20 @@ _ALLOWED_ARGS: dict[str, set[str]] = {
 }
 # `confirmed` is injected by the core loop after a spoken yes, so it is
 # never something the model can set for itself.
-for _gated in ("terminal_command", "file_manager", "backlog"):
+#
+# Every tool that can spend money, send a message, delete something or drive
+# the real mouse is on this list. The computer-use tools are all here: they
+# have no sandbox and no undo, so the spoken yes is the only thing standing
+# between a misheard word and a purchase.
+for _gated in (
+    "terminal_command",
+    "file_manager",
+    "backlog",
+    "mouse_action",
+    "keyboard_action",
+    "screen_task",
+    "browser_task",
+):
     _ALLOWED_ARGS[_gated].add("confirmed")
 
 # Tools that can be stopped part-way through, at a point where stopping is
@@ -69,7 +100,13 @@ for _gated in ("terminal_command", "file_manager", "backlog"):
 # `cancel` is deliberately absent from `_ALLOWED_ARGS`: it is attached after
 # the model's arguments have been filtered, so the model can neither set it
 # nor clear it.
-CANCELLABLE: frozenset[str] = frozenset({"terminal_command", "file_manager"})
+#
+# The two autonomous loops are the clearest case for this. `screen_task`
+# checks between steps and `browser_task` between page actions - both are
+# points where the work is coherent and stopping leaves nothing half-written.
+CANCELLABLE: frozenset[str] = frozenset(
+    {"terminal_command", "file_manager", "screen_task", "browser_task"}
+)
 
 
 def dispatch(
@@ -97,6 +134,11 @@ def dispatch(
             "Those arguments made no sense.", f"Expected an object, got {type(raw).__name__}."
         )
 
+    # A near-miss name is renamed onto the real property before filtering,
+    # so a call the model got almost right is not silently emptied. It is
+    # still only ever a rename onto something the schema declares.
+    raw = normalise_arguments(name, raw)
+
     allowed = _ALLOWED_ARGS.get(name, set())
     kwargs = {key: value for key, value in raw.items() if key in allowed}
     dropped = set(raw) - allowed
@@ -107,7 +149,7 @@ def dispatch(
     for key, value in list(kwargs.items()):
         if isinstance(value, bool) or value is None:
             continue
-        if key in {"start_claude", "background", "confirmed", "recursive"}:
+        if key in {"start_claude", "background", "confirmed", "recursive", "headless"}:
             kwargs[key] = str(value).strip().lower() in {"true", "1", "yes"}
         elif not isinstance(value, str):
             kwargs[key] = str(value)

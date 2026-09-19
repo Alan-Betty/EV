@@ -11,8 +11,16 @@ numpy>=1.24               # sounddevice dependency; also used for buffer handlin
 rich>=13.0                # sci-fi terminal UI: panels, spinners, colour
 
 # --- OS automation ----------------------------------------------------------
-pyautogui>=0.9.54         # keystrokes for the VS Code integrated terminal
+pyautogui>=0.9.54         # keystrokes, clicks and drags; the hands
 pynput>=1.7.6             # global push-to-talk hotkey
+
+# --- screen perception ------------------------------------------------------
+# The eyes. There is still no local model here: the frame is grabbed into
+# memory, downscaled, JPEG-encoded and posted to the same endpoint the brain
+# already uses. Together these add roughly 15 MB resident, and only from the
+# first screenshot onwards - both are imported lazily.
+mss>=9.0                  # native screen grab, ~100ms for a 1080p frame
+pillow>=10.0              # downscale to 1280px and JPEG it: 8 MB raw -> ~95 KB
 
 # --- strongly recommended ---------------------------------------------------
 send2trash>=1.8           # file_manager deletes go to the Recycle Bin, so a
@@ -20,6 +28,11 @@ send2trash>=1.8           # file_manager deletes go to the Recycle Bin, so a
                           # are permanent.
 
 # --- optional, uncomment as needed ------------------------------------------
+# playwright>=1.40         # browser_task: DOM-level web automation. The
+#                          # heaviest thing E.V. can reach for, so it is
+#                          # opt-in, imported lazily, and the browser is torn
+#                          # down when the task ends. After installing:
+#                          #   python -m playwright install chromium
 # python-dotenv>=1.0       # config.py has its own .env parser; this is nicer
 # SpeechRecognition>=3.10  # only for EV_STT_PROVIDER=google (keyless fallback)
 # PyAudio>=0.2.14          # alternative mic backend if sounddevice misbehaves

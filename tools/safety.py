@@ -76,6 +76,89 @@ _REVIEW: tuple[tuple[str, str], ...] = (
 )
 
 
+# ---------------------------------------------------------------------------
+# GUI actions
+# ---------------------------------------------------------------------------
+# Driving the mouse and keyboard is a second risk surface, and the shell
+# patterns above say nothing useful about it: no regex over a command line
+# will ever notice that the button under the pointer says "Place order".
+#
+# What we do have is the description of what is about to happen - the label
+# on the button, the text being typed, the goal of the run. That is the
+# string these patterns read. It is not a sandbox and it proves nothing; it
+# is the difference between a misread screen costing a click and a misread
+# screen costing a purchase.
+#
+# Nothing here is BLOCKED. A GUI action has no equivalent of "format C:" that
+# is never legitimate - a user may genuinely want the thing bought, sent or
+# deleted. What they must not get is it happening without being asked.
+_GUI_REVIEW: tuple[tuple[str, str], ...] = (
+    (
+        r"\b(buy|purchase|checkout|check\s+out|pay|payment|place\s+(the\s+)?order|"
+        r"complete\s+(the\s+)?(order|purchase)|proceed\s+to\s+(checkout|payment)|"
+        r"confirm\s+(and\s+)?(pay|purchase|order)|subscribe|renew\b|upgrade\s+plan)\b",
+        "spends money",
+    ),
+    (
+        r"\b(send|sending|post|publish|tweet|submit|reply\s+all|forward)\b",
+        "sends something other people will see",
+    ),
+    (
+        r"\b(delete|deleting|remove|discard|erase|wipe|uninstall|"
+        r"empty\s+(the\s+)?(bin|trash|recycle\s+bin)|move\s+to\s+trash|"
+        r"factory\s+reset|format\s+(the\s+)?(disk|drive))\b",
+        "destroys something",
+    ),
+    (
+        r"\b(password|passphrase|credit\s*card|card\s+number|cvv|cvc|"
+        r"security\s+code|social\s+security|two[\s-]factor|one[\s-]time\s+code|"
+        r"seed\s+phrase|private\s+key)\b",
+        "handles a credential",
+    ),
+    (
+        r"\b(sign\s+out|log\s+out|shut\s*down|reboot|power\s+off|restart\s+the\s+"
+        r"(pc|computer|machine))\b",
+        "ends the session or the machine",
+    ),
+    (
+        r"\b(grant\s+access|allow\s+access|authorise|authorize|"
+        r"accept\s+(the\s+)?(terms|invite|request)|agree\s+to)\b",
+        "agrees to something on the user's behalf",
+    ),
+    (
+        r"\balt\s*\+\s*f4\b|\bctrl\s*\+\s*alt\s*\+\s*del(ete)?\b",
+        "closes a window or interrupts the system",
+    ),
+)
+
+
+def classify_gui(description: str) -> Verdict:
+    """Classify a GUI action by how it was described.
+
+    `description` is whatever names the intent: the label on the button, the
+    text about to be typed, the hotkey, the goal of an autonomous run.
+    Callers pass everything they have, joined, because the risk can live in
+    any one of them - "click Confirm" is harmless right up until the page
+    underneath it is a checkout.
+
+    Typed text is *also* put through `classify`, separately, so a shell
+    command typed into a terminal window meets the same blocked patterns it
+    would have met had it been run directly. This function deliberately does
+    not do that itself: the shell REVIEW list flags every ordinary sentence
+    containing the word "move", which is fine for a command line and useless
+    for a description of a click.
+    """
+    text = " ".join((description or "").lower().split())
+    if not text:
+        return Verdict(Risk.SAFE, "nothing to classify")
+
+    for pattern, reason in _GUI_REVIEW:
+        if re.search(pattern, text):
+            return Verdict(Risk.REVIEW, reason)
+
+    return Verdict(Risk.SAFE, "no risky intent matched")
+
+
 def classify(command: str) -> Verdict:
     """Classify a shell command by how much damage it could do."""
     text = " ".join(command.lower().split())

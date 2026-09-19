@@ -218,7 +218,7 @@ def test_malformed_argument_json_does_not_crash():
 
 
 def test_api_errors_become_readable_messages():
-    for status, fragment in ((401, "key"), (429, "Rate limited"), (500, "500")):
+    for status, fragment in ((401, "key"), (429, "rate limit"), (500, "500")):
 
         async def go(status=status):
             client = _client(lambda r: httpx.Response(status, text="nope"))
@@ -378,3 +378,57 @@ def _main() -> int:
 
 if __name__ == "__main__":
     sys.exit(_main())
+
+
+# ---------------------------------------------------------------------------
+# A reply that is really a tool call
+# ---------------------------------------------------------------------------
+# The last rung of the tool_use_failed ladder asks for prose and sometimes
+# gets JSON: the model knew which tool it wanted and wrote it in the content
+# field. "Open Gmail and give me a summary of the important mail" produced a
+# flawless browser_task object that way, and it was read out, braces and all.
+def test_a_tool_call_written_as_prose_is_rescued():
+    from ev.brain import _salvage_tool_call
+
+    call = _salvage_tool_call(
+        '{"name": "browser_task", "arguments": {"task": "Open Gmail"}}'
+    )
+    assert call is not None
+    assert call.name == "browser_task"
+    assert call.arguments["task"] == "Open Gmail"
+
+
+def test_a_rescued_call_survives_a_code_fence():
+    from ev.brain import _salvage_tool_call
+
+    call = _salvage_tool_call(
+        '```json\n{"name": "screen_task", "arguments": {"task": "open notepad"}}\n```'
+    )
+    assert call is not None and call.name == "screen_task"
+
+
+def test_the_nested_function_shape_is_rescued_too():
+    from ev.brain import _salvage_tool_call
+
+    call = _salvage_tool_call(
+        '{"function": {"name": "open_app", "arguments": {"app": "chrome"}}}'
+    )
+    assert call is not None and call.name == "open_app"
+
+
+def test_ordinary_speech_is_never_mistaken_for_a_tool_call():
+    """The strictness is the point: a chat answer that quotes some JSON must
+    be spoken, not executed."""
+    from ev.brain import _salvage_tool_call
+
+    assert _salvage_tool_call("Three thirteen point two. Modern of you.") is None
+    assert _salvage_tool_call("") is None
+    assert _salvage_tool_call('{"name": "no_such_tool", "arguments": {}}') is None
+    assert _salvage_tool_call("Use {\"name\": \"open_app\"} for that.") is None
+
+
+def test_a_rescued_chat_call_stays_prose():
+    """Rescuing a `chat` would be a no-op that threw away the actual words."""
+    from ev.brain import _salvage_tool_call
+
+    assert _salvage_tool_call('{"name": "chat", "arguments": {"reply": "hi"}}') is None

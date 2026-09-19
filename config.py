@@ -105,6 +105,14 @@ GEMINI_BASE_URL = _env(
 LLM_TEMPERATURE = _env_float("EV_LLM_TEMPERATURE", 0.4)
 LLM_MAX_TOKENS = _env_int("EV_LLM_MAX_TOKENS", 400)
 LLM_TIMEOUT_S = _env_float("EV_LLM_TIMEOUT_S", 20.0)
+# Groq's free tier is metered in tokens per minute, and a single request with
+# the full tool schema attached is a large fraction of one minute's budget.
+# Rather than surfacing that as an error the user can do nothing useful about,
+# E.V. waits out the window the response headers name and tries once more.
+# Set to 0 to fail immediately instead.
+LLM_RATE_LIMIT_RETRIES = _env_int("EV_LLM_RATE_LIMIT_RETRIES", 1)
+# Nobody is standing at a microphone for a minute. Past this, admit it.
+LLM_RATE_LIMIT_MAX_WAIT_S = _env_float("EV_LLM_RATE_LIMIT_MAX_WAIT_S", 12.0)
 # Prior user/assistant exchanges kept in context. Deliberately small: short
 # history keeps latency, token spend and RAM all down.
 HISTORY_TURNS = _env_int("EV_HISTORY_TURNS", 6)
@@ -206,8 +214,14 @@ WAKE_PHRASES = _env_list(
 # window E.V. needs no wake phrase, which is what makes a back-and-forth feel
 # like talking to someone rather than issuing commands. The timer resets on
 # every exchange, so a real conversation never lapses mid-flow.
+#
+# Kept short on purpose. A long window means E.V. is still treating the room
+# as a conversation a minute after it ended, so an offhand remark to someone
+# else gets transcribed, sent to the model and acted on. Eight seconds is
+# about as long as a natural pause between two sentences of the same thought;
+# past that, saying the name again costs nothing and removes all doubt.
 CONVERSATION_WINDOW_S = _env_float(
-    "EV_CONVERSATION_WINDOW_S", _env_float("EV_FOLLOWUP_WINDOW_S", 75.0)
+    "EV_CONVERSATION_WINDOW_S", _env_float("EV_FOLLOWUP_WINDOW_S", 8.0)
 )
 FOLLOWUP_WINDOW_S = CONVERSATION_WINDOW_S  # backwards-compatible alias
 PUSH_TO_TALK_ENABLED = _env_bool("EV_PUSH_TO_TALK_ENABLED", True)
@@ -305,6 +319,134 @@ TERMINAL_SPAWN_S = _env_float("EV_TERMINAL_SPAWN_S", 2.5)
 
 
 # ---------------------------------------------------------------------------
+# Screen perception (vision)
+# ---------------------------------------------------------------------------
+# E.V. can look at the screen and answer questions about it. The frame never
+# touches a local model: it is JPEG-encoded in memory and posted to the same
+# provider the brain already uses, over the same kind of plain JSON request.
+# Nothing is written to disk unless the user explicitly asks for a saved copy,
+# and that path goes through `file_manager`'s root check like any other write.
+VISION_ENABLED = _env_bool("EV_VISION_ENABLED", True)
+# Defaults to whatever the brain is using, so one key covers both.
+VISION_PROVIDER = _env("EV_VISION_PROVIDER", "").lower() or LLM_PROVIDER
+GROQ_VISION_MODEL = _env("EV_GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+GROQ_VISION_FALLBACKS = [
+    name.strip()
+    for name in _env(
+        "EV_GROQ_VISION_FALLBACKS",
+        # Groq's vision catalogue turns over fast and differs per account, so
+        # this is a ladder rather than a single name. `--check` reports which
+        # rung this machine will actually land on.
+        "meta-llama/llama-4-maverick-17b-128e-instruct,"
+        "qwen/qwen3.8-27b,"
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+    ).split(",")
+    if name.strip()
+]
+GEMINI_VISION_MODEL = _env("EV_GEMINI_VISION_MODEL", "") or GEMINI_MODEL
+# A 4K frame is ~8 MB raw and buys nothing: the model reads a button at 1280px
+# just as well, the upload is a fifth of the size, and the peak allocation
+# stays inside E.V.'s memory budget.
+VISION_MAX_WIDTH = _env_int("EV_VISION_MAX_WIDTH", 1280)
+VISION_JPEG_QUALITY = _env_int("EV_VISION_JPEG_QUALITY", 60)
+# Vision responses are longer than a tool call but still read aloud, so the
+# cap is generous rather than unlimited.
+VISION_MAX_TOKENS = _env_int("EV_VISION_MAX_TOKENS", 320)
+VISION_TIMEOUT_S = _env_float("EV_VISION_TIMEOUT_S", 30.0)
+VISION_TEMPERATURE = _env_float("EV_VISION_TEMPERATURE", 0.1)
+# A step of a screen task is about to move the pointer, so it is worth more
+# pixels than a casual "what's on my screen". Menu entries and file names in
+# a sidebar are the things that get misread at 1280px, and they are exactly
+# the things a task has to click.
+VISION_TASK_MAX_WIDTH = _env_int("EV_VISION_TASK_MAX_WIDTH", 1600)
+VISION_TASK_JPEG_QUALITY = _env_int("EV_VISION_TASK_JPEG_QUALITY", 72)
+# A labelled grid drawn over the frame before it is sent. The model reads a
+# coordinate off the ruler instead of estimating one from the edges of the
+# image, which is the single largest source of clicks that land near the
+# target instead of on it. Costs a few milliseconds and a few KB.
+VISION_GRID = _env_bool("EV_VISION_GRID", True)
+VISION_GRID_DIVISIONS = _env_int("EV_VISION_GRID_DIVISIONS", 10)
+# A zoom is a second look at one rectangle of the screen, captured at native
+# resolution. It is how small text gets read on a 4K display, where the
+# whole-screen frame has thrown away the pixels the words were made of.
+VISION_ZOOM_MAX_WIDTH = _env_int("EV_VISION_ZOOM_MAX_WIDTH", 1400)
+
+
+# ---------------------------------------------------------------------------
+# Autonomous computer use (mouse and keyboard)
+# ---------------------------------------------------------------------------
+# Driving the real mouse and keyboard is the most dangerous thing E.V. does:
+# there is no sandbox and no undo. Two things keep it honest - every action is
+# classified by `tools.safety.classify_gui` before it runs, and anything that
+# looks like a purchase, a sent message or a delete is held for a spoken yes.
+COMPUTER_USE_ENABLED = _env_bool("EV_COMPUTER_USE_ENABLED", True)
+# Turning this off removes the confirmation gate entirely. Don't.
+COMPUTER_CONFIRM_RISKY = _env_bool("EV_COMPUTER_CONFIRM_RISKY", True)
+# A mouse that teleports confuses applications that track hover state, so the
+# pointer is moved over a few frames instead of being warped.
+COMPUTER_MOVE_DURATION_S = _env_float("EV_COMPUTER_MOVE_DURATION_S", 0.15)
+COMPUTER_TYPE_INTERVAL_S = _env_float("EV_COMPUTER_TYPE_INTERVAL_S", 0.01)
+# How long the screen is given to settle after an action before the next
+# frame is captured. Too short and the loop reads the previous state.
+COMPUTER_ACTION_PAUSE_S = _env_float("EV_COMPUTER_ACTION_PAUSE_S", 0.45)
+# Cap on one autonomous run. A vision loop with no ceiling is a robot that
+# clicks forever on a page that never changes.
+# Eight was enough for "mute Spotify in the volume mixer" and nowhere near
+# enough for "open the project in VS Code, open run.ps1 and run it", which is
+# a launch, a focus, a quick-open, a filename, a confirm and a hotkey before
+# anything has been verified. A ceiling exists to stop a runaway, not to stop
+# a real job half way through.
+SCREEN_TASK_MAX_STEPS = _env_int("EV_SCREEN_TASK_MAX_STEPS", 16)
+SCREEN_TASK_TIMEOUT_S = _env_float("EV_SCREEN_TASK_TIMEOUT_S", 180.0)
+# Actions the model may chain in one reply without looking again. Typing a
+# line and pressing Enter needs no fresh frame between the two, and paying a
+# vision call for it is most of why a long task times out. Kept small: the
+# whole argument for the loop is that the screen moves underneath you.
+SCREEN_TASK_MAX_BATCH = _env_int("EV_SCREEN_TASK_MAX_BATCH", 3)
+# How long `wait` will sit watching for a window title to appear. An app
+# launched cold takes seconds, and a fixed sleep is either a waste or a
+# guess; polling for the window is neither.
+SCREEN_TASK_WAIT_S = _env_float("EV_SCREEN_TASK_WAIT_S", 12.0)
+# Text longer than this is pasted through the clipboard rather than typed
+# key by key. pyautogui's writer cannot produce characters that are not on
+# the layout at all, and at one keystroke per 10ms a paragraph takes long
+# enough for an autocomplete popup to eat half of it.
+COMPUTER_PASTE_THRESHOLD = _env_int("EV_COMPUTER_PASTE_THRESHOLD", 60)
+
+
+# ---------------------------------------------------------------------------
+# Browser automation (Playwright)
+# ---------------------------------------------------------------------------
+# Structured web work goes through the DOM rather than through pixels: it is
+# faster, it does not need the window in the foreground, and a CSS selector
+# cannot miss by three pixels. Playwright is imported lazily and the browser
+# is torn down at the end of every task, so the cost is paid only while a web
+# task is actually running.
+BROWSER_AUTOMATION_ENABLED = _env_bool("EV_BROWSER_AUTOMATION_ENABLED", True)
+BROWSER_ENGINE = _env("EV_BROWSER_ENGINE", "chromium").lower()  # chromium|firefox|webkit
+# Headed by default: the user asked E.V. to do something on their computer and
+# watching it happen is most of the reassurance.
+BROWSER_HEADLESS = _env_bool("EV_BROWSER_HEADLESS", False)
+BROWSER_STEP_TIMEOUT_S = _env_float("EV_BROWSER_STEP_TIMEOUT_S", 15.0)
+BROWSER_TASK_TIMEOUT_S = _env_float("EV_BROWSER_TASK_TIMEOUT_S", 90.0)
+BROWSER_MAX_STEPS = _env_int("EV_BROWSER_MAX_STEPS", 20)
+# How much text a `read` step may hand back to the model.
+BROWSER_READ_CHARS = _env_int("EV_BROWSER_READ_CHARS", 2400)
+# How many separate elements one `read` may return when its selector matches
+# a list. An inbox is thirty rows, and reading only the first is how "give me
+# a summary of the important mails" turns into a summary of one mail.
+BROWSER_READ_ITEMS = _env_int("EV_BROWSER_READ_ITEMS", 30)
+# Whether the automation browser keeps a profile between tasks. Without one
+# every task starts logged out of everything, so "open Gmail and summarise
+# the important mail" reaches a sign-in page and stops. The user logs in
+# once, in a window they can see, and it holds from then on.
+# The directory itself is BROWSER_PROFILE_DIR, defined with the other state
+# paths further down - it lives under STATE_DIR so one EV_STATE_DIR relocates
+# everything E.V. persists, profile included.
+BROWSER_PERSIST_PROFILE = _env_bool("EV_BROWSER_PERSIST_PROFILE", True)
+
+
+# ---------------------------------------------------------------------------
 # Runtime
 # ---------------------------------------------------------------------------
 LOG_LEVEL = _env("EV_LOG_LEVEL", "INFO").upper()
@@ -333,6 +475,36 @@ ACK_PHRASES = [
     if phrase.strip()
 ]
 
+# A screen task is different in kind: it is slow by construction, and while
+# it runs the pointer moves on its own. Saying what is about to happen,
+# before the first click rather than after it, is the difference between
+# "it is working" and "something has taken over my mouse".
+ACK_SCREEN_PHRASE = _env("EV_ACK_SCREEN_PHRASE", "On it, navigating your screen.")
+# Spoken with no delay, unlike the generic acknowledgement: there is no
+# version of a screen task that finishes fast enough to not need announcing.
+ACK_SCREEN_DELAY_S = _env_float("EV_ACK_SCREEN_DELAY_S", 0.0)
+
+
+# ---------------------------------------------------------------------------
+# Compound requests
+# ---------------------------------------------------------------------------
+# "Open my mail and give me a summary of the important things" is two jobs in
+# one sentence, and the model reliably answers it with a single tool call: it
+# opens the mail and the summary never becomes a call at all. E.V. then says
+# "Opening your mail." and goes quiet on the only part the user was waiting
+# for, which reads as being ignored.
+#
+# So when an utterance ends in a question that the first tool cannot have
+# answered, E.V. takes one more turn for it. Only a trailing *question*
+# qualifies - see `ev.session.split_followup`. An action followed by another
+# action is usually one call on purpose, and re-running the tail of those
+# would do the thing twice.
+CHAIN_ENABLED = _env_bool("EV_CHAIN_ENABLED", True)
+# The first tool has usually just launched something. Looking at the screen
+# before it has finished drawing describes the old one, so the follow-up
+# waits for the window to appear.
+CHAIN_SETTLE_S = _env_float("EV_CHAIN_SETTLE_S", 2.0)
+
 
 # ---------------------------------------------------------------------------
 # Persistent state: memory and backlog
@@ -342,6 +514,11 @@ ACK_PHRASES = [
 STATE_DIR = Path(_env("EV_STATE_DIR") or (BASE_DIR / ".cache" / "state"))
 MEMORY_FILE = Path(_env("EV_MEMORY_FILE") or (STATE_DIR / "memory.json"))
 BACKLOG_FILE = Path(_env("EV_BACKLOG_FILE") or (STATE_DIR / "backlog.json"))
+# Cookies and logins for `browser_task`, so a web errand starts signed in to
+# the things the user is signed in to. See BROWSER_PERSIST_PROFILE above.
+BROWSER_PROFILE_DIR = Path(
+    _env("EV_BROWSER_PROFILE_DIR") or (STATE_DIR / "browser-profile")
+)
 
 MEMORY_ENABLED = _env_bool("EV_MEMORY_ENABLED", True)
 # Preferences and profile facts ride in the system prompt, so they cost tokens
@@ -516,6 +693,14 @@ SEARCH_ENGINES: dict[str, str] = {
     "stackoverflow": "https://stackoverflow.com/search?q={q}",
     "wikipedia": "https://en.wikipedia.org/w/index.php?search={q}",
     "reddit": "https://www.reddit.com/search/?q={q}",
+    # Mail and calendar ignore {q} - "open my email" is a destination, not a
+    # search. Without these the model has nowhere to send the request and
+    # falls back to asking which provider, which is not what was asked for.
+    "mail": _env("EV_MAIL_URL", "https://mail.google.com/"),
+    "gmail": "https://mail.google.com/",
+    "outlook": "https://outlook.live.com/mail/",
+    "calendar": _env("EV_CALENDAR_URL", "https://calendar.google.com/"),
+    "drive": "https://drive.google.com/",
 }
 
 
@@ -572,20 +757,33 @@ You: "Above my pay grade. Want me to search it?"
 
 TOOL RULES
 - Acting beats talking. If the request maps to a tool, call the tool.
-- One tool per turn unless the request genuinely needs a chain.
 - "open Chrome and search for X" is ONE web_search call with the browser \
-argument set. Not two calls.
-- terminal_command is the last resort. Never use it to launch a GUI app, \
-open a web page, or touch a file - that is what open_app, web_search and \
-file_manager are for.
-- Anything involving a file or folder goes through file_manager: creating, \
-reading, listing, copying, moving, renaming, deleting, searching, tidying. \
-When asked to create a file with content, write the real content out in \
-full in the content argument - never promise to do it later, and never \
-hand back a placeholder.
-- Never invent a file path. If the user named no directory, omit the argument \
-and let the default apply.
-- Chit-chat, questions, opinions, and anything needing no machine action go \
+argument set, not two calls.
+- Files and folders always go through file_manager, never terminal_command. \
+Action 'open' shows a folder in File Explorer - "open File Explorer and go to \
+my GitHub folder" is one call, action 'open', path 'github'. Pass the folder \
+as the user said it and let the tool resolve it. When creating a file, write \
+the real content out in full; never a placeholder.
+- Never invent a path. Not for file_manager, and above all not for open_app's \
+arguments - a guessed path opens the wrong window and looks like success. If \
+you do not know where something is, let file_manager 'find' or 'open' look.
+- "open my email", "check my calendar", "open my drive" are web_search with \
+engine mail, calendar or drive and no query. Do not ask which provider.
+- take_screenshot is how you look at the screen: what is on it, what an \
+error says, what an inbox contains. Use it before any mouse_action, and pass \
+region to read small text.
+- mouse_action and keyboard_action drive the real pointer and keyboard. Last \
+resort, no undo. Coordinates are fractions 0 to 1; always fill in label.
+- screen_task does a whole desktop job: opens apps, focuses windows, clicks \
+and types, looking between steps. "Open Notepad and type hello" is ONE \
+screen_task and the goal is that whole sentence, not an open_app that drops \
+the typing.
+- browser_task beats screen_task on a website: it reads the page, not the \
+pixels. To learn what is IN a page, an inbox or a calendar or results, use \
+browser_task ending in a read step. web_search only opens a page.
+- terminal_command is the last resort of all. Never for a GUI app, a web \
+page, or a file.
+- Chit-chat, questions, opinions and anything needing no machine action go \
 through chat.
 
 You always answer with a tool call. chat is the fallback."""

@@ -98,6 +98,72 @@ for _intent in _PRIORITY:
         _LOOKUP.setdefault(_phrase, _intent)
 
 
+# ---------------------------------------------------------------------------
+# Compound requests
+# ---------------------------------------------------------------------------
+# "Open my mail and give me a summary of the important things" is two jobs,
+# and the model answers it with one tool call - it opens the mail and drops
+# the summary. Nothing was wrong with the call; the second half simply never
+# became one. From where the user is standing that reads as E.V. ignoring
+# them, because the part they were waiting for is the part that vanished.
+#
+# This finds that trailing half so the core loop can go back for it.
+#
+# The gate is deliberately narrow: only a trailing *question* counts. An
+# action followed by another action ("open Chrome and search for X") is
+# usually one tool call on purpose, and re-running the tail of those would
+# search twice. A question has no side effect to double, so the worst case of
+# a false positive here is one wasted round trip - against a silent failure,
+# which is what the alternative costs.
+_JOINER = re.compile(
+    r"\s+(?:and\s+then|and\s+also|then|and)\s+|\s*[;,]\s*then\s+", re.IGNORECASE
+)
+
+# Openings that mean "tell me something", as opposed to "do something".
+_ASK_OPENERS = (
+    "give me", "gimme", "get me", "tell me", "show me what", "read me",
+    "read out", "read back", "let me know", "fill me in", "catch me up",
+    "summarise", "summarize", "summary", "describe", "explain", "list",
+    "what", "which", "who", "when", "where", "why", "how",
+    "is there", "are there", "anything", "any ",
+)
+
+# A trailing clause has to be doing something with information to qualify.
+_ASK_WORDS = (
+    "summary", "summarise", "summarize", "important", "gist", "rundown",
+    "overview", "tell", "read", "say", "what", "which", "anything",
+    "unread", "new ", "latest", "recap",
+)
+
+
+def split_followup(text: str) -> str:
+    """Return the trailing question of a compound request, or "".
+
+    Conservative by design. It returns something only when the utterance
+    splits on a joining word *and* the trailing clause reads as a request for
+    information rather than a second action.
+    """
+    cleaned = " ".join((text or "").split())
+    if not cleaned:
+        return ""
+
+    parts = [part.strip(" .,;") for part in _JOINER.split(cleaned)]
+    parts = [part for part in parts if part]
+    if len(parts) < 2:
+        return ""
+
+    tail = parts[-1]
+    lowered = tail.lower()
+    # Too short to be a request of its own: "open Chrome and go" is one job.
+    if len(lowered.split()) < 2:
+        return ""
+    if not lowered.startswith(_ASK_OPENERS):
+        return ""
+    if not any(word in lowered for word in _ASK_WORDS):
+        return ""
+    return tail
+
+
 def match_intent(text: str, mode: Mode = Mode.ACTIVE) -> Intent | None:
     """Return a control intent for this utterance, or None.
 

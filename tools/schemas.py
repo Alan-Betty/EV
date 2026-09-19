@@ -16,26 +16,23 @@ TOOL_SPECS: list[ToolSpec] = [
     {
         "name": "open_app",
         "description": (
-            "Launch a desktop application by name, for example Chrome, VS Code, "
-            "Notepad, Spotify, Windows Terminal or Task Manager. Use this only "
-            "for starting a program. If the user wants a web search, use "
-            "web_search instead."
+            "Launch a desktop program by name: Chrome, VS Code, Notepad, "
+            "Spotify, Task Manager. Starting a program only - use web_search "
+            "for the web, and file_manager 'open' to show a folder."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "app": {
                     "type": "string",
-                    "description": (
-                        "Application name as the user said it, e.g. 'chrome', "
-                        "'vs code', 'notepad', 'task manager'."
-                    ),
+                    "description": "The name as the user said it.",
                 },
                 "arguments": {
                     "type": "string",
                     "description": (
-                        "Optional extra command-line arguments, such as a file "
-                        "or folder to open with the app. Leave empty if unsure."
+                        "Extra command-line arguments. Only a path you have "
+                        "actually been told - never one you construct. Leave "
+                        "empty if unsure."
                     ),
                 },
             },
@@ -45,9 +42,13 @@ TOOL_SPECS: list[ToolSpec] = [
     {
         "name": "web_search",
         "description": (
-            "Open a browser on a search results page, or on a specific URL. "
-            "Handles requests like 'search for a good ergonomic mouse', 'look "
-            "that up on YouTube', or 'open Chrome and find me a gaming mouse'."
+            "Open a browser on a search results page, on a specific URL, or "
+            "on a site the user lives in. Handles 'search for a good ergonomic "
+            "mouse', 'look that up on YouTube', 'open Chrome and find me a "
+            "gaming mouse', and also 'open my email', 'check my calendar' - "
+            "for those set engine to mail, calendar or drive and leave query "
+            "empty. Do not ask which provider; open the default and let the "
+            "user say if they wanted another."
         ),
         "parameters": {
             "type": "object",
@@ -55,15 +56,13 @@ TOOL_SPECS: list[ToolSpec] = [
                 "query": {
                     "type": "string",
                     "description": (
-                        "The search terms. Clean them up into a good search "
-                        "query; drop filler words like 'can you find me'."
+                        "The search terms, cleaned of filler. Leave empty for "
+                        "mail, calendar and drive."
                     ),
                 },
                 "engine": {
                     "type": "string",
-                    "description": (
-                        "Which site to search. Defaults to google."
-                    ),
+                    "description": "Where to go. Defaults to google.",
                     "enum": [
                         "google",
                         "bing",
@@ -76,21 +75,22 @@ TOOL_SPECS: list[ToolSpec] = [
                         "stackoverflow",
                         "wikipedia",
                         "reddit",
+                        "mail",
+                        "gmail",
+                        "outlook",
+                        "calendar",
+                        "drive",
                     ],
                 },
                 "browser": {
                     "type": "string",
-                    "description": (
-                        "Which browser to open it in. Only set this if the user "
-                        "named one; otherwise omit to use the system default."
-                    ),
+                    "description": "Only if the user named one.",
                     "enum": ["chrome", "edge", "firefox", "brave", "default"],
                 },
                 "url": {
                     "type": "string",
                     "description": (
-                        "Open this exact URL instead of running a search. Use "
-                        "only when the user names a site to go to directly."
+                        "An exact URL, when the user names a site directly."
                     ),
                 },
             },
@@ -100,10 +100,9 @@ TOOL_SPECS: list[ToolSpec] = [
     {
         "name": "dev_workflow",
         "description": (
-            "Developer macro: open VS Code on a project folder, spawn an "
-            "integrated terminal, start the Claude Code CLI in it, and "
-            "optionally type an opening prompt. Use for requests like 'launch "
-            "VS Code and start Claude Code on my API project'."
+            "Developer macro: open VS Code on a folder, spawn an integrated "
+            "terminal, start the Claude Code CLI, optionally type a prompt. "
+            "For 'launch VS Code and start Claude on my API project'."
         ),
         "parameters": {
             "type": "object",
@@ -111,25 +110,22 @@ TOOL_SPECS: list[ToolSpec] = [
                 "directory": {
                     "type": "string",
                     "description": (
-                        "Project folder to open. Use exactly what the user said "
-                        "(a full path, or a bare project name to search for). "
-                        "Omit entirely if they did not name one."
+                        "Exactly what the user said - a path, or a bare "
+                        "project name to search for. Omit if they named none."
                     ),
                 },
                 "prompt": {
                     "type": "string",
                     "description": (
-                        "Initial prompt to send to Claude Code once it starts, "
-                        "e.g. 'review the auth middleware for bugs'. Omit if "
+                        "Prompt to send to Claude Code once it starts. Omit if "
                         "the user only asked to start it."
                     ),
                 },
                 "start_claude": {
                     "type": "boolean",
                     "description": (
-                        "Whether to launch the Claude CLI in the terminal. "
-                        "Defaults to true. Set false if the user only wants "
-                        "VS Code and a plain terminal."
+                        "Defaults to true. False for VS Code and a plain "
+                        "terminal only."
                     ),
                 },
             },
@@ -139,10 +135,9 @@ TOOL_SPECS: list[ToolSpec] = [
     {
         "name": "terminal_command",
         "description": (
-            "Run a shell command on the user's machine. Last resort only: use "
-            "open_app for programs and web_search for the browser. Good for "
-            "things like git status, ipconfig, listing a folder, or checking a "
-            "package version."
+            "Run a shell command. Last resort: open_app for programs, "
+            "web_search for the browser, file_manager for files. Good for "
+            "git status, ipconfig, checking a package version."
         ),
         "parameters": {
             "type": "object",
@@ -163,10 +158,8 @@ TOOL_SPECS: list[ToolSpec] = [
                 "background": {
                     "type": "boolean",
                     "description": (
-                        "True for long-running commands that should be detached "
-                        "into their own visible terminal window (a dev server, "
-                        "a watch task). False to run it and read back the "
-                        "output. Defaults to false."
+                        "True to detach a long-running command into its own "
+                        "window. False reads the output back. Default false."
                     ),
                 },
             },
@@ -176,18 +169,14 @@ TOOL_SPECS: list[ToolSpec] = [
     {
         "name": "file_manager",
         "description": (
-            "Create, read, list, copy, move, rename, delete, search and "
-            "organise files and folders in the user's own directories "
-            "(Desktop, Downloads, Documents, Pictures and so on). Use this for "
-            "anything about files: 'make a text file in Documents with my top "
-            "ten places', 'copy report.pdf from Downloads to Documents', "
-            "'organise my Downloads folder', 'what's in my Desktop', 'rename "
-            "that to notes.txt', 'delete the old zip'. Prefer this over "
-            "terminal_command for every file operation - it is safer and it "
-            "asks before deleting. It also does whole-batch work in one call: "
-            "'copy every invoice from Downloads to Documents', 'move all the "
-            "screenshots off my Desktop', 'rename these photos to holiday'. "
-            "Prefer one batch action over a stream of single-file calls."
+            "Everything to do with files and folders in the user's own "
+            "directories: create, read, list, open, copy, move, rename, "
+            "delete, find, organise, and whole-folder batch versions of "
+            "those. Use it for 'make a file with my shopping list', 'what's "
+            "on my Desktop', 'open File Explorer at my GitHub folder', "
+            "'copy every invoice to Documents'. Always prefer this over "
+            "terminal_command for files, and one batch action over many "
+            "single-file calls."
         ),
         "parameters": {
             "type": "object",
@@ -195,17 +184,13 @@ TOOL_SPECS: list[ToolSpec] = [
                 "action": {
                     "type": "string",
                     "description": (
-                        "What to do. 'create' writes a new file (put the text "
-                        "in 'content'). 'append' adds to an existing file. "
-                        "'read' returns the contents. 'list' shows a folder. "
-                        "'copy'/'move'/'rename' need 'destination'. 'delete' "
-                        "removes a file or folder. 'makedir' creates a folder. "
-                        "'find' searches by name using 'pattern'. 'organize' "
-                        "sorts loose files in a folder into type subfolders. "
-                        "'batch_copy' and 'batch_move' take every file in the "
-                        "'path' folder matching 'pattern' and put it in "
-                        "'destination'. 'batch_rename' renames every match in "
-                        "'path' to 'new_name', numbered, keeping extensions."
+                        "'open' shows a folder in File Explorer (or reads a "
+                        "file out). 'list' names what is in a folder without "
+                        "showing it. 'create' and 'append' need 'content'. "
+                        "'copy', 'move' and 'rename' need 'destination'. "
+                        "'find' needs 'pattern'. 'organize' sorts a folder "
+                        "into type subfolders. The batch actions act on every "
+                        "file in 'path' matching 'pattern'."
                     ),
                     "enum": [
                         "create",
@@ -216,6 +201,7 @@ TOOL_SPECS: list[ToolSpec] = [
                         "move",
                         "rename",
                         "delete",
+                        "open",
                         "makedir",
                         "find",
                         "organize",
@@ -227,47 +213,38 @@ TOOL_SPECS: list[ToolSpec] = [
                 "path": {
                     "type": "string",
                     "description": (
-                        "The file or folder to act on. A spoken folder name "
-                        "('Downloads', 'Desktop'), a relative path "
-                        "('Documents/notes.txt'), or a full path. For a new "
-                        "file, include the filename and extension. If the user "
-                        "named no folder, just give the filename and it lands "
-                        "in Documents."
+                        "The file or folder, as the user said it: 'Downloads', "
+                        "'my github folder', 'Documents/notes.txt'. Never "
+                        "invent an absolute path. Omit the folder and a new "
+                        "file lands in Documents."
                     ),
                 },
                 "destination": {
                     "type": "string",
                     "description": (
-                        "Where it goes, for copy, move and rename, and the "
-                        "target folder for batch_copy and batch_move. A folder "
-                        "name to move into, or a full new filename to rename "
-                        "to. Omit for every other action."
+                        "Where it goes: a folder to move into, or a new "
+                        "filename to rename to."
                     ),
                 },
                 "content": {
                     "type": "string",
                     "description": (
-                        "The full text to write, for create and append. Write "
-                        "the actual content the user asked for - if they want "
-                        "a list of ten places, write all ten out here. Plain "
-                        "text, with real newlines between lines."
+                        "The full text to write. Write out what the user "
+                        "actually asked for, in full - never a placeholder."
                     ),
                 },
                 "pattern": {
                     "type": "string",
                     "description": (
-                        "Name fragment or glob, used by 'find' and by the "
-                        "batch actions, e.g. 'invoice' or '*.pdf'. For a batch "
-                        "action this picks which files in 'path' are affected; "
-                        "omit it to mean all of them."
+                        "Name fragment or glob, e.g. 'invoice' or '*.pdf'. "
+                        "Omit to mean every file."
                     ),
                 },
                 "new_name": {
                     "type": "string",
                     "description": (
-                        "Base name for 'batch_rename', e.g. 'holiday' turns the "
-                        "matches into 'holiday 1', 'holiday 2' and so on. Give "
-                        "the name only - each file keeps its own extension."
+                        "Base name for 'batch_rename': 'holiday' gives "
+                        "'holiday 1', 'holiday 2'. No extension."
                     ),
                 },
             },
@@ -277,12 +254,10 @@ TOOL_SPECS: list[ToolSpec] = [
     {
         "name": "backlog",
         "description": (
-            "The running list of things left unfinished - commands that were "
-            "interrupted, actions that failed, and reminders the user asked to "
-            "keep. E.V. adds to it automatically; use this tool when the user "
-            "asks about it. Handles 'what's still outstanding', 'add a "
-            "reminder to back up the photos', 'that one's done', 'clear the "
-            "list', 'go ahead and retry the first one'."
+            "The running list of unfinished things - interrupted commands, "
+            "failures, and reminders. E.V. adds to it by itself; use this "
+            "when the user asks: 'what's outstanding', 'remind me to back up "
+            "the photos', 'that one's done', 'retry the first one'."
         ),
         "parameters": {
             "type": "object",
@@ -290,26 +265,20 @@ TOOL_SPECS: list[ToolSpec] = [
                 "action": {
                     "type": "string",
                     "description": (
-                        "'list' reads back what is outstanding. 'add' stores a "
-                        "new reminder from 'text'. 'done' and 'drop' remove the "
-                        "item named by 'item'. 'clear' empties the whole list. "
-                        "'run' retries the stored command for an item."
+                        "'add' stores 'text'. 'done', 'drop' and 'run' act on "
+                        "'item'. 'clear' empties the list."
                     ),
                     "enum": ["list", "add", "done", "drop", "clear", "run"],
                 },
                 "text": {
                     "type": "string",
-                    "description": (
-                        "What to add, for 'add'. One short line, as the user "
-                        "would say it back to themselves."
-                    ),
+                    "description": "One short line, as the user would say it.",
                 },
                 "item": {
                     "type": "string",
                     "description": (
-                        "Which item to act on, for done, drop and run. A "
-                        "position as the user said it ('1', 'first', 'last') or "
-                        "a few words from the item itself."
+                        "A position ('first', 'last', '1') or a few words from "
+                        "the item."
                     ),
                 },
             },
@@ -319,11 +288,119 @@ TOOL_SPECS: list[ToolSpec] = [
     {
         "name": "remember",
         "description": (
-            "Keep a small fact about the user between sessions, or look one up "
-            "again. Use for 'remember that I take my coffee black', 'my main "
-            "project is the API repo', 'what do you know about me', 'forget "
-            "what I said about the editor'. Facts are short and survive a "
-            "reboot. Not for conversation history, which E.V. keeps anyway."
+            "Keep or recall a small fact about the user between sessions: "
+            "'remember I take my coffee black', 'what do you know about me', "
+            "'forget what I said about the editor'. Not for conversation "
+            "history, which E.V. keeps anyway."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "'set' needs key and value; 'get' and 'forget' need key.",
+                    "enum": ["set", "get", "forget", "list"],
+                },
+                "key": {
+                    "type": "string",
+                    "description": "One or two words: 'coffee', 'main project'.",
+                },
+                "value": {
+                    "type": "string",
+                    "description": "The fact itself, short.",
+                },
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "take_screenshot",
+        "description": (
+            "Look at the screen and answer a question about it: 'what's on "
+            "my screen', 'what does that error say'. Use it before any "
+            "mouse_action, so you aim at something you have seen."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": (
+                        "What to find out. Omit for a general description."
+                    ),
+                },
+                "region": {
+                    "type": "string",
+                    "description": (
+                        "Optional 'left,top,right,bottom' as fractions 0-1, to "
+                        "look closely at one part. Use it to read small text."
+                    ),
+                },
+                "save_as": {
+                    "type": "string",
+                    "description": (
+                        "Only if the user asked for the shot to be kept, e.g. "
+                        "'Pictures/bug.png'. Looking needs no file."
+                    ),
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "mouse_action",
+        "description": (
+            "Drive the real mouse. Screenshot first - never guess where "
+            "something is. No undo, so only when open_app, web_search, "
+            "browser_task and file_manager cannot do the job."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "What the mouse should do.",
+                    "enum": [
+                        "move",
+                        "click",
+                        "double_click",
+                        "right_click",
+                        "middle_click",
+                        "drag",
+                        "scroll",
+                    ],
+                },
+                "x": {
+                    "type": "string",
+                    "description": "Fraction across the screen: 0 left, 1 right.",
+                },
+                "y": {
+                    "type": "string",
+                    "description": "Fraction down the screen: 0 top, 1 bottom.",
+                },
+                "to_x": {"type": "string", "description": "Drag end x. 'drag' only."},
+                "to_y": {"type": "string", "description": "Drag end y. 'drag' only."},
+                "amount": {
+                    "type": "string",
+                    "description": "Scroll distance, ~400 a screenful. Negative is down.",
+                },
+                "label": {
+                    "type": "string",
+                    "description": (
+                        "Visible name of the target, e.g. 'the Save button'. "
+                        "Always fill it in - the user is asked to approve it."
+                    ),
+                },
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "keyboard_action",
+        "description": (
+            "Type text or send a hotkey to whatever has focus: 'type my "
+            "address', 'hit enter'. Screenshot first - the keys go wherever "
+            "the cursor already is."
         ),
         "parameters": {
             "type": "object",
@@ -331,27 +408,105 @@ TOOL_SPECS: list[ToolSpec] = [
                 "action": {
                     "type": "string",
                     "description": (
-                        "'set' stores key and value. 'get' looks a key up. "
-                        "'forget' drops one. 'list' reads back everything."
+                        "'type' writes 'text'. 'press' sends 'keys'."
                     ),
-                    "enum": ["set", "get", "forget", "list"],
+                    "enum": ["type", "press"],
                 },
-                "key": {
+                "text": {
+                    "type": "string",
+                    "description": "The exact characters to type, for 'type'.",
+                },
+                "keys": {
+                    "type": "string",
+                    "description": "e.g. 'enter', 'ctrl+s', 'alt+tab'.",
+                },
+                "label": {
                     "type": "string",
                     "description": (
-                        "What the fact is about, in one or two words: 'coffee', "
-                        "'editor', 'main project', 'name'."
-                    ),
-                },
-                "value": {
-                    "type": "string",
-                    "description": (
-                        "The fact itself, for 'set'. Short: 'black', 'VS Code', "
-                        "'the API repo'."
+                        "What this is for, in a few words. Shown to the user "
+                        "when it needs approving."
                     ),
                 },
             },
             "required": ["action"],
+        },
+    },
+    {
+        "name": "screen_task",
+        "description": (
+            "A whole desktop job: looks, acts, looks again. Opens apps, "
+            "focuses windows, clicks, types, sends shortcuts. Use it when a "
+            "request needs more than one of those: 'open Notepad and type "
+            "hello', 'open my project in VS Code and run the script'. State "
+            "the whole goal in one call. For a web page use browser_task."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": (
+                        "The whole goal in one sentence, so someone looking "
+                        "at the screen could tell it was done. Name the app "
+                        "and the file if you know them."
+                    ),
+                },
+                "max_steps": {
+                    "type": "string",
+                    "description": "Optional ceiling on how many actions it may take.",
+                },
+            },
+            "required": ["task"],
+        },
+    },
+    {
+        "name": "browser_task",
+        "description": (
+            "Automate a website through the page itself rather than by "
+            "clicking at pixels: navigate, fill forms, apply filters, click "
+            "by visible text, read results back. Use it for 'search Amazon "
+            "for a mouse and add the top one to my cart'. Prefer it over "
+            "screen_task for anything on the web; use web_search when the "
+            "user only wants a page opened to read."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": (
+                        "The whole errand in one sentence. It is shown in the "
+                        "confirmation question, so make it honest."
+                    ),
+                },
+                "url": {
+                    "type": "string",
+                    "description": (
+                        "The page to start on. A name like 'gmail' or "
+                        "'calendar' resolves on its own."
+                    ),
+                },
+                "steps": {
+                    "type": "string",
+                    "description": (
+                        "One action per line: 'verb target' or 'verb target = "
+                        "value'. Verbs: goto, click, fill, select, check, "
+                        "press, wait, scroll, read. A target with no CSS "
+                        "syntax matches visible text. 'read' returns every "
+                        "match; end with one to learn what is on the page. "
+                        "Example: 'goto amazon.co.uk' / 'fill #search = "
+                        "wireless mouse' / 'press Enter' / 'read .s-result-item'."
+                    ),
+                },
+                "headless": {
+                    "type": "boolean",
+                    "description": (
+                        "True to hide the browser. Default false so the user "
+                        "can watch."
+                    ),
+                },
+            },
+            "required": [],
         },
     },
     {
@@ -366,8 +521,8 @@ TOOL_SPECS: list[ToolSpec] = [
                 "reply": {
                     "type": "string",
                     "description": (
-                        "What to say out loud. One or two short sentences, "
-                        "about 25 words maximum, in E.V.'s dry voice."
+                        "What to say out loud. One or two short sentences, 25 "
+                        "words maximum, in E.V.'s dry voice."
                     ),
                 }
             },
@@ -376,6 +531,66 @@ TOOL_SPECS: list[ToolSpec] = [
     },
 ]
 
+
+
+# Names a model reaches for when it does not quite recall the schema. Groq
+# answered "open gmail and summarise the important mail" with a perfectly
+# sensible `browser_task` whose only argument was called `goal`, and since
+# `dispatch` filters to the declared properties, that call would have arrived
+# with nothing in it and browsed nowhere.
+#
+# This is a rename, never an addition: an alias is applied only when the tool
+# really declares the target property and nothing has already filled it, so
+# `TOOL_SPECS` stays the single source of truth and no tool can acquire an
+# argument it never described. Anything not listed here is still dropped.
+ARGUMENT_ALIASES: dict[str, str] = {
+    "goal": "task",
+    "objective": "task",
+    "instruction": "task",
+    "application": "app",
+    "program": "app",
+    "app_name": "app",
+    "args": "arguments",
+    "file": "path",
+    "filename": "path",
+    "filepath": "path",
+    "folder": "path",
+    "directory_path": "path",
+    "search": "query",
+    "search_query": "query",
+    "website": "url",
+    "link": "url",
+    "cmd": "command",
+    "key": "keys",
+    "hotkey": "keys",
+    "message": "text",
+    "body": "content",
+}
+
+
+def normalise_arguments(tool: str, arguments: dict) -> dict:
+    """Rename near-miss argument names onto the ones the tool declares.
+
+    Only for a property the tool actually has and that is not already set.
+    An unrecognised name is left alone for `dispatch` to drop, exactly as
+    before - this widens what a model can be understood to have meant, not
+    what a tool can be asked to do.
+    """
+    declared = _PROPERTIES.get(tool)
+    if not declared or not isinstance(arguments, dict):
+        return arguments
+
+    renamed = dict(arguments)
+    for alias, target in ARGUMENT_ALIASES.items():
+        if alias in renamed and target in declared and target not in renamed:
+            if alias not in declared:  # never rename a real property away
+                renamed[target] = renamed.pop(alias)
+    return renamed
+
+
+_PROPERTIES: dict[str, set[str]] = {
+    spec["name"]: set(spec["parameters"].get("properties", {})) for spec in TOOL_SPECS
+}
 
 TOOL_NAMES: frozenset[str] = frozenset(spec["name"] for spec in TOOL_SPECS)
 

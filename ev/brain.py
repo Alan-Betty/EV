@@ -19,6 +19,7 @@ Two rules here exist because breaking either one is audible:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -28,7 +29,7 @@ from typing import Any, Callable
 import httpx
 
 import config
-from tools.schemas import to_gemini_tools, to_openai_tools
+from tools.schemas import TOOL_NAMES, to_gemini_tools, to_openai_tools
 
 log = logging.getLogger("ev.brain")
 
@@ -37,7 +38,22 @@ SentenceHook = Callable[[str], None]
 
 
 class BrainError(RuntimeError):
-    """The model could not be reached or answered with something unusable."""
+    """The model could not be reached or answered with something unusable.
+
+    `tool_failure` marks one specific, recoverable case: the API accepted the
+    request but rejected the model's own tool call - either it emitted no call
+    at all under `tool_choice: required`, or it emitted arguments that were
+    not valid JSON. Groq returns both as a 400 with code `tool_use_failed`.
+
+    That distinction is load-bearing. A rejected tool call is not a broken
+    key or a dead network; the same request usually succeeds a second time
+    with the constraint relaxed, and failing it outright is what made a
+    perfectly ordinary request come back with nothing a user could act on.
+    """
+
+    def __init__(self, message: str, tool_failure: bool = False) -> None:
+        super().__init__(message)
+        self.tool_failure = tool_failure
 
 
 @dataclass
@@ -58,6 +74,86 @@ class Turn:
     user: str
     assistant: str
     observation: str = ""
+
+
+_DURATION = re.compile(r"(?:(\d+(?:\.\d+)?)m(?!s))?\s*(?:(\d+(?:\.\d+)?)s)?")
+
+
+def _retry_after(headers: Any) -> float | None:
+    """How long the server says to wait, in seconds, or None.
+
+    Groq answers in two shapes: a plain `retry-after` in seconds, and
+    `x-ratelimit-reset-tokens` as a duration like "2m52.8s" or "547ms". Both
+    are worth reading - guessing a backoff here would either give up while
+    the window was about to open or sit on a microphone for a minute.
+    """
+    plain = headers.get("retry-after")
+    if plain:
+        try:
+            return max(0.0, float(plain))
+        except ValueError:
+            pass
+
+    raw = (headers.get("x-ratelimit-reset-tokens") or "").strip().lower()
+    if not raw:
+        return None
+    if raw.endswith("ms"):
+        try:
+            return max(0.0, float(raw[:-2]) / 1000.0)
+        except ValueError:
+            return None
+    match = _DURATION.fullmatch(raw)
+    if not match or not any(match.groups()):
+        return None
+    minutes = float(match.group(1) or 0)
+    seconds = float(match.group(2) or 0)
+    return minutes * 60.0 + seconds
+
+
+def _salvage_tool_call(text: str) -> ToolCall | None:
+    """A prose reply that is really a tool call, rescued. None if it is prose.
+
+    The last rung of the ladder asks for words and sometimes gets JSON: the
+    model knew exactly which tool it wanted and simply wrote it in the
+    content field instead of the tool-call field. "Open Gmail and give me a
+    summary of the important mail" produced a flawless `browser_task` object
+    that way.
+
+    Speaking that is the worst of the three possible outcomes - worse than
+    the tool running, and worse than an honest "I couldn't do that", because
+    a speech synthesiser reads braces and quotation marks out loud. The
+    intent is right there in the reply, so take it.
+
+    Deliberately strict. The whole reply has to be one JSON object naming a
+    tool that exists, which is what keeps an ordinary chat answer that
+    happens to quote some JSON from being executed instead of spoken.
+    """
+    stripped = (text or "").strip()
+    if stripped.startswith("```"):
+        stripped = re.sub(r"^```[a-zA-Z]*\s*", "", stripped)
+        stripped = re.sub(r"\s*```$", "", stripped).strip()
+    if not stripped.startswith("{") or not stripped.endswith("}"):
+        return None
+
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+
+    name = parsed.get("name") or parsed.get("tool") or parsed.get("function")
+    if isinstance(name, dict):  # {"function": {"name": ..., "arguments": ...}}
+        parsed = name
+        name = parsed.get("name")
+    if not isinstance(name, str) or name not in TOOL_NAMES or name == "chat":
+        return None
+
+    arguments = parsed.get("arguments")
+    if arguments is None:
+        arguments = parsed.get("parameters")
+    log.info("Rescued a %s call the model wrote as prose", name)
+    return ToolCall(name, _coerce_arguments(arguments))
 
 
 def _coerce_arguments(raw: Any) -> dict[str, Any]:
@@ -296,8 +392,12 @@ class Brain:
                 return await self._decide_groq_streamed(
                     transcript, extra_context, on_sentence
                 )
-            except BrainError:
-                raise
+            except BrainError as exc:
+                if not exc.tool_failure:
+                    raise
+                # Recoverable: the plain call retries with the constraint
+                # relaxed and then, if needed, without tools at all.
+                log.info("Streamed tool call rejected; retrying without streaming")
             except Exception as exc:
                 # Streaming is an optimisation, never a dependency. A malformed
                 # SSE frame must not cost the user their answer.
@@ -314,12 +414,24 @@ class Brain:
         return prompt
 
     async def _post(self, url: str, payload: dict, headers: dict) -> dict:
-        try:
-            response = await self._client.post(url, json=payload, headers=headers)
-        except httpx.TimeoutException as exc:
-            raise BrainError("The model timed out.") from exc
-        except httpx.HTTPError as exc:
-            raise BrainError(f"Network error reaching the model: {exc}") from exc
+        attempts = max(0, config.LLM_RATE_LIMIT_RETRIES) + 1
+        for attempt in range(attempts):
+            try:
+                response = await self._client.post(url, json=payload, headers=headers)
+            except httpx.TimeoutException as exc:
+                raise BrainError("The model timed out.") from exc
+            except httpx.HTTPError as exc:
+                raise BrainError(f"Network error reaching the model: {exc}") from exc
+
+            if response.status_code != 429 or attempt == attempts - 1:
+                break
+
+            wait = _retry_after(response.headers)
+            if wait is None or wait > config.LLM_RATE_LIMIT_MAX_WAIT_S:
+                # Longer than anyone will stand at a microphone waiting.
+                break
+            log.info("Rate limited; waiting %.1fs before one retry", wait)
+            await asyncio.sleep(wait)
 
         self._raise_for_status(response.status_code, response.text)
 
@@ -333,8 +445,20 @@ class Brain:
         if status == 401:
             raise BrainError("API key rejected. Check the key in your .env file.")
         if status == 429:
-            raise BrainError("Rate limited. Give it a few seconds.")
+            # Only reached once the wait in `_post` has already been tried,
+            # so this really is "still busy" rather than "busy right now".
+            raise BrainError("I'm over my rate limit. Try that again shortly.")
         if status >= 400:
+            if "tool_use_failed" in body:
+                # The model's own tool call was rejected, not the request.
+                # Flagged so the caller can retry instead of surfacing it, and
+                # phrased as English because this string is spoken aloud if
+                # every retry fails - a raw JSON error body read out by a
+                # speech synthesiser is the worst possible answer.
+                raise BrainError(
+                    "That one tangled me up. Try it a simpler way?",
+                    tool_failure=True,
+                )
             raise BrainError(f"Model returned {status}: {body[:200]}")
 
     # -- Groq (OpenAI-compatible) ----------------------------------------
@@ -377,16 +501,31 @@ class Brain:
                 f"{config.GROQ_BASE_URL}/chat/completions", payload, headers
             )
         except BrainError as exc:
-            # Smaller models cannot always honour tool_choice=required and the
-            # API rejects the whole request rather than degrading. Retry once
-            # letting the model choose; a prose answer becomes a chat reply.
-            if "did not call a tool" not in str(exc):
+            # Groq rejects the whole request when the model's tool call is
+            # unusable - no call at all under `tool_choice: required`, or
+            # arguments that were not valid JSON. Both are the model
+            # stumbling, not the request being wrong, so neither is worth
+            # handing back to the user.
+            #
+            # Two rungs down. First let the model choose whether to call a
+            # tool; that alone fixes most of it. If even that comes back
+            # broken, drop the tools entirely and ask for prose, which becomes
+            # a spoken answer. A request like "open notepad and type the
+            # second largest word in the dictionary" reliably broke the tool
+            # call and, before this, ended the turn with nothing said at all.
+            if not exc.tool_failure:
                 raise
-            log.info("Model would not force a tool call; retrying with tool_choice=auto")
+            log.info("Model's tool call was rejected; retrying with tool_choice=auto")
             payload["tool_choice"] = "auto"
-            data = await self._post(
-                f"{config.GROQ_BASE_URL}/chat/completions", payload, headers
-            )
+            try:
+                data = await self._post(
+                    f"{config.GROQ_BASE_URL}/chat/completions", payload, headers
+                )
+            except BrainError as retry_exc:
+                if not retry_exc.tool_failure:
+                    raise
+                log.info("Tool call rejected twice; falling back to a prose answer")
+                return await self._plain_reply(transcript, extra_context)
 
         try:
             message = data["choices"][0]["message"]
@@ -402,8 +541,40 @@ class Brain:
 
         # `tool_choice: required` should prevent this, but models improvise.
         text = (message.get("content") or "").strip()
+        rescued = _salvage_tool_call(text)
+        if rescued is not None:
+            return rescued
         log.info("Groq answered with prose instead of a tool call")
         return ToolCall("chat", {"reply": text or "I didn't catch that."})
+
+    async def _plain_reply(self, transcript: str, extra_context: str) -> ToolCall:
+        """Answer in prose, with no tools offered at all.
+
+        The last rung of the ladder. Some requests reliably break the model's
+        tool-calling - usually because they ask a question and an action in
+        one breath - and when that happens twice, the useful thing left is the
+        answer to the question. Stripping the tools removes the thing that was
+        failing, so this call either produces words to say or a plain error,
+        never another unusable tool call.
+        """
+        payload = self._groq_payload(transcript, extra_context)
+        payload.pop("tools", None)
+        payload.pop("tool_choice", None)
+        headers = {"Authorization": f"Bearer {config.GROQ_API_KEY}"}
+        data = await self._post(
+            f"{config.GROQ_BASE_URL}/chat/completions", payload, headers
+        )
+        try:
+            text = (data["choices"][0]["message"].get("content") or "").strip()
+        except (KeyError, IndexError):
+            text = ""
+        rescued = _salvage_tool_call(text)
+        if rescued is not None:
+            return rescued
+        return ToolCall(
+            "chat",
+            {"reply": text or "I couldn't work out how to do that one."},
+        )
 
     async def _decide_groq_streamed(
         self, transcript: str, extra_context: str, on_sentence: SentenceHook
@@ -418,8 +589,13 @@ class Brain:
         payload = {**self._groq_payload(transcript, extra_context), "stream": True}
         headers = {"Authorization": f"Bearer {config.GROQ_API_KEY}"}
 
-        name = ""
-        arguments = ""
+        # Keyed by the index the API assigns each call. A model answering
+        # "open notepad and type X" emits two calls in one completion, and
+        # concatenating their argument fragments into one buffer produced
+        # `{"name": "notepad"}{"action": "create"}` - not valid JSON, so every
+        # argument was dropped and the tool ran on nothing. Only the first
+        # call is acted on, matching the non-streaming path.
+        calls: dict[int, dict[str, str]] = {}
         prose: list[str] = []
         emitter = _SentenceEmitter(on_sentence)
 
@@ -455,21 +631,35 @@ class Brain:
 
                     for call in delta.get("tool_calls") or []:
                         function = call.get("function") or {}
+                        try:
+                            index = int(call.get("index", 0))
+                        except (TypeError, ValueError):
+                            index = 0
+                        slot = calls.setdefault(index, {"name": "", "arguments": ""})
                         if function.get("name"):
-                            name = function["name"]
+                            slot["name"] = function["name"]
                         if function.get("arguments"):
-                            arguments += function["arguments"]
+                            slot["arguments"] += function["arguments"]
 
                     # Speaking starts here, mid-generation. This is the whole
                     # point of the streaming path.
-                    if name == "chat" and arguments:
-                        emitter.feed(partial_reply(arguments))
+                    first = calls.get(min(calls)) if calls else None
+                    if first and first["name"] == "chat" and first["arguments"]:
+                        emitter.feed(partial_reply(first["arguments"]))
         except httpx.TimeoutException as exc:
             raise BrainError("The model timed out.") from exc
         except httpx.HTTPError as exc:
             raise BrainError(f"Network error reaching the model: {exc}") from exc
 
-        if name:
+        if len(calls) > 1:
+            log.info(
+                "Model asked for %d tools in one turn; acting on the first",
+                len(calls),
+            )
+
+        first = calls.get(min(calls)) if calls else None
+        if first and first["name"]:
+            name, arguments = first["name"], first["arguments"]
             parsed = _coerce_arguments(arguments)
             if name == "chat":
                 reply = str(parsed.get("reply", "") or partial_reply(arguments)).strip()
@@ -478,9 +668,18 @@ class Brain:
             return ToolCall(name, parsed)
 
         text = "".join(prose).strip()
-        log.info("Groq streamed prose instead of a tool call")
-        emitter.flush(text)
-        return ToolCall("chat", {"reply": text or "I didn't catch that."})
+        if text:
+            log.info("Groq streamed prose instead of a tool call")
+            emitter.flush(text)
+            return ToolCall("chat", {"reply": text})
+
+        # Neither a tool call nor a word of prose. Groq does this when the
+        # model's own tool call was unusable: the stream simply ends empty,
+        # with no error frame to catch. Answering "I didn't catch that" here
+        # blamed the user for the model's stumble, so the plain call - which
+        # retries and then falls back to prose - gets its turn instead.
+        log.info("Streamed completion was empty; falling back to a plain call")
+        return await self._decide_groq(transcript, extra_context)
 
     # -- Gemini -----------------------------------------------------------
     async def _decide_gemini(self, transcript: str, extra_context: str) -> ToolCall:

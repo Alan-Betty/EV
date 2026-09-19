@@ -34,6 +34,17 @@ def _clean_query(query: str) -> str:
     return cleaned or query.strip()
 
 
+def _is_destination(engine: str) -> bool:
+    """True for an entry that is a place rather than a search.
+
+    "Open my email" names somewhere to go; there is nothing to put in a query
+    string. Those templates simply have no `{q}` in them, so the template is
+    its own test - no second list to keep in step with the first.
+    """
+    template = config.SEARCH_ENGINES.get(engine.lower(), "")
+    return bool(template) and "{q}" not in template
+
+
 def _build_url(query: str, engine: str) -> str:
     template = config.SEARCH_ENGINES.get(
         engine.lower(), config.SEARCH_ENGINES[config.DEFAULT_SEARCH_ENGINE]
@@ -76,6 +87,19 @@ def web_search(
         target = _normalise_url(url)
         spoken = re.sub(r"^https?://(www\.)?", "", target).split("/")[0]
         speech = f"Opening {spoken}."
+    elif _is_destination(engine):
+        # A place, not a search. This used to fall through to "Search for
+        # what, exactly?" when there was no query, so "open my email" got a
+        # question back instead of an inbox - and when there *was* a query,
+        # it built a search URL for a site that has no search endpoint.
+        target = config.SEARCH_ENGINES[engine.lower()]
+        speech = {
+            "mail": "Opening your mail.",
+            "gmail": "Opening Gmail.",
+            "outlook": "Opening Outlook.",
+            "calendar": "Opening your calendar.",
+            "drive": "Opening your drive.",
+        }.get(engine.lower(), f"Opening {engine}.")
     elif query and query.strip():
         cleaned = _clean_query(query)
         target = _build_url(cleaned, engine)
@@ -88,6 +112,11 @@ def web_search(
     else:
         return ToolResult.failure("Search for what, exactly?")
 
+    return _launch(target, speech, browser)
+
+
+def _launch(target: str, speech: str, browser: str) -> ToolResult:
+    """Open a URL in the named browser, falling back to the default one."""
     if browser != "default":
         if _open_in(browser, target):
             return ToolResult.success(speech, f"Opened {target} in {browser}")
