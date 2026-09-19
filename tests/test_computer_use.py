@@ -177,21 +177,60 @@ def test_computer_schemas_translate_to_both_providers():
 
 
 def test_gemini_schema_has_no_unsupported_keys():
-    """Gemini rejects any schema key outside its OpenAPI subset."""
+    """Gemini rejects any schema key outside its OpenAPI subset.
+
+    The walk has to know where it is. `properties` is a map of argument name
+    to schema, so its keys are `question` and `region`, not schema keywords -
+    checking them against the keyword list is the exact mistake that used to
+    live in `_strip_unsupported`, and an earlier version of this test made it
+    too. It passed only because the translator had already emptied
+    `properties` by the time the assertion ran, so the test was holding the
+    bug in place rather than catching it.
+    """
     allowed = {"type", "description", "properties", "required", "enum", "items", "nullable"}
 
     def walk(node):
-        if isinstance(node, dict):
-            assert set(node) <= allowed, f"unsupported keys: {set(node) - allowed}"
-            for value in node.values():
-                walk(value)
-        elif isinstance(node, list):
-            for item in node:
-                walk(item)
+        assert isinstance(node, dict)
+        assert set(node) <= allowed, f"unsupported keys: {set(node) - allowed}"
+        for name, sub in (node.get("properties") or {}).items():
+            assert isinstance(name, str) and name
+            walk(sub)
+        if "items" in node:
+            walk(node["items"])
 
     for decl in to_gemini_tools()[0]["functionDeclarations"]:
         if decl["name"] in COMPUTER_TOOLS:
             walk(decl["parameters"])
+
+
+def test_gemini_translation_keeps_every_declared_property():
+    """The arguments have to survive the trip, not just the tool names.
+
+    This is the regression that made the whole Gemini provider useless:
+    `_strip_unsupported` filtered the `properties` map's keys against the
+    schema-keyword list, so every tool reached Gemini as
+
+        {"type": "object", "properties": {}, "required": ["app"]}
+
+    and the API answered `required[0]: property is not defined` - correctly,
+    because by then it was not. Nothing about the tool *names* changed, so
+    every name-level check still passed while no tool could receive a single
+    argument.
+    """
+    declarations = {
+        decl["name"]: decl for decl in to_gemini_tools()[0]["functionDeclarations"]
+    }
+    for spec in TOOL_SPECS:
+        declared = set(spec["parameters"].get("properties", {}))
+        translated = set(
+            declarations[spec["name"]]["parameters"].get("properties", {})
+        )
+        assert translated == declared, f"{spec['name']} lost {declared - translated}"
+
+        # Anything named in `required` must actually be defined, which is the
+        # invariant Gemini itself enforces and the one that used to break.
+        for name in declarations[spec["name"]]["parameters"].get("required", []):
+            assert name in translated, f"{spec['name']}: required {name!r} not defined"
 
 
 def test_allowed_args_track_the_schema():
@@ -1218,3 +1257,122 @@ def test_max_steps_counts_actions_not_looks(monkeypatch):
     # six actions happened where four were asked for.
     done = result.detail.split("Done: ")[1].split(". Ask again")[0]
     assert len(done.split("; ")) == 4
+
+
+# ---------------------------------------------------------------------------
+# The vision token budget
+# ---------------------------------------------------------------------------
+# A vision step costs about 1900 against a per-minute budget, and - measured
+# on a live free key at quality 72 - the charge is flat in the size of the
+# frame: 1600px/46KB cost 1912, 960px/17KB cost 1949, 640px/7KB cost 1992.
+# Shrinking the image buys nothing, so the only economy a screen task has is
+# knowing when to stop. `SCREEN_TASK_MAX_STEPS` cannot express that, because
+# it counts steps rather than what they cost.
+def _budget(monkeypatch, value):
+    from tools import computer_use
+
+    monkeypatch.setattr(computer_use, "_budget_remaining", value)
+
+
+def test_the_budget_is_read_from_the_response_headers(monkeypatch):
+    from tools import computer_use
+
+    _budget(monkeypatch, None)
+    computer_use._note_budget({"x-ratelimit-remaining-tokens": "4321"})
+    assert computer_use.vision_budget() == 4321
+
+
+def test_an_unreadable_budget_header_leaves_the_last_reading_alone(monkeypatch):
+    """Total on purpose. A single odd response must not talk the loop into
+    believing it has an unlimited budget or none at all."""
+    from tools import computer_use
+
+    _budget(monkeypatch, 5000)
+    for headers in ({}, {"x-ratelimit-remaining-tokens": ""},
+                    {"x-ratelimit-remaining-tokens": "soon"}, None):
+        computer_use._note_budget(headers)
+        assert computer_use.vision_budget() == 5000
+
+
+def test_an_unknown_budget_is_not_treated_as_an_empty_one(monkeypatch):
+    """None is not zero. Gemini states no such header, and a provider that
+    says nothing must be met by the loop behaving exactly as it did before
+    any of this existed."""
+    _arm(monkeypatch)
+    _budget(monkeypatch, None)
+    prompts = _script(
+        monkeypatch,
+        [
+            '{"action": "click", "x": 0.5, "y": 0.5, "label": "a button"}',
+            '{"action": "done", "speech": "All set."}',
+        ],
+    )
+    result = screen_task(task="open settings")
+    assert result.ok
+    assert result.speech == "All set."
+    assert len(prompts) == 2
+
+
+def test_the_loop_stops_before_the_wall_rather_than_hitting_it(monkeypatch):
+    """The 429 it is avoiding arrives mid-task, with the desktop half way
+    through a job and nothing said about where it got to. Stopping one step
+    short leaves something to report and something to backlog."""
+    from tools import computer_use
+
+    _arm(monkeypatch)
+    _budget(monkeypatch, 8000)
+    monkeypatch.setattr(config, "VISION_BUDGET_FLOOR", 2200)
+
+    calls = {"n": 0}
+    original = _script(
+        monkeypatch,
+        ['{"action": "click", "x": 0.5, "y": 0.5, "label": "a button"}'],
+    )
+    real_vision = computer_use.ask_vision
+
+    def draining(frame, prompt, system=""):
+        calls["n"] += 1
+        # The first step leaves the window nearly empty, exactly as one real
+        # frame at ~1900 a time would.
+        computer_use._budget_remaining = 8000 - calls["n"] * 6500
+        return real_vision(frame, prompt, system)
+
+    monkeypatch.setattr(computer_use, "ask_vision", draining)
+
+    result = screen_task(task="open settings")
+    assert result.ok  # the clicks that happened really did happen
+    assert "give it a minute" in result.speech
+    assert "still needs doing" in result.detail
+    assert "1 step" in result.detail
+    assert len(original) == 1  # stopped before paying for a second look
+
+
+def test_the_first_look_is_always_attempted(monkeypatch):
+    """With no steps behind it there is nothing to hand back and nothing to
+    lose, so an empty window is left to the wait in `_post_json` rather than
+    refusing to look at all."""
+    _arm(monkeypatch)
+    _budget(monkeypatch, 10)
+    monkeypatch.setattr(config, "VISION_BUDGET_FLOOR", 2200)
+    prompts = _script(monkeypatch, ['{"action": "done", "speech": "Nothing to do."}'])
+    result = screen_task(task="open settings")
+    assert result.ok
+    assert result.speech == "Nothing to do."
+    assert len(prompts) == 1
+
+
+def test_a_zero_floor_switches_the_guard_off(monkeypatch):
+    _arm(monkeypatch)
+    _budget(monkeypatch, 1)
+    monkeypatch.setattr(config, "VISION_BUDGET_FLOOR", 0)
+    prompts = _script(
+        monkeypatch,
+        [
+            '{"action": "click", "x": 0.5, "y": 0.5, "label": "a button"}',
+            '{"action": "done", "speech": "All set."}',
+        ],
+    )
+    result = screen_task(task="open settings")
+    assert result.ok
+    assert result.speech == "All set."
+    assert len(prompts) == 2

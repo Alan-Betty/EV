@@ -209,18 +209,40 @@ class EV:
         words += [item.text for item in self.backlog.pending()[:5]]
         return words
 
+    def _user_name(self) -> str:
+        """What to call the user out loud.
+
+        A stored fact outranks the configured default, so "remember my name is
+        Al" changes the greeting from the next start onwards without anyone
+        touching `.env`. Both are optional: with neither, the greeting simply
+        drops the name rather than addressing the user as an empty string.
+        """
+        for key in ("name", "user name", "my name"):
+            stored = self.memory.recall(key)
+            if stored:
+                return stored.strip()
+        return config.USER_NAME.strip()
+
     async def _report_state(self) -> None:
-        """Say what carried over from last time, if anything did.
+        """Say what carried over from last time.
 
         Spoken, because the whole point of a backlog is being told about it
-        rather than having to go and look. Silent on a clean, recent restart -
-        being greeted every time you restart a process gets old fast.
+        rather than having to go and look.
+
+        The greeting itself is not conditional on there being news. A voice
+        assistant that starts up silent is indistinguishable from one that
+        failed to start, and the user is looking at a terminal rather than at
+        a status light.
         """
         report = self._boot_report
         if report is None:
             return
 
-        greeting = report.greeting
+        greeting = (
+            report.greeting_for(self._user_name())
+            if config.GREET_ON_START
+            else report.greeting
+        )
         if greeting:
             await self.say(greeting)
 
@@ -228,6 +250,13 @@ class EV:
         if summary:
             await self.say(summary)
             self.ui.note(self.backlog.listing())
+
+        # The user's own list, after E.V.'s. They are different things and
+        # saying so in two sentences is what keeps them from sounding like
+        # one merged pile of unfinished business.
+        todos = self.memory.todo_summary()
+        if todos:
+            await self.say(todos)
 
     async def start(self) -> None:
         # Warm the TTS stack while the microphone calibrates, so neither cost
@@ -241,6 +270,10 @@ class EV:
             if not self.text_mode:
                 self.mic = Microphone()
                 await asyncio.to_thread(self.mic.open)
+                # Clear the level history as each reply starts playing. The
+                # tail of the user's own command is still counted as recent
+                # speech otherwise, and E.V. barges in on its own first word.
+                self.speaker.on_playback_start = self.mic.reset_levels
                 with self.ui.status("Calibrating to room noise..."):
                     await asyncio.to_thread(self.mic.calibrate)
         finally:
@@ -318,11 +351,10 @@ class EV:
         try:
             with self.ui.status("Transcribing..."):
                 transcript = await self.transcriber.transcribe(utterance.wav)
-            # Feeds the next utterance's decoding prompt: names and jargon
-            # carry across a conversation, and Whisper reads the prompt as
-            # text immediately preceding the audio.
-            if transcript and not transcript.rejected:
-                self.transcriber.note_transcript(transcript)
+            # Deliberately *not* fed to the decoding prompt here. That
+            # happens in `_route`, once E.V. knows the words were meant for
+            # it: a conversation happening across the room would otherwise
+            # steer the recogniser for the command that follows it.
             return transcript
         except TranscriptionError as exc:
             log.warning("Transcription failed: %s", exc)
@@ -385,17 +417,43 @@ class EV:
     async def _watch_for_barge_in(self) -> None:
         """Cut playback the moment the user starts talking over E.V.
 
-        Deliberately conservative. On speakers rather than headphones, E.V.
-        hears itself, so this waits for speech that is both sustained and
-        louder than its own tail before giving up the floor.
+        Two independent conditions, because either one alone has a failure
+        mode that makes E.V. unusable in the opposite direction:
+
+        * **Sustained.** A door closing is loud and over in one frame.
+          `BARGE_IN_FRAMES` is what stops a cough taking the floor.
+        * **Louder than E.V.** On loudspeakers E.V. hears its own voice, which
+          is a long, steady run of speech-looking frames - exactly what the
+          frame count is looking for. Left at that, E.V. interrupts itself on
+          every single reply. The level test is what separates the user from
+          the loopback.
+
+        On a trigger the queued audio is *kept* rather than flushed. Those
+        frames are the opening of the user's sentence, and throwing them away
+        makes them say it twice - which is the thing barge-in exists to stop.
         """
         if self.mic is None:
             return
-        await asyncio.sleep(0.6)  # ignore the attack of E.V.'s own first word
+        # E.V.'s own attack is the loudest thing this microphone will hear all
+        # sentence. Cutting itself off on its own first syllable is the one
+        # barge-in failure with no recovery, so the grace period comes first.
+        await asyncio.sleep(config.BARGE_IN_GRACE_S)
+        threshold = self.mic.noise_floor * config.BARGE_IN_LEVEL_MULTIPLIER
         while self.speaker.speaking:
-            if self.mic.speech_energy() >= config.BARGE_IN_FRAMES:
-                log.info("Barge-in detected; stopping playback")
+            if (
+                self.mic.speech_energy() >= config.BARGE_IN_FRAMES
+                and self.mic.speech_level() >= threshold
+            ):
+                log.info(
+                    "Barge-in: %d frames at %.4f (floor %.4f)",
+                    self.mic.speech_energy(),
+                    self.mic.speech_level(),
+                    self.mic.noise_floor,
+                )
+                if config.BARGE_IN_KEEP_AUDIO:
+                    self.mic.hold_audio()
                 self.speaker.stop()
+                self.ui.note("Go ahead.")  # drawn, never spoken
                 return
             await asyncio.sleep(0.05)
 
@@ -463,16 +521,29 @@ class EV:
         if not transcript:
             return
 
-        if not self.text_mode:
-            self.ui.user(transcript, engaged=self.session.engaged)
-
         if self.text_mode and transcript.lower() in {"quit", "exit"}:
             self.request_stop()
             return
 
+        # The wake check comes *before* the echo, and that order is the whole
+        # point. Drawn first, every sentence spoken near the microphone
+        # appeared on screen under a "you >" prompt whether or not it was
+        # addressed to E.V. - so a conversation with somebody else in the room
+        # was transcribed into E.V.'s terminal, looked like it had been heard
+        # and understood, and then got no reply. Silence is the correct answer
+        # to something that was not said to you, and it has to look like
+        # silence too.
+        engaged = self.session.engaged
         command = self._extract_command(transcript)
         if command is None:
             return
+
+        if not self.text_mode:
+            # `engaged` is read before `_extract_command`, which engages the
+            # session on a wake phrase - otherwise the marker would claim the
+            # conversation was already open when this utterance is what opened
+            # it.
+            self.ui.user(transcript, engaged=engaged)
 
         await self._route(transcript, command)
 
@@ -484,6 +555,13 @@ class EV:
         already been transcribed and echoed; re-listening for it would make
         the user say it twice.
         """
+        # Names and jargon carry across a conversation, and Whisper reads the
+        # decoding prompt as text immediately preceding the audio. Fed here
+        # rather than at transcription time, so only words that were actually
+        # meant for E.V. shape what it expects to hear next.
+        if transcript and not getattr(transcript, "rejected", False):
+            self.transcriber.note_transcript(transcript)
+
         # Checked only once E.V. knows it was being spoken to. A rejected
         # transcript from across the room should stay silent, exactly like any
         # other utterance that was not addressed here.
@@ -998,6 +1076,15 @@ class EV:
         # One-shot mode skips `start`, but it still wants the user's stored
         # preferences and the open backlog in context.
         self._boot()
+        # And it still needs a model that exists. Skipping this is what made
+        # `--say` answer a perfectly ordinary command with a 404 from a model
+        # name the interactive path would have quietly fallen back from.
+        try:
+            await self.brain.verify_model()
+        except BrainError as exc:
+            self.ui.error(str(exc))
+            self._running = False
+            return
         try:
             intent = match_intent(command, self.session.mode)
             if intent is not None:
@@ -1071,6 +1158,29 @@ def check_config() -> int:
                                 f"fallback matched. Set EV_GROQ_MODEL to one of: "
                                 f"{', '.join(usable) or 'none'}"
                             )
+
+                    # How many separate token budgets this key actually has.
+                    # Groq meters tokens per minute per model, so this is the
+                    # number that decides how many commands fit in a minute -
+                    # and it is the first thing worth knowing when someone is
+                    # hitting rate limits. One bucket is worth saying out
+                    # loud, because it is a fixable state rather than a fact.
+                    probe = Brain.__new__(Brain)
+                    probe._build_rotation(available)
+                    rotation = probe._groq_rotation
+                    per_minute = 8000 * len(rotation)
+                    if len(rotation) > 1:
+                        notes.append(
+                            f"OK   token buckets: {len(rotation)} "
+                            f"({', '.join(rotation)}) - Groq meters per model, "
+                            f"so that is ~{per_minute} tokens a minute, not 8000"
+                        )
+                    else:
+                        notes.append(
+                            "WARN token buckets: 1. Groq meters tokens per minute "
+                            "per model, so a second usable model on this key would "
+                            "double the budget. Add one to EV_GROQ_MODEL_ROTATION."
+                        )
                 elif response.status_code == 401:
                     problems.append("MISS brain: Groq rejected the API key")
             except Exception as exc:

@@ -25,7 +25,7 @@ import httpx  # noqa: E402
 
 import config  # noqa: E402
 from ev.brain import Brain, BrainError  # noqa: E402
-from tools.schemas import TOOL_NAMES, TOOL_SPECS  # noqa: E402
+from tools.schemas import CORE_TOOLS, TOOL_NAMES, TOOL_SPECS  # noqa: E402
 
 # The environment variables above only reach `config` if this module is the
 # first one to import it, which depends on the order pytest happens to collect
@@ -114,8 +114,15 @@ def test_groq_request_shape_and_tool_parsing():
     assert body["tool_choice"] == "required"
     assert body["messages"][0]["role"] == "system"
     assert "E.V." in body["messages"][0]["content"]
+    # Not every tool any more: the schema is filtered per utterance, because
+    # sending all of it cost ~2830 of the ~4400 tokens a turn spends against
+    # a per-minute budget. What must hold is that the filter is a subset of
+    # the real tools, that the core set is always in it, and that the tool
+    # this utterance actually needs survived the cut.
     names = {tool["function"]["name"] for tool in body["tools"]}
-    assert names == set(TOOL_NAMES)
+    assert names <= set(TOOL_NAMES)
+    assert set(CORE_TOOLS) <= names
+    assert "open_app" in names
 
 
 def test_gemini_request_shape_and_function_call_parsing():
@@ -143,7 +150,15 @@ def test_gemini_request_shape_and_function_call_parsing():
         body = json.loads(request.content)
         assert body["toolConfig"]["functionCallingConfig"]["mode"] == "ANY"
         assert "systemInstruction" in body
-        assert len(body["tools"][0]["functionDeclarations"]) == len(TOOL_SPECS)
+        declared = {
+            decl["name"] for decl in body["tools"][0]["functionDeclarations"]
+        }
+        # Subset, like the Groq path - and selected by the same call, so a
+        # turn that fails over from one provider to the other is offered the
+        # same tools in both dialects rather than losing one on the way.
+        assert declared <= {spec["name"] for spec in TOOL_SPECS}
+        assert set(CORE_TOOLS) <= declared
+        assert "web_search" in declared
 
     finally:
         config.LLM_PROVIDER = "groq"

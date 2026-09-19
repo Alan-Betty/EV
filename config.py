@@ -96,11 +96,62 @@ GROQ_MODEL_FALLBACKS = [
 ]
 GROQ_BASE_URL = _env("EV_GROQ_BASE_URL", "https://api.groq.com/openai/v1")
 
+# Groq's free tier meters tokens per minute *per model*, not per account, so
+# a second model on the same key is a second budget. Measured on a free key:
+# burning 1500 tokens on `openai/gpt-oss-20b` took `gpt-oss-20b` from 7927 to
+# 6427 and left `openai/gpt-oss-120b` sitting at its full 7927.
+#
+# `GROQ_MODEL_FALLBACKS` cannot do this job and was never meant to. It is an
+# availability ladder, walked once at startup by `verify_model` to find a
+# model that exists, and never consulted again - so a 429 half way through a
+# session stayed on the exhausted model until the minute was up. This is the
+# runtime one: a rate limit moves E.V. to the next budget.
+#
+# The move is *sticky*, and that is the opposite of how provider failover
+# behaves. Failover lasts one turn because the other provider is a worse fit
+# and the session should come home. These buckets are equivalent, and the one
+# just abandoned needs a full minute to refill, so hopping back on the next
+# utterance would land straight back in the wall. Rotation wraps, so a long
+# enough session returns to the first model once it has recovered.
+#
+# Empty means "derive from GROQ_MODEL plus GROQ_MODEL_FALLBACKS", pruned at
+# startup against the models this account actually has.
+GROQ_MODEL_ROTATION = [
+    name.strip()
+    for name in _env("EV_GROQ_MODEL_ROTATION", "").split(",")
+    if name.strip()
+]
+# Rotating the brain onto the vision model would defeat the whole point: they
+# would share one bucket, and a screen task would empty it for both.
+GROQ_ROTATION_AVOIDS_VISION = _env_bool("EV_GROQ_ROTATION_AVOIDS_VISION", True)
+
 GEMINI_API_KEY = _env("GEMINI_API_KEY")
-GEMINI_MODEL = _env("EV_GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = _env("EV_GEMINI_MODEL", "gemini-flash-latest")
+# Gemini's catalogue is per-account in the same way Groq's is, and worse: a
+# model can be listed by `/models` and still answer `generateContent` with a
+# 404 saying it "is no longer available to new users". Listing is therefore
+# not proof, so the ladder is walked with real requests, exactly as Groq's is.
+GEMINI_MODEL_FALLBACKS = [
+    name.strip()
+    for name in _env(
+        "EV_GEMINI_MODEL_FALLBACKS",
+        "gemini-flash-latest,gemini-3.6-flash,gemini-2.5-flash,gemini-2.5-flash-lite",
+    ).split(",")
+    if name.strip()
+]
 GEMINI_BASE_URL = _env(
     "EV_GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"
 )
+
+# When the configured provider is rate limited for longer than it is worth
+# waiting out, try the other one rather than telling the user to come back
+# later. Both providers are described by the same `TOOL_SPECS`, so the second
+# request is the same request in a different dialect - there is nothing to
+# reconcile afterwards and the session carries on uninterrupted.
+#
+# Off if the other provider has no key, which is checked at call time rather
+# than here so that a key added to `.env` mid-session is picked up on reload.
+LLM_PROVIDER_FAILOVER = _env_bool("EV_LLM_PROVIDER_FAILOVER", True)
 
 LLM_TEMPERATURE = _env_float("EV_LLM_TEMPERATURE", 0.4)
 LLM_MAX_TOKENS = _env_int("EV_LLM_MAX_TOKENS", 400)
@@ -119,6 +170,14 @@ HISTORY_TURNS = _env_int("EV_HISTORY_TURNS", 6)
 # Stream the completion so speech can start on the first finished sentence
 # instead of after the last token. Falls back to a plain call on any error.
 LLM_STREAMING = _env_bool("EV_LLM_STREAMING", True)
+# Offer the model only the tools this utterance plausibly needs, instead of
+# all of them every time. The full schema is ~2830 tokens of the ~4400 a real
+# turn costs, so this is the single largest lever on how many commands fit in
+# a minute; measured over a spread of ordinary utterances it removes about
+# 70% of the schema. `tools.schemas.select_tools` picks the set, `chat` and
+# the other core tools are always in it, and a miss costs one retry with the
+# full schema rather than the user's request. Turn it off to send everything.
+TOOL_SUBSET_ENABLED = _env_bool("EV_TOOL_SUBSET_ENABLED", True)
 # How much of a tool result is replayed to the model next turn. Kept short:
 # it is context, not a transcript, and it never enters the assistant role.
 HISTORY_OBSERVATION_CHARS = _env_int("EV_HISTORY_OBSERVATION_CHARS", 400)
@@ -266,6 +325,23 @@ TTS_BARGE_IN = _env_bool("EV_TTS_BARGE_IN", True)
 # Consecutive speech-looking frames required before E.V. yields the floor.
 # Higher is safer on loudspeakers, where E.V. hears its own voice.
 BARGE_IN_FRAMES = _env_int("EV_BARGE_IN_FRAMES", 8)
+# How much louder than the room the user has to be before E.V. treats it as
+# an interruption rather than as its own voice coming back through the
+# speakers. On headphones 1.0 would do; on a laptop the loopback is the whole
+# problem, and a multiplier is what separates "someone spoke" from "E.V. is
+# audible". Frame count and loudness are both required, because either one on
+# its own has a failure mode: a count alone trips on E.V.'s own steady
+# output, and a level alone trips on a door closing.
+BARGE_IN_LEVEL_MULTIPLIER = _env_float("EV_BARGE_IN_LEVEL_MULTIPLIER", 1.8)
+# Ignore the first moments of playback. E.V.'s own attack is the loudest thing
+# the microphone will hear all sentence, and cutting itself off on its own
+# first syllable is the one barge-in failure that makes E.V. unusable.
+BARGE_IN_GRACE_S = _env_float("EV_BARGE_IN_GRACE_S", 0.6)
+# Keep the audio that triggered a barge-in instead of flushing it. Without
+# this the user's first word is captured, thrown away by the flush at the top
+# of `listen`, and they have to start the sentence again - which is precisely
+# the thing barge-in exists to avoid.
+BARGE_IN_KEEP_AUDIO = _env_bool("EV_BARGE_IN_KEEP_AUDIO", True)
 
 # Short replies repeat constantly, and synthesis is a ~0.8s network round
 # trip. Caching them on disk makes a repeat reply play more or less instantly.
@@ -343,6 +419,13 @@ GROQ_VISION_FALLBACKS = [
     ).split(",")
     if name.strip()
 ]
+# True when the user named a vision model themselves. `Brain.verify_model` can
+# change `GEMINI_MODEL` at runtime after a 404, and this is what says whether
+# the vision model should follow it: a derived default should, an explicit
+# choice should not. Without this, `verify_model` moved the brain onto a
+# working model and left every screenshot pointed at the dead one, which read
+# as "E.V. can talk but has gone blind".
+GEMINI_VISION_MODEL_PINNED = bool(_env("EV_GEMINI_VISION_MODEL"))
 GEMINI_VISION_MODEL = _env("EV_GEMINI_VISION_MODEL", "") or GEMINI_MODEL
 # A 4K frame is ~8 MB raw and buys nothing: the model reads a button at 1280px
 # just as well, the upload is a fifth of the size, and the peak allocation
@@ -370,6 +453,33 @@ VISION_GRID_DIVISIONS = _env_int("EV_VISION_GRID_DIVISIONS", 10)
 # resolution. It is how small text gets read on a 4K display, where the
 # whole-screen frame has thrown away the pixels the words were made of.
 VISION_ZOOM_MAX_WIDTH = _env_int("EV_VISION_ZOOM_MAX_WIDTH", 1400)
+
+# A screen task is the most expensive thing E.V. does against a per-minute
+# token budget, and the frame is nearly all of it. Groq's limiter does not
+# charge what the model reports: a step comes back saying `prompt_tokens:
+# 783` while the remaining-token header drops by about 1900, because the
+# meter is counting the request rather than the tokens the model saw. Four
+# steps empty an 8000-token minute.
+#
+# The charge is also flat in the size of the frame, which is worth writing
+# down because the obvious economy does not work. Measured on one key at
+# quality 72: 1600px/46KB cost 1912, 960px/17KB cost 1949, 800px/11KB cost
+# 1968. Shrinking the image by four times bought nothing at all, so sending
+# a narrower frame when the budget runs low would spend the coordinate
+# accuracy that `VISION_TASK_MAX_WIDTH` exists to buy and get no tokens back
+# for it. Don't add that; it has been tried.
+#
+# What is left is knowing when to stop. `SCREEN_TASK_MAX_STEPS` counts steps
+# rather than what they cost, so a sixteen-step ceiling was really a
+# four-step one with a 429 on the end - and that 429 lands mid-task, with the
+# desktop half way through a job and nothing said about where it got to.
+# Groq states what is left in the response headers, so the loop stops one
+# step short and hands back what it managed, which the core loop backlogs
+# like any other unfinished work.
+#
+# The floor is one frame's charge plus enough headroom for the reply. Set it
+# to 0 to switch this off and take the 429 instead.
+VISION_BUDGET_FLOOR = _env_int("EV_VISION_BUDGET_FLOOR", 2200)
 
 
 # ---------------------------------------------------------------------------
@@ -530,6 +640,20 @@ MEMORY_TOUCH_INTERVAL_S = _env_float("EV_MEMORY_TOUCH_INTERVAL_S", 30.0)
 # Gaps shorter than this are not worth a "welcome back" - restarting E.V.
 # twice in a minute should not be greeted like a homecoming.
 MEMORY_MIN_GAP_S = _env_float("EV_MEMORY_MIN_GAP_S", 900.0)
+# The standing to-do list. Bounded like the fact store, and for the same
+# reason: the open items ride in the system prompt on every single turn.
+MEMORY_MAX_TODOS = _env_int("EV_MEMORY_MAX_TODOS", 50)
+# How many of those open items the model is actually shown. The list may
+# legitimately be long; the prompt may not.
+MEMORY_CONTEXT_TODOS = _env_int("EV_MEMORY_CONTEXT_TODOS", 8)
+
+# What E.V. calls the user out loud. Overridden by a `name` stored through
+# `remember_fact`, so "call me Al" outranks the file - the value here is only
+# the starting point.
+USER_NAME = _env("EV_USER_NAME", "Alan")
+# Greet by name on every start, not only after a long gap. The gap-based
+# greeting stays quiet on a quick restart; this one is the front door.
+GREET_ON_START = _env_bool("EV_GREET_ON_START", True)
 
 # Index every Start Menu shortcut, so E.V. can launch programs that were never
 # added to PATH and were never written into APP_ALIASES. Cached in STATE_DIR
@@ -712,18 +836,19 @@ Windows desktop and you have real control over it. You are consumer-grade kit, \
 not a billionaire's war computer, and you have made your peace with that.
 
 WHO YOU ARE
-You are the competent friend who has already done the thing while everyone \
-else was still discussing it. Dry, fast, unbothered. You have opinions and you \
-share them in about four words. You are on the user's side completely, which \
-is exactly why you are willing to tell them when an idea is bad.
+You are the friend who has already done the thing while everyone else was \
+still discussing it, and who is glad to see the user either way. Warm, quick, \
+unbothered. Opinions in about six words. You are on the user's side \
+completely, which is exactly why you will tell them when an idea is bad.
 
-Your humour is deadpan and it comes from being unimpressed, never from being \
-mean. You tease the user the way a good friend does - briefly, then you do the \
-thing anyway. You never sulk, never lecture, and never make a joke that costs \
-the user a second of their time.
+Your humour is dry and always on the user's side - you joke with them, never \
+at them. You tease the way a good friend does: briefly, warmly, then you do \
+the thing anyway. When they are tired or stuck, say so like a person would, \
+not like a wellness app. Never sulk, never lecture, never pile on.
 
 HOW YOU TALK
-- One sentence. Two if the second one earns it. Under twenty words.
+- Two sentences. Three if the third earns it. Under thirty-five words. It is \
+read aloud before they can reply, so spend length on warmth, never padding.
 - Lead with the outcome. "Chrome's up." not "I have opened Chrome for you."
 - Plain spoken English. It is being read aloud: no markdown, no bullets, no \
 emoji, no URLs, no code, no file paths spelled out letter by letter.
@@ -733,6 +858,8 @@ you are about to do. Do it, then say it is done.
 - Never say "Certainly", "Of course", "I'd be happy to", "Let me", or "As an \
 AI". No apologising for things that are not your fault.
 - Vary your acknowledgements. Not every reply is "Done."
+- A joke rides along with the answer, never instead of it. If the funny \
+version is longer, say the useful one.
 - Your reply is fed straight to a speech synthesiser and read aloud \
 exactly as written. Never prefix it with a label of any kind: no "Spoke:", \
 no "E.V.:", no "Response:", "Reply:", "Answer:" or "Assistant:". No quote \
@@ -741,17 +868,18 @@ the words you want said.
 
 TONE EXAMPLES - match this register
 User: "open chrome and find me a gaming mouse"
-You: "Chrome's up, mice incoming."
+You: "Chrome's up. Let's find you one with an unreasonable number of buttons."
 User: "what's my python version"
-You: "Three thirteen point two. Modern of you."
+You: "Three thirteen point two. You're current, nice."
 User: "delete the whole build folder"
-You: "That wipes the folder. Sure?"
+You: "That wipes the folder. Confirm?"
 User: "thanks"
-You: "Mm-hm."
-User: "can you write my entire app for me"
-You: "Bold. Narrow it down and I'll start."
+You: "Anytime."
 User: "I've been up for nineteen hours"
-You: "That's a you problem. Want me to open the coffee shop map?"
+You: "Nineteen. That's a lot of hours. Want a coffee shop, or are we \
+pretending that's fine?"
+User: "that didn't work"
+You: "Yeah, I see it. Let me try it the other way round."
 User: "what's the meaning of life"
 You: "Above my pay grade. Want me to search it?"
 

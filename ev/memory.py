@@ -153,6 +153,31 @@ class StartupReport:
             return ""
         return f"Welcome back. You were offline for {self.offline_phrase}."
 
+    def greeting_for(self, name: str = "") -> str:
+        """The spoken welcome, led by the user's name.
+
+        Distinct from `greeting`, which stays quiet on a quick restart because
+        being greeted like a homecoming every time a process restarts gets old
+        fast. This one is the front door: it is said on every start, because a
+        voice assistant that comes up silent is indistinguishable from one
+        that did not come up at all.
+
+        Plain speech, no labels - it reaches `Speaker.say` by the same path as
+        any other reply. The gap clause is appended only when there is a gap
+        worth mentioning, so a restart says "Welcome back, Alan." and nothing
+        more.
+        """
+        who = (name or "").strip()
+        opening = f"Welcome back, {who}." if who else "Welcome back."
+
+        if self.first_run:
+            return opening
+        if not self.clean_shutdown:
+            return f"{opening} Last session ended badly, {self.offline_phrase} ago."
+        if self.offline_seconds < config.MEMORY_MIN_GAP_S:
+            return opening
+        return f"{opening} You were offline for {self.offline_phrase}."
+
     @property
     def context(self) -> str:
         """The same facts, written for the model rather than for the speaker."""
@@ -191,6 +216,12 @@ class Memory:
             "version": SCHEMA_VERSION,
             "profile": {},
             "preferences": {},
+            # A standing to-do list, distinct from `ev.backlog`. The backlog is
+            # what E.V. failed to finish and files by itself; this is what the
+            # user asked to be kept. Mixing them would put "remind me to call
+            # the dentist" next to a cancelled file copy, and let "clear the
+            # backlog" quietly delete the dentist.
+            "todos": [],
             "state": {
                 "last_active": 0.0,
                 "clean_shutdown": True,
@@ -209,6 +240,20 @@ class Memory:
             value = loaded.get(section)
             if isinstance(value, dict):
                 merged[section].update(value)
+        # A list, not a dict, and every row is rebuilt rather than trusted.
+        # This file can be hand-edited, and one malformed row must not be the
+        # difference between booting and not booting.
+        todos = loaded.get("todos")
+        if isinstance(todos, list):
+            merged["todos"] = [
+                {
+                    "text": str(row.get("text", "")).strip(),
+                    "done": bool(row.get("done", False)),
+                    "added": float(row.get("added") or 0.0),
+                }
+                for row in todos
+                if isinstance(row, dict) and str(row.get("text", "")).strip()
+            ]
         self._data = merged
 
     def save(self) -> bool:
@@ -323,9 +368,103 @@ class Memory:
         return True
 
     def clear(self) -> None:
+        """Drop every remembered fact. Deliberately leaves the to-do list.
+
+        "Forget what you know about me" is about preferences, not about the
+        errands the user asked to be held. Losing those to a phrase aimed at
+        something else is the kind of data loss nobody forgives.
+        """
         self._data["preferences"].clear()
         self._data["profile"].clear()
         self.save()
+
+    # -- to-do list -------------------------------------------------------
+    @property
+    def todos(self) -> list[dict[str, Any]]:
+        """Every entry, done and not, oldest first."""
+        return [dict(row) for row in self._data["todos"]]
+
+    def open_todos(self) -> list[str]:
+        return [row["text"] for row in self._data["todos"] if not row.get("done")]
+
+    def add_todo(self, item: str) -> bool:
+        """Append one errand. A duplicate is a no-op, not a second row."""
+        text = (item or "").strip()
+        if not text:
+            return False
+        for row in self._data["todos"]:
+            if row["text"].lower() == text.lower() and not row.get("done"):
+                return True  # already listed; holding it twice helps nobody
+        self._data["todos"].append({"text": text, "done": False, "added": time.time()})
+
+        # Bounded for the same reason the fact store is: the open items ride in
+        # the system prompt, so an unbounded list is an unbounded prompt.
+        # Completed rows go first - they have already served their purpose.
+        overflow = len(self._data["todos"]) - config.MEMORY_MAX_TODOS
+        if overflow > 0:
+            done = [i for i, r in enumerate(self._data["todos"]) if r.get("done")]
+            for index in sorted(done[:overflow], reverse=True):
+                self._data["todos"].pop(index)
+                overflow -= 1
+            if overflow > 0:
+                del self._data["todos"][:overflow]
+        return self.save()
+
+    def _match_todo(self, item: str) -> int:
+        """Index of the row the user means, or -1.
+
+        Speech says "the first one" far more often than it quotes an errand
+        back word for word, so a 1-based position into the *open* items is the
+        primary form and a substring match is the fallback.
+        """
+        ref = (item or "").strip().lower()
+        if not ref:
+            return -1
+        open_rows = [i for i, r in enumerate(self._data["todos"]) if not r.get("done")]
+
+        if ref == "last":
+            return open_rows[-1] if open_rows else -1
+
+        ordinals = {"first": 1, "1st": 1, "second": 2, "2nd": 2, "third": 3, "3rd": 3}
+        position = ordinals.get(ref)
+        if position is None and ref.isdigit():
+            position = int(ref)
+        if position is not None:
+            if 1 <= position <= len(open_rows):
+                return open_rows[position - 1]
+            return -1
+
+        for index in open_rows:
+            if ref in self._data["todos"][index]["text"].lower():
+                return index
+        for index, row in enumerate(self._data["todos"]):
+            if ref in row["text"].lower():
+                return index
+        return -1
+
+    def complete_todo(self, item: str) -> str:
+        """Mark one errand done. Returns its text, or "" if nothing matched."""
+        index = self._match_todo(item)
+        if index < 0:
+            return ""
+        self._data["todos"][index]["done"] = True
+        self.save()
+        return self._data["todos"][index]["text"]
+
+    def drop_todo(self, item: str) -> str:
+        """Remove one errand outright. Returns its text, or ""."""
+        index = self._match_todo(item)
+        if index < 0:
+            return ""
+        removed = self._data["todos"].pop(index)
+        self.save()
+        return removed["text"]
+
+    def clear_todos(self) -> int:
+        count = len(self._data["todos"])
+        self._data["todos"].clear()
+        self.save()
+        return count
 
     # -- model context ----------------------------------------------------
     def context(self) -> str:
@@ -347,7 +486,33 @@ class Memory:
                 + "; ".join(f"{k} is {v}" for k, v in self._data["preferences"].items())
                 + "."
             )
+        open_items = self.open_todos()
+        if open_items:
+            # Capped separately from the store itself: the list may legitimately
+            # grow long, but the prompt it rides in may not.
+            shown = open_items[: config.MEMORY_CONTEXT_TODOS]
+            parts.append(
+                f"The user's to-do list ({len(open_items)} open): "
+                + "; ".join(shown)
+                + "."
+            )
         return " ".join(parts)
+
+    def todo_summary(self) -> str:
+        """The spoken boot line for the to-do list, or "".
+
+        Plain speech - it reaches the speaker by the same path as any reply,
+        so it carries no labels and no machine detail.
+        """
+        open_items = self.open_todos()
+        if not open_items:
+            return ""
+        if len(open_items) == 1:
+            return f"One thing on your list: {open_items[0]}."
+        return (
+            f"You have {len(open_items)} things on your list, "
+            f"starting with {open_items[0]}."
+        )
 
 
 _memory: Memory | None = None

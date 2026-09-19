@@ -141,3 +141,44 @@ def test_observation_is_length_capped():
 def test_turn_defaults_to_no_observation():
     turn = Turn("hi", "Hey.")
     assert turn.observation == ""
+
+
+# ---------------------------------------------------------------------------
+# Typographic punctuation
+# ---------------------------------------------------------------------------
+def test_curly_punctuation_is_flattened_to_ascii():
+    """The Windows console is cp1252 and cannot encode a curly apostrophe.
+
+    The same cleaned string is drawn by the UI and handed to the speaker - that
+    is deliberate - so a character the terminal cannot render shows up as
+    "That?s a marathon" even though the audio was perfectly fine. A warm,
+    conversational register produces these constantly, so this stopped being
+    cosmetic the moment the voice stopped being clipped.
+    """
+    assert clean_for_speech("That\u2019s a marathon") == "That's a marathon"
+    assert clean_for_speech("Wait \u2014 no") == "Wait - no"
+    assert clean_for_speech("Hmm\u2026 maybe") == "Hmm... maybe"
+    assert clean_for_speech("caf\u00e9\u00a0open") == "caf\u00e9 open"
+
+
+def test_a_reply_wrapped_in_curly_quotes_is_still_unwrapped():
+    """Flattening runs first, so the unwrapping below it sees ASCII quotes."""
+    assert clean_for_speech("\u201cChrome's up.\u201d") == "Chrome's up."
+
+
+def test_flattening_leaves_real_words_alone():
+    """Accented letters are speech. Only punctuation is being normalised."""
+    assert clean_for_speech("Caf\u00e9 na\u00efve r\u00e9sum\u00e9") == "Caf\u00e9 na\u00efve r\u00e9sum\u00e9"
+
+
+def test_everything_cleaned_survives_a_cp1252_console():
+    """The actual failure, asserted directly rather than by proxy."""
+    samples = [
+        "That\u2019s a marathon. Want a coffee, or are we powering through?",
+        "\u201cDone\u201d \u2014 more or less\u2026",
+        "Nineteen. That\u2019s a lot of hours.",
+    ]
+    for sample in samples:
+        cleaned = clean_for_speech(sample)
+        # Raises UnicodeEncodeError if anything curly survived.
+        cleaned.encode("cp1252")

@@ -768,7 +768,7 @@ def file_manager(
     if verb in _NEEDS_CONFIRMATION and config.FILE_CONFIRM_DELETE and not confirmed:
         what = _CONFIRM_PHRASING.get(verb, verb)
         return ToolResult.confirm(
-            f"That'll {what} {friendly(target)}. Sure?",
+            f"That'll {what} {friendly(target)}. Confirm?",
             f"Awaiting confirmation to {verb} {target}.",
             action=verb,
             path=str(target),

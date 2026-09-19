@@ -81,6 +81,36 @@ _SHELL_ECHO = re.compile(r"^[ \t]*(?:\$|PS\s+[A-Za-z]:\[^>\n]*>)[ \t]+.*$", re.M
 _EXIT_CODE = re.compile(r"^[ \t]*exit\s*=\s*-?\d+[ \t]*$", re.MULTILINE | re.IGNORECASE)
 _QUOTE_PAIRS = {'"': '"', "'": "'", "\u201c": "\u201d", "\u2018": "\u2019"}
 
+# Typographic punctuation, flattened to ASCII.
+#
+# Two reasons, and the second is the one that bites. A speech synthesiser
+# mostly copes with a curly apostrophe, but the Windows console is cp1252 and
+# cannot encode one at all: "That's a marathon" reaches the terminal as
+# "That?s a marathon". The same cleaned string is what the UI draws and what
+# the speaker receives - that is deliberate, and it means a character the
+# console cannot render is a visible defect even though the audio was fine.
+#
+# A conversational register produces these constantly, far more than a clipped
+# one did, so this stopped being cosmetic the moment the voice got warmer.
+_TYPOGRAPHIC = str.maketrans(
+    {
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201a": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u201e": '"',
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2015": "-",
+        "\u2026": "...",
+        "\u00a0": " ",
+        "\u200b": "",
+        "\u2032": "'",
+        "\u2033": '"',
+    }
+)
+
 
 def strip_meta_labels(text: str) -> str:
     """Remove role labels and channel prefixes from a would-be spoken string.
@@ -126,6 +156,10 @@ def clean_for_speech(text: str) -> str:
     ">" that makes "E.V. > hi" recognisable as chrome in the first place.
     """
     spoken = strip_meta_labels(text)
+    # Before anything else looks at the characters: the quote-stripping below
+    # and `_QUOTE_PAIRS` both work on ASCII quotes, and flattening first means
+    # a reply wrapped in curly quotes is unwrapped like any other.
+    spoken = spoken.translate(_TYPOGRAPHIC)
     spoken = _URL.sub("that link", spoken)
     spoken = _MARKDOWN.sub("", spoken)
     # Bare paths read terribly character by character.
@@ -208,6 +242,15 @@ class Speaker:
         self._speaking = False
         self._cancel = False
         self._warned_once = False
+        # The stream currently holding the floor, if any. `stop()` needs it:
+        # killing the MP3 that is playing stops one sentence, while the rest
+        # of the reply is already queued behind it and plays straight after.
+        # Barge-in has to reach both.
+        self._stream: "SpeechStream | None" = None
+        # Called as playback starts, so the caller can forget whatever the
+        # microphone heard a moment ago. Without it the tail of the user's own
+        # command counts as recent speech and E.V. barges in on itself.
+        self.on_playback_start = None
 
         if not self.enabled:
             return
@@ -249,11 +292,22 @@ class Speaker:
         async with self._lock:
             self._speaking = True
             self._cancel = False
+            self._note_playback_start()
             try:
                 await self._speak_chunks(chunks)
             finally:
                 self._speaking = False
         return spoken
+
+    def _note_playback_start(self) -> None:
+        """Tell the caller the floor has just been taken. Never raises."""
+        hook = self.on_playback_start
+        if hook is None:
+            return
+        try:
+            hook()
+        except Exception as exc:  # a bad hook must not cost the user speech
+            log.debug("Playback-start hook failed: %s", exc)
 
     async def _speak_chunks(self, chunks: list[str]) -> None:
         """Play each chunk, synthesising the next one while it plays.
@@ -445,11 +499,28 @@ class Speaker:
         Here the first sentence is already playing while the model is still
         writing the second.
         """
-        return SpeechStream(self)
+        stream = SpeechStream(self)
+        self._stream = stream
+        return stream
 
     def stop(self) -> None:
-        """Cut playback short, for barge-in or shutdown."""
+        """Cut playback short, for barge-in or shutdown.
+
+        Three things have to stop, not one. Killing the clip that is playing
+        only ends the current sentence; a streamed reply has the rest of
+        itself queued behind that clip and would carry straight on into it,
+        which is the opposite of yielding the floor. So: refuse further
+        chunks, empty the stream's queue, then kill the audio device.
+        """
         self._cancel = True
+        # Before the player, so nothing new can be queued in the window
+        # between killing the clip and the stream noticing it should stop.
+        stream, self._stream = self._stream, None
+        if stream is not None:
+            try:
+                stream.cancel()
+            except Exception as exc:
+                log.debug("Could not cancel the speech stream: %s", exc)
         if self._player is not None:
             try:
                 self._player.stop()
@@ -475,6 +546,7 @@ class SpeechStream:
         self._queue: asyncio.Queue[str | None] = asyncio.Queue()
         self._spoken: list[str] = []
         self._closed = False
+        self._cancelled = False
         self._task: asyncio.Task | None = None
         if speaker.enabled and speaker._player is not None:
             self._task = asyncio.ensure_future(self._run())
@@ -487,7 +559,10 @@ class SpeechStream:
     def feed(self, sentence: str) -> None:
         """Queue one sentence. Non-blocking, and safe to call from a hook."""
         spoken = clean_for_speech(sentence)
-        if not spoken or self._closed:
+        # `_closed` covers a normal end of generation; `_cancelled` covers
+        # barge-in, where the model is still streaming sentences at a hook
+        # that must no longer accept them.
+        if not spoken or self._closed or self._cancelled:
             return
         self._spoken.append(spoken)
         if self._task is not None:
@@ -509,9 +584,24 @@ class SpeechStream:
                 await self._task
         return self.spoken
 
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled
+
     def cancel(self) -> None:
-        """Abandon playback, for barge-in or shutdown."""
+        """Abandon playback, for barge-in or shutdown.
+
+        The queue is emptied rather than just closed. A sentence still sitting
+        in it is a sentence E.V. is about to say, and "stop talking" that
+        leaves three queued sentences to play is not a stop.
+        """
         self._closed = True
+        self._cancelled = True
+        while True:
+            try:
+                self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
         if self._task is not None:
             self._queue.put_nowait(None)
             self._task.cancel()
@@ -521,6 +611,7 @@ class SpeechStream:
         async with speaker._lock:
             speaker._speaking = True
             speaker._cancel = False
+            speaker._note_playback_start()
             synth: asyncio.Future | None = None
             path: str | None = None
             try:
@@ -570,6 +661,8 @@ class SpeechStream:
                         break
             finally:
                 speaker._speaking = False
+                if speaker._stream is self:
+                    speaker._stream = None
                 _unlink(path)
                 if synth is not None:
                     synth.cancel()

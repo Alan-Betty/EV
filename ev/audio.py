@@ -132,7 +132,14 @@ class Microphone:
         self._reader: threading.Thread | None = None
         self._reading = False
         self._recent_speech = 0
+        # A decaying peak of recent input. Frame *count* alone cannot tell
+        # the user's voice from E.V.'s own, because on loudspeakers both are
+        # a steady run of speech-looking frames; loudness can.
+        self._recent_peak = 0.0
         self._muted = False
+        # Set by `hold_audio()`. The next `listen()` keeps what is already
+        # queued instead of flushing it - see that method.
+        self._hold = False
 
     # -- lifecycle --------------------------------------------------------
     def open(self) -> None:
@@ -184,8 +191,14 @@ class Microphone:
                 self._recent_speech = min(self._recent_speech + 1, 100)
             else:
                 self._recent_speech = max(self._recent_speech - 1, 0)
+            # Decays rather than resetting, so a peak survives the gaps
+            # between syllables but not the gap between sentences.
+            self._recent_peak = max(level, self._recent_peak * 0.92)
 
             if self._muted:
+                # Still measured above, never queued here: the levels are what
+                # barge-in reads, and a muted microphone that had stopped
+                # measuring would be a deaf one.
                 continue
             try:
                 self._queue.put_nowait((frame, level))
@@ -205,9 +218,42 @@ class Microphone:
             except queue.Empty:
                 return
 
+    def reset_levels(self) -> None:
+        """Forget what was recently heard, so barge-in starts from silence.
+
+        Called as playback begins. Without it the tail of the user's own
+        command is still counted as recent speech, and E.V. cuts itself off
+        on the first syllable of its own reply every single time.
+        """
+        self._recent_speech = 0
+        self._recent_peak = 0.0
+
     def speech_energy(self) -> int:
         """How many recent frames looked like speech. Used for barge-in."""
         return self._recent_speech
+
+    def speech_level(self) -> float:
+        """Decaying peak level of recent input, normalised 0-1.
+
+        The other half of barge-in. E.V. talking through the user's speakers
+        produces a long run of speech-looking frames, so a frame count on its
+        own would have E.V. interrupting itself on every reply; what separates
+        the user from the loopback is that the user is louder.
+        """
+        return self._recent_peak
+
+    def hold_audio(self) -> None:
+        """Keep what is already queued for the next `listen()`.
+
+        `listen` normally flushes first, so a command starts from live audio
+        rather than from whatever piled up while E.V. was busy. That is right
+        everywhere except barge-in, where the queued audio *is* the point: the
+        frames that proved the user had started talking are the first word of
+        what they are saying. Flushed, they cost the user the start of their
+        sentence, and barge-in exists precisely to stop them having to repeat
+        themselves.
+        """
+        self._hold = True
 
     def _resolve_device(self, devices) -> int | None:
         """Match EV_INPUT_DEVICE against an index or a name substring."""
@@ -410,8 +456,14 @@ class Microphone:
         """
         if self._stream is None:
             raise AudioError("Microphone is not open")
-        # Start from live audio, not whatever accumulated while E.V. was busy.
-        self.flush()
+        # Start from live audio, not whatever accumulated while E.V. was busy -
+        # unless a barge-in asked for it, in which case the queue holds the
+        # opening of the user's sentence. One-shot: cleared here so the hold
+        # can never outlive the interruption that set it.
+        if self._hold:
+            self._hold = False
+        else:
+            self.flush()
 
         preroll_frames = max(1, config.PREROLL_MS // config.FRAME_MS)
         min_speech_frames = max(1, config.MIN_SPEECH_MS // config.FRAME_MS)

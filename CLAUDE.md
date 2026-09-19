@@ -115,6 +115,14 @@ an inbox has no search URL and a built one would 404.
 
 ### Confirmation and safety
 
+Every confirmation asks **"Confirm?"**, and asks it identically everywhere.
+"Sure?" reads as a dare: it invites a reflexive "yeah" from someone who has
+half-heard the sentence before it, which is the exact failure a confirmation
+exists to prevent. Wording it the same way in every tool means the user learns
+one response rather than one per tool, and `tests/test_smoke.py` scans the
+source for the old phrasing so it cannot creep back into a branch the suite
+never reaches.
+
 `confirmed` is injected by the core loop after a spoken yes — it is added to `_ALLOWED_ARGS` manually and is never something the model can set for itself. The flow: a tool returns `ToolResult.confirm(...)` → `ev_core._execute` stores `session.pending` (holding the tool name too, since file deletes and shell commands both arrive here) → the next utterance goes to `_resolve_pending`. Only an unambiguous yes runs it; an utterance that is neither yes nor no is treated as the user moving on, and is re-dispatched as a fresh command rather than swallowed.
 
 Two independent gates enforce this:
@@ -131,6 +139,48 @@ The batch actions (`batch_copy`, `batch_move`, `batch_rename`) act on a whole fo
 With `LLM_STREAMING` on and audio enabled, `Brain._decide_groq_streamed` pulls the `chat` reply out of half-written tool-call JSON via `partial_reply()` (hand-rolled, because `json.loads` is useless mid-stream) and hands complete sentences to a `SpeechStream`. **Only `chat` streams** — every other tool has a side effect, and announcing "Chrome's up" before Chrome is up would be a lie. The stream is created lazily on the first sentence and must be `cancel()`ed if the call turns out not to be `chat`, or it holds the speaker lock forever. Streaming is an optimisation and never a dependency: any failure falls back to a plain call.
 
 Tool calls are accumulated **per `index`**, not into one buffer. A model answering "open notepad and type X" emits two calls in one completion, and concatenating their argument fragments produced `{...}{...}` — not valid JSON, so every argument was dropped and the tool ran on nothing. Only the first call is acted on, matching the non-streaming path.
+
+### Two providers, and the schema that has to survive the trip
+
+`TOOL_SPECS` is provider-neutral, and `to_gemini_tools()` translates it. That
+translation is structural, not uniform, and getting it wrong is silent:
+`properties` is a *map of argument name to schema*, so filtering its keys
+against Gemini's keyword list deletes every argument the tool has. That is
+what `_strip_unsupported` used to do. Every tool reached Gemini as
+
+    {"type": "object", "properties": {}, "required": ["app"]}
+
+and the API answered `required[0]: property is not defined`, correctly. The
+tool *names* were all still right, so every name-level test stayed green
+while the provider could not perform a single action. `tests/test_gemini_payload.py`
+now pins the arguments, not just the names, and asserts that nothing in
+`required` is undefined - which is the invariant Gemini itself enforces.
+
+Three more things the Gemini path needs and the Groq path does not:
+
+- **Availability is not what the catalogue says.** A model can be listed by
+  `/models` and still answer `generateContent` with 404 "no longer available
+  to new users" - `gemini-2.5-flash` does exactly that on newer keys. So
+  `_verify_gemini_model` walks `GEMINI_MODEL_FALLBACKS` with real requests. A
+  429 or 503 counts as available: the model exists and is busy, and walking
+  past it lands the session on a worse one.
+- **A derived vision model has to follow.** `GEMINI_VISION_MODEL` is bound at
+  import from `GEMINI_MODEL`, so a fallback that moved only the brain left
+  every screenshot pointed at the model that just 404ed - E.V. talking
+  normally and going blind. It follows only when the user did not pin one.
+- **The retry delay is in the body.** Gemini answers a 429 with a `RetryInfo`
+  detail (`"retryDelay": "31s"`), not a `retry-after` header. Read from the
+  headers alone, every Gemini rate limit looked like one with no stated delay,
+  so E.V. never waited at all.
+
+**A rate limit on one provider is answered by the other.** `BrainError` carries
+`rate_limited`, and `_decide_elsewhere` re-runs the same turn against the other
+provider - the same request in a different dialect, since both are described by
+the same `TOOL_SPECS`. It is one hop and one turn: `_failing_over` blocks a
+second bounce, and the provider is restored in a `finally`, because the point
+is to save one utterance rather than to move house over a single 429. Off when
+the other provider has no key, which is read at call time so a key added to
+`.env` needs no code change.
 
 ### When the model's own tool call is rejected
 
@@ -343,14 +393,100 @@ the tool rules brought the floor to ~3885, which is what makes two turns fit.
 Keep new tool descriptions short for that reason: the cost is paid on every
 utterance, including the ones that will never use the tool.
 
-That floor is now ~3963 (~2876 of schema, ~1087 of prompt), and it is a
-ceiling as much as a measurement: two turns must stay under 8000, so there
-are about 35 tokens of slack. Teaching the model about `screen_task`'s new
-verbs cost more than that in the first draft and had to be paid for by
-compressing `mouse_action`'s field descriptions. Measure after any change
-here - `len(json.dumps(to_openai_tools()))//4` plus the same for
-`SYSTEM_PROMPT` - because going over does not fail loudly. It fails as the
-second half of a compound request quietly not happening.
+That floor *was* ~3988 (~2826 of schema, ~1162 of prompt), and the claim
+written here - that two turns fit under 8000 with ~24 tokens of slack - was
+wrong in the only way that mattered. It measured an empty request. A real
+turn carries history and an observation as well, and a live measurement put
+it at **4362 prompt tokens**, so a compound request was ~8800 and did not fit
+at all. Every arithmetic on this page is now checked against
+`x-ratelimit-remaining-tokens` on a real response rather than a character
+count, because the character count was the thing that hid it.
+
+Three changes brought it back under, and they attack different halves of the
+problem.
+
+**The schema is filtered per utterance.** `tools/schemas.select_tools` picks
+the tools worth paying for and `to_openai_tools(names)` / `to_gemini_tools(names)`
+build a payload from just those. Measured over ordinary commands it removes
+about 70% of the schema and puts a turn at ~1650-2450 tokens, so two turns
+are ~3300-4900 and fit with room to spare. Two properties make a wrong guess
+survivable rather than silent: `CORE_TOOLS` - `chat`, `open_app`,
+`web_search` - is always offered, so an utterance matching nothing still
+reaches a tool; and the first rung of the `tool_use_failed` ladder now puts
+the **whole** schema back on rather than only relaxing `tool_choice`, because
+"the model could not say what it meant in the tools it was shown" and "the
+model wanted no tool at all" have the same fix and distinguishing them would
+cost a round trip. Word lists are deliberately generous for the same reason:
+a false positive costs tokens on one turn, a false negative costs the user
+the thing they asked for and tells them nothing about why.
+
+Two traps in that code, both found the hard way. `properties` is a map of
+argument names, so an empty trigger tuple compiles to `(?:)`, which matches
+the empty string at the first word boundary of **anything** - a tool with no
+trigger words of its own was silently offered on every single utterance.
+And `session_context` is deliberately not fed to the selector: it is standing
+state mentioning folders, errands and applications, so it matches nearly
+every tool on nearly every turn and hands the whole saving back.
+
+**Groq's budget is per model, not per account.** This is the largest free win
+in the project and it was sitting unused. Burning 1500 tokens on
+`openai/gpt-oss-20b` takes that model from 7927 to 6427 and leaves
+`openai/gpt-oss-120b` at its full 7927 - separate buckets, same key. So a 429
+is news about one bucket, and `Brain._rotate_groq_model` moves to the next
+one. `GROQ_MODEL_FALLBACKS` could not do this job and was never meant to: it
+is an availability ladder walked once by `verify_model`, so a rate limit
+mid-session stayed on the exhausted model until the minute was up.
+`_build_rotation` prunes the same list against what the account really has,
+skips the vision model (sharing a bucket with a screen task would empty the
+brain's budget on the way past), and the move is **sticky** - the opposite of
+provider failover, which lasts one turn. The abandoned bucket needs a full
+minute to refill, so hopping back on the next utterance lands straight back
+in the wall; rotation wraps instead, and a long session returns to the first
+model once it has recovered.
+
+Order matters here: every Groq bucket is tried before Gemini is asked at all.
+One hop between buckets costs nothing, and one hop to Gemini spends a request
+from a free tier metered per **day** - `gemini-flash-latest` resolves to
+`gemini-3.8-flash` at 20 requests a day, which is why an unpinned alias makes
+a useless failover target. Prefer a lite alias or a named model.
+
+This also fixed a leak: `decide` re-raised anything that was not a
+`tool_failure`, so a 429 raised while *streaming* escaped the function
+entirely, taking the plain-call retry and provider failover with it. The one
+case with two remedies got neither. `_decide_groq_turn` now holds the
+streaming-then-plain attempt and lets rate limits through to the caller,
+which is the only thing that knows another bucket exists.
+
+**Vision is metered separately and charged by the request, not the tokens.**
+A screen-task step reports `prompt_tokens: 783` while the remaining-token
+header drops by about **1900**, so four steps empty a minute and
+`SCREEN_TASK_MAX_STEPS=16` was really a four-step ceiling with a 429 on the
+end - arriving mid-task, with the desktop half way through a job nobody has
+described. `tools/computer_use.vision_budget()` reads the header and the loop
+stops one step short, returning what it managed for the backlog.
+
+The obvious economy does not work, and it is written down here because it
+will be proposed again: the charge is **flat in the size of the frame**. At
+quality 72, 1600px/46KB cost 1912, 960px/17KB cost 1949, 640px/7KB cost 1992.
+Shrinking the image by six times bought nothing at all, so degrading the
+frame when the budget runs low would spend the coordinate accuracy
+`VISION_TASK_MAX_WIDTH` exists to buy and get no tokens back for it. It was
+implemented, measured, and removed.
+
+Keep new tool descriptions short regardless. The subset makes the ceiling
+survivable, not irrelevant: the full schema is still what the tool-failure
+retry sends and what `EV_TOOL_SUBSET_ENABLED=false` sends every turn, and
+`tests/test_memory_tools.py` still asserts two of those fit under 8000.
+Splitting `remember` into `remember_fact`, `recall_fact` and `manage_todo`
+cost 157 tokens, paid for by compressing `file_manager`, `web_search`,
+`browser_task` and `backlog` - three narrow tool names route better than one
+wide one, but not at the price of the second half of every compound request.
+Widening the voice to let a joke land cost another 75, paid the same way.
+Measure after any change here - `len(json.dumps(to_openai_tools()))//4` plus
+the same for `SYSTEM_PROMPT`, and `x-ratelimit-remaining-tokens` on a real
+request for anything carrying an image - because going over does not fail
+loudly. It fails as the second half of a compound request quietly not
+happening.
 
 `Brain._post` also waits out a 429 once, using the delay named in the
 response headers (`retry-after`, or `x-ratelimit-reset-tokens` as `2m52.8s` /
@@ -367,9 +503,63 @@ waiting it could have done itself.
 - **A corrupt file is a warning, not an error.** It is moved to `.corrupt` and E.V. starts empty. Losing preferences is survivable; refusing to boot is not.
 - **The clean-shutdown flag is pessimistic.** Cleared and persisted at `begin_session`, set again only in `stop()`, so an unclean exit is detectable next time instead of looking like a tidy one.
 
+`EV._report_state()` greets by name on every start. This used to be silent on
+a quick restart, on the argument that being greeted like a homecoming every
+time a process restarts gets old; the argument the other way won, because a
+voice assistant that comes up saying nothing is indistinguishable from one
+that failed to come up. Only the name-led opening is unconditional - the
+offline gap, the backlog and the to-do list are still reported only when there
+is something to report. The name comes from a stored `name` fact first and
+`config.USER_NAME` second, so "remember my name is Al" changes the greeting
+without anyone touching `.env`. `EV_GREET_ON_START=false` restores the old
+behaviour.
+
 `EV._boot()` is idempotent and called from both `start()` and `run_once()`, since `--say` reaches the loop by a different route. It assembles `Brain.session_context` — the offline gap, stored facts, open backlog — which rides in the system prompt under its own heading, separate from `extra_context` (which is about the last action). `EV._report_state()` speaks the welcome-back and the backlog summary in the interactive loop only.
 
 A backlog entry is a reminder, **never a signed permission slip**: `Backlog.add` strips `confirmed` on the way in, and `backlog run` re-dispatches without it, so a delete declined on Monday is asked about again on Tuesday.
+
+**The to-do list is not the backlog, and they are separate on purpose.** The
+backlog is what E.V. failed to finish and files by itself; the to-do list in
+`ev/memory.py` is what the user asked to be kept. Merged, "remind me to call
+the dentist" would sit next to a cancelled file copy and "clear the backlog"
+would quietly delete the dentist. `Memory.clear()` leaves the to-dos alone for
+the same reason - "forget what you know about me" is about preferences, not
+errands. `manage_todo clear` is gated like a file delete, which is why
+`manage_todo` is in the manual `confirmed` allow-list in `tools/__init__.py`.
+
+`remember_fact` / `recall_fact` / `manage_todo` are what the model is shown.
+The older single `remember` tool is still in `REGISTRY` and still works, but is
+no longer in `TOOL_SPECS`, so it costs nothing per turn; its arguments are
+declared by hand in `_ALLOWED_ARGS` because there is no spec left to derive
+them from, and an empty set there would mean every argument silently dropped.
+
+### Full duplex: hearing the user over E.V.'s own voice
+
+The microphone reader thread never stops, so E.V. can be interrupted
+mid-sentence. Turning that into working barge-in takes three things that are
+each easy to leave out:
+
+- **Two conditions, not one.** `_watch_for_barge_in` requires both
+  `BARGE_IN_FRAMES` of sustained speech *and* a level above
+  `noise_floor * BARGE_IN_LEVEL_MULTIPLIER`. Either alone fails in the
+  opposite direction: on loudspeakers E.V.'s own voice is a long steady run of
+  speech-looking frames, so a frame count alone has E.V. interrupting itself
+  on every reply, while a level alone trips on a door closing.
+  `BARGE_IN_GRACE_S` covers the attack of E.V.'s own first word, and
+  `Speaker.on_playback_start` clears the level history as playback begins -
+  without it the tail of the user's own command is still counted as recent
+  speech.
+- **Stopping has to reach the queue.** Killing the clip that is playing ends
+  one sentence. A streamed reply has the rest of itself queued behind it and
+  carries straight on, which is the opposite of yielding the floor. So
+  `Speaker.stop()` cancels the registered `SpeechStream` *before* stopping the
+  player, `SpeechStream.cancel()` drains its queue, and `feed()` refuses
+  anything the model streams afterwards.
+- **The audio that triggered it is kept.** `listen()` normally flushes first,
+  so a command starts from live audio. On a barge-in the queued frames *are*
+  the opening of the user's sentence, so `mic.hold_audio()` suppresses exactly
+  one flush. Flushed instead, the user has to start the sentence again - which
+  is the thing barge-in exists to prevent.
 
 ### Session modes and local intents
 
@@ -378,6 +568,27 @@ A backlog entry is a reminder, **never a signed permission slip**: `Backlog.add`
 Wake detection in [ev/wake.py](ev/wake.py) *is* fuzzy, because STT mangles "E.V." into Eve, Evie, AV, heavy. It slices the command off the original transcript by character offset — slicing by word index desynchronises and eats the next word.
 
 `is_resume_phrase()` is the one deliberate exception to the exact-match rule, and it runs **only in standby**. The risk that makes fuzzy matching wrong everywhere else — swallowing a real request — does not exist there, because standby has exactly two exits and accepts no commands. What it fixes is the opposite failure: "hey, wake up" falling through `match_intent` to a bare `return`, leaving the user with their words echoed, no reply, and no way back in. A non-matching utterance in standby now draws a hint (`ui.note`, never spoken — answering aloud would defeat standby), and anything longer than `STANDBY_MAX_UTTERANCE_S` is dropped before it costs a transcription call.
+
+### Silence has to look like silence
+
+An utterance with no wake phrase, once the conversation window has lapsed, is
+not E.V.'s business - and `_tick` used to draw it anyway. The echo came before
+the wake check, so every sentence spoken near the microphone appeared on
+screen under a `you >` prompt whether or not it was addressed: a conversation
+with somebody else in the room was written into E.V.'s terminal, looked like
+it had been heard and understood, and then got no reply. The order is now
+wake-check first, echo second, and an unaddressed transcript is also kept out
+of `note_transcript`, so the room cannot steer the decoding prompt for the
+command that follows it.
+
+What this does **not** do is stop the transcription. Detecting "E.V." in an
+utterance means having the words of that utterance, and `ev.wake` matches
+against the transcript because the project runs no local model by design - a
+local wake-word engine is exactly the resident-memory dependency the whole
+architecture exists to avoid. So audio is still sent to Whisper while idle.
+Anyone who minds that has two honest levers, both in `.env`: `EV_STANDBY...`
+via "take five", which drops to standby and stops transcribing anything longer
+than `STANDBY_MAX_UTTERANCE_S`, or a local `EV_STT_PROVIDER=whispercpp`.
 
 ### Speech recognition
 

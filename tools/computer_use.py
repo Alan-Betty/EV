@@ -507,6 +507,44 @@ def _vision_provider() -> str:
     return (config.VISION_PROVIDER or config.LLM_PROVIDER or "groq").lower()
 
 
+# How much of the per-minute token budget the provider says is left, or None
+# when it does not say. Module-level rather than passed around because every
+# vision request updates it and the only reader is the task loop, which is
+# several frames away from the socket.
+_budget_remaining: int | None = None
+
+
+def vision_budget() -> int | None:
+    """Tokens left in the vision model's window, or None if unknown.
+
+    None is not zero and must not be treated as it: Gemini states no such
+    header, and a provider that says nothing should be met by a loop that
+    behaves exactly as it did before any of this existed.
+    """
+    return _budget_remaining
+
+
+def _note_budget(headers: Any) -> None:
+    """Record what the provider said is left in the window.
+
+    Deliberately total: a header that is missing, empty or not a number
+    leaves the previous reading alone rather than clearing it, because a
+    single odd response should not talk the loop into thinking it has an
+    unlimited budget or none at all.
+    """
+    global _budget_remaining
+    try:
+        raw = headers.get("x-ratelimit-remaining-tokens")
+    except AttributeError:
+        return
+    if raw is None:
+        return
+    try:
+        _budget_remaining = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return
+
+
 def ask_vision(frame: Frame, prompt: str, system: str = "") -> str:
     """Post one frame and one question; return the model's text.
 
@@ -544,6 +582,8 @@ def _post_json(url: str, payload: dict, headers: dict) -> dict:
             raise VisionError("Looking at the screen timed out.") from exc
         except httpx.HTTPError as exc:
             raise VisionError(f"Couldn't reach the vision model: {exc}") from exc
+
+        _note_budget(response.headers)
 
         if response.status_code != 429 or attempt:
             break
@@ -1126,7 +1166,7 @@ def mouse_action(
     held = _gate(
         described,
         confirmed,
-        f"That clicks {label or 'that'}. Sure?" if label else "That's a live click. Sure?",
+        f"That clicks {label or 'that'}. Confirm?" if label else "That's a live click. Confirm?",
         action=verb,
         x=str(x),
         y=str(y),
@@ -1277,7 +1317,7 @@ def keyboard_action(
     held = _gate(
         described,
         confirmed,
-        f"That types {label or 'that'} for real. Sure?",
+        f"That types {label or 'that'} for real. Confirm?",
         action=verb,
         text=text,
         keys=keys,
@@ -1661,6 +1701,35 @@ def screen_task(
                 "Ran out of time on that one.",
                 f"screen_task '{goal}' hit the {config.SCREEN_TASK_TIMEOUT_S:.0f}s "
                 f"ceiling after {len(history)} step(s): {'; '.join(history) or 'none'}.",
+            )
+
+        # Stop one step short of the wall rather than walking into it. A
+        # vision step costs about 1900 against the per-minute budget and the
+        # charge does not shrink with the frame, so there is no cheaper
+        # version of this step to fall back on - only the choice between
+        # stopping with something to report and being cut off mid-task with
+        # the desktop in a state nobody has described.
+        #
+        # With no steps behind it there is nothing to hand back and nothing
+        # to lose, so the first look is always attempted and a real 429 is
+        # left to the wait in `_post_json`.
+        budget = vision_budget()
+        if (
+            history
+            and budget is not None
+            and config.VISION_BUDGET_FLOOR
+            and budget < config.VISION_BUDGET_FLOOR
+        ):
+            log.info(
+                "Stopping screen_task early: %d vision tokens left in the window",
+                budget,
+            )
+            return ToolResult.success(
+                "I'm out of budget for looking at the screen - "
+                "give it a minute and I'll pick this up.",
+                f"screen_task '{goal}' stopped after {len(history)} step(s) with "
+                f"{budget} vision tokens left in the per-minute window: "
+                f"{'; '.join(history)}. Not finished - the rest still needs doing.",
             )
 
         try:

@@ -349,7 +349,8 @@ def test_the_boot_report_says_how_long_we_were_down_and_what_is_open(
     asyncio.run(assistant._report_state())
 
     assert speaker.said[0] == (
-        "Welcome back. You were offline for 2 hours and 15 minutes."
+        f"Welcome back, {config.USER_NAME}. You were offline for "
+        "2 hours and 15 minutes."
     )
     assert "2 backlog items remaining from your previous session" in speaker.said[1]
     # Both went to the speaker through `EV.say`, so both are label-free.
@@ -357,9 +358,41 @@ def test_the_boot_report_says_how_long_we_were_down_and_what_is_open(
         assert clean_for_speech(spoken) == spoken
 
 
-def test_a_quiet_restart_with_nothing_open_says_nothing(monkeypatch, tmp_path):
+def test_a_quiet_restart_still_greets_but_says_nothing_else(monkeypatch, tmp_path):
+    """A start with no news is still a start, and it is still announced.
+
+    This used to be silent, on the argument that being greeted every time a
+    process restarts gets old. The argument the other way won: a voice
+    assistant that comes up saying nothing is indistinguishable from one that
+    failed to come up, and the user is looking at a terminal rather than at a
+    status light. The gap clause is still conditional - only the name-led
+    opening is unconditional.
+    """
+    speaker = FakeSpeaker()
+    assistant = _stateful(monkeypatch, tmp_path, speaker)
+    assistant._boot()
+    asyncio.run(assistant._report_state())
+
+    assert speaker.said == [f"Welcome back, {config.USER_NAME}."]
+    # No backlog, no to-dos, and above all no offline clause on a fresh start.
+    assert "offline" not in speaker.said[0]
+
+
+def test_the_greeting_can_be_switched_off(monkeypatch, tmp_path):
+    """`EV_GREET_ON_START=false` restores the old quiet-restart behaviour."""
+    monkeypatch.setattr(config, "GREET_ON_START", False)
     speaker = FakeSpeaker()
     assistant = _stateful(monkeypatch, tmp_path, speaker)
     assistant._boot()
     asyncio.run(assistant._report_state())
     assert speaker.said == []
+
+
+def test_a_stored_name_outranks_the_configured_one(monkeypatch, tmp_path):
+    """"Remember my name is Al" changes the greeting, without touching .env."""
+    speaker = FakeSpeaker()
+    assistant = _stateful(monkeypatch, tmp_path, speaker)
+    assistant.memory.remember("name", "Al")
+    assistant._boot()
+    asyncio.run(assistant._report_state())
+    assert speaker.said[0] == "Welcome back, Al."

@@ -24,7 +24,7 @@ from tools.computer_use import (
 )
 from tools.dev_tools import dev_workflow
 from tools.file_manager import file_manager
-from tools.memory import remember
+from tools.memory import manage_todo, recall_fact, remember, remember_fact
 from tools.schemas import (
     TOOL_NAMES,
     TOOL_SPECS,
@@ -64,6 +64,13 @@ REGISTRY: dict[str, Callable[..., ToolResult]] = {
     "screen_task": screen_task,
     "browser_task": browser_task,
     "backlog": backlog,
+    "remember_fact": remember_fact,
+    "recall_fact": recall_fact,
+    "manage_todo": manage_todo,
+    # Not in `TOOL_SPECS`, so it costs no tokens per turn, but still callable.
+    # It predates the three named tools above and a model that half-recalls
+    # the schema reaches for it; `dispatch` would otherwise answer a perfectly
+    # sensible `remember` call with "I don't have a tool for that".
     "remember": remember,
     "chat": chat,
 }
@@ -74,6 +81,11 @@ _ALLOWED_ARGS: dict[str, set[str]] = {
     spec["name"]: set(spec["parameters"].get("properties", {}))
     for spec in TOOL_SPECS
 }
+# `remember` has no spec of its own any more - see the registry note above -
+# so its arguments are declared here instead. Written out rather than derived
+# because there is nothing left to derive them from, and an empty set would
+# mean every argument silently dropped and the tool running on nothing.
+_ALLOWED_ARGS["remember"] = {"action", "key", "value"}
 # `confirmed` is injected by the core loop after a spoken yes, so it is
 # never something the model can set for itself.
 #
@@ -85,6 +97,9 @@ for _gated in (
     "terminal_command",
     "file_manager",
     "backlog",
+    # `manage_todo clear` wipes a list the user built by hand. Same gate as a
+    # file delete, for the same reason: a misheard "clear my list" should ask.
+    "manage_todo",
     "mouse_action",
     "keyboard_action",
     "screen_task",

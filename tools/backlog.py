@@ -116,7 +116,7 @@ def backlog(
         # core loop, never from the model.
         if config.BACKLOG_CONFIRM_CLEAR and not confirmed:
             return ToolResult.confirm(
-                f"That wipes all {pending} backlog items. Sure?",
+                f"That wipes all {pending} backlog items. Confirm?",
                 f"Awaiting confirmation to clear the backlog.\n{store.listing()}",
                 action="clear",
             )

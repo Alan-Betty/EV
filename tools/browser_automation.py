@@ -328,7 +328,7 @@ def browser_task(
             verdict = classify_gui(f"{task} {step.describe()}")
             if verdict.needs_confirmation:
                 return ToolResult.confirm(
-                    f"That one {verdict.reason} - {step.target or step.verb}. Sure?",
+                    f"That one {verdict.reason} - {step.target or step.verb}. Confirm?",
                     f"Awaiting confirmation for browser_task '{task or url}': "
                     f"step '{step.describe()}' {verdict.reason}.",
                     task=task,

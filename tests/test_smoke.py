@@ -431,3 +431,55 @@ def test_an_unknown_argument_is_still_dropped_by_dispatch():
     from tools.schemas import normalise_arguments
 
     assert normalise_arguments("screen_task", {"nonsense": "x"}) == {"nonsense": "x"}
+
+
+# ---------------------------------------------------------------------------
+# How a confirmation is worded
+# ---------------------------------------------------------------------------
+def test_every_confirmation_asks_to_confirm():
+    """One word, asked the same way everywhere.
+
+    "Sure?" reads as a dare - it invites a reflexive "yeah" from someone who
+    has half-heard the sentence before it, which is the exact failure mode a
+    confirmation exists to prevent. "Confirm?" asks for a decision instead,
+    and asking it identically everywhere means the user learns one response
+    rather than one per tool.
+
+    This scans the source rather than calling the tools, because the point is
+    that nothing anywhere phrases it the old way - including a branch this
+    suite has no easy way to reach.
+    """
+    import re
+
+    root = Path(__file__).resolve().parent.parent
+    offenders: list[str] = []
+    for path in sorted((root / "tools").glob("*.py")):
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if re.search(r"\bSure\?", line):
+                offenders.append(f"{path.name}:{number}: {line.strip()}")
+
+    assert not offenders, "confirmations still asking 'Sure?':\n" + "\n".join(offenders)
+
+
+def test_the_tone_examples_show_the_same_wording():
+    """The prompt teaches by example, so its example has to match the tools."""
+    assert "Confirm?" in config.SYSTEM_PROMPT
+    assert "Sure?" not in config.SYSTEM_PROMPT
+
+
+def test_a_real_confirmation_uses_it(tmp_path, monkeypatch):
+    """Not just the source text - the string a user would actually hear."""
+    from tools.file_manager import file_manager
+
+    monkeypatch.setattr(config, "FILE_ROOTS", [tmp_path])
+    target = tmp_path / "notes.txt"
+    target.write_text("hello", encoding="utf-8")
+
+    result = file_manager(action="delete", path=str(target))
+
+    assert result.needs_confirmation is True
+    assert result.speech.endswith("Confirm?")
+    # Not asserting `clean_for_speech` leaves this string untouched: the
+    # temp-directory name pytest generates is full of underscores, which the
+    # speech filter strips as markdown. That is the filter doing its job on a
+    # path no real user would have, not a fault in the confirmation.
