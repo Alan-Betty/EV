@@ -163,9 +163,12 @@ TOOL_SPECS: list[ToolSpec] = [
     {
         "name": "file_manager",
         "description": (
-            "Anything to do with the user's files and folders: create, "
-            "read, list, open, copy, move, rename, delete, find, organise, "
-            "and batch versions of those. 'what's on my Desktop', 'open "
+            # The action list that used to sit here repeated the `action`
+            # enum below it word for word, and the enum is the copy the
+            # model actually has to satisfy. Paying for it twice on every
+            # turn bought nothing - see the token budget note in CLAUDE.md.
+            "Anything to do with the user's files and folders. "
+            "'what's on my Desktop', 'open "
             "Explorer at my GitHub folder', 'copy every invoice to "
             "Documents'. Always prefer this over terminal_command, and one "
             "batch action over many single calls."

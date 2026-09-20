@@ -25,6 +25,7 @@ import os
 import re
 import shutil
 import tempfile
+from typing import Callable
 
 import config
 from ev.audio import build_player
@@ -250,7 +251,11 @@ class Speaker:
         # Called as playback starts, so the caller can forget whatever the
         # microphone heard a moment ago. Without it the tail of the user's own
         # command counts as recent speech and E.V. barges in on itself.
-        self.on_playback_start = None
+        #
+        # Annotated, because `= None` on its own makes the attribute's type
+        # None, and the one thing anybody ever does with this is assign a
+        # function to it.
+        self.on_playback_start: Callable[[], None] | None = None
 
         if not self.enabled:
             return

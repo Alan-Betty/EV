@@ -73,6 +73,12 @@ class ToolResult:
     detail: str = ""
     data: dict[str, Any] = field(default_factory=dict)
     needs_confirmation: bool = False
+    # True when `detail` carries text E.V. did not write and the user did not
+    # say - a web page, a file, whatever was on the screen. Set centrally by
+    # `dispatch`, read by `ev.brain.Brain.remember`, which fences it so the
+    # model reads it as data rather than as an instruction. See
+    # `tools.guard.UNTRUSTED_OUTPUT`.
+    untrusted: bool = False
 
     @classmethod
     def success(cls, speech: str, detail: str = "", **data: Any) -> "ToolResult":

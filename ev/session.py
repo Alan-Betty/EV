@@ -43,6 +43,13 @@ class Intent(str, Enum):
     CANCEL = "cancel"  # abandon what you are doing, stay awake
     SHUTDOWN = "shutdown"  # quit entirely
     STATUS = "status"  # are you there / what are you doing
+    # Take every side effect away, keep talking. The difference from CANCEL
+    # is scope and duration: CANCEL drops the tool that is running and E.V.
+    # is free again the moment it returns, while LOCKDOWN is about the ones
+    # that have not started yet. It is the phrase for "you are doing
+    # something wrong and I do not want to argue about which thing".
+    LOCKDOWN = "lockdown"
+    UNLOCK = "unlock"  # hand the tools back
 
 
 _PUNCT = re.compile(r"[^\w\s']")
@@ -86,11 +93,41 @@ _PHRASES: dict[Intent, tuple[str, ...]] = {
         "you there", "are you there", "status", "what are you doing",
         "you still there", "still with me", "report",
     ),
+    # Deliberately several ways to say it. This is the phrase someone
+    # reaches for while watching the pointer move on its own, and that is
+    # not the moment to remember an exact wording. Every one of them is
+    # still matched exactly, like the rest of this table - a fuzzy lockdown
+    # would fire on "lock the door".
+    Intent.LOCKDOWN: (
+        "lockdown", "lock down", "lock it down", "locked down",
+        "emergency stop", "kill switch", "stop everything",
+        "stop everything now", "hands off", "hands off everything",
+        "freeze", "freeze everything", "safe mode", "don't touch anything",
+        "dont touch anything", "stop touching things", "abort everything",
+    ),
+    Intent.UNLOCK: (
+        "unlock", "unlock yourself", "stand down", "you're clear",
+        "youre clear", "all clear", "lift the lockdown", "lift lockdown",
+        "end lockdown", "release", "you can act", "hands back on",
+        "back to normal", "normal mode",
+    ),
 }
 
 # RESUME and STATUS share "you there". In standby, resuming is what the user
 # means, so RESUME is checked first and this ordering is deliberate.
-_PRIORITY = (Intent.RESUME, Intent.STANDBY, Intent.CANCEL, Intent.SHUTDOWN, Intent.STATUS)
+# LOCKDOWN and UNLOCK come first. They share no phrase with anything below,
+# so the order changes nothing today - it is here so that a phrase added
+# later collides in the safe direction: a word that could mean either
+# "cancel" or "lock down" should lock down.
+_PRIORITY = (
+    Intent.LOCKDOWN,
+    Intent.UNLOCK,
+    Intent.RESUME,
+    Intent.STANDBY,
+    Intent.CANCEL,
+    Intent.SHUTDOWN,
+    Intent.STATUS,
+)
 
 _LOOKUP: dict[str, Intent] = {}
 for _intent in _PRIORITY:
@@ -224,6 +261,15 @@ _RESPONSES: dict[Intent, tuple[str, ...]] = {
         "Still here.",
         "Right here. Idle.",
         "Awake and waiting.",
+    ),
+    # Flat and specific, on purpose. Every other line in this table has a
+    # joke in it somewhere; these two are the ones the user needs to be sure
+    # they heard correctly, and the way back is in the sentence.
+    Intent.LOCKDOWN: (
+        "Locked down. I won't touch anything until you say unlock.",
+    ),
+    Intent.UNLOCK: (
+        "Unlocked. Back to work.",
     ),
 }
 

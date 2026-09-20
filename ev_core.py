@@ -39,6 +39,7 @@ import random
 import signal
 import sys
 import threading
+import time
 
 import httpx
 
@@ -57,12 +58,19 @@ from ev.session import (
     response_for,
     split_followup,
 )
-from ev.stt import Transcriber, TranscriptionError
+from ev.stt import Transcriber, TranscriptionError, Transcript
 from ev.tts import Speaker, SpeechStream, clean_for_speech
 from ev.ui import UI
 from tools import CANCELLABLE, CancelToken, ToolResult, dispatch
 from tools.computer_use import close_vision_client
-from tools.safety import is_affirmative, is_negative
+from tools.guard import (
+    audit,
+    engage_lockdown,
+    is_locked_down,
+    lockdown_reason,
+    release_lockdown,
+)
+from tools.safety import is_affirmative, is_high_risk, is_negative
 
 log = logging.getLogger("ev")
 
@@ -124,6 +132,33 @@ def _acknowledgement(tool: str = "") -> str:
     return random.choice(config.ACK_PHRASES) if config.ACK_PHRASES else "On it."
 
 
+class TurnClock:
+    """Where one turn's seconds went, for the log line.
+
+    Deliberately a plain stopwatch rather than anything cleverer. The point
+    is to be able to say "the model took 0.9s and the voice took 0.8s"
+    instead of "it feels slow", because those two have different fixes and
+    no amount of reasoning about the code tells you which one you have.
+    """
+
+    __slots__ = ("started", "stages", "_mark")
+
+    def __init__(self) -> None:
+        self.started = time.perf_counter()
+        self._mark = self.started
+        self.stages: list[tuple[str, float]] = []
+
+    def lap(self, name: str) -> None:
+        """Record the time since the last lap under `name`."""
+        now = time.perf_counter()
+        self.stages.append((name, now - self._mark))
+        self._mark = now
+
+    def report(self) -> str:
+        parts = " ".join(f"{name} {secs:.2f}s" for name, secs in self.stages)
+        return f"{parts} | total {time.perf_counter() - self.started:.2f}s"
+
+
 def _summarise_call(call: ToolCall) -> str:
     """How a backlog entry should read when it is handed back tomorrow."""
     described = _describe(call)
@@ -132,6 +167,13 @@ def _summarise_call(call: ToolCall) -> str:
 
 class EV:
     """Owns the session: audio devices, network clients, and history."""
+
+    # A class-level default, not only an `__init__` one. Several tests build
+    # an `EV` with `__new__` and set up just the handful of attributes they
+    # need, which is the right way to test a loop that owns a microphone and
+    # two network clients - and it means anything read on a code path they
+    # exercise has to have a value without `__init__` having run.
+    _clock: "TurnClock | None" = None
 
     def __init__(self, text_mode: bool = False) -> None:
         self.text_mode = text_mode or config.TEXT_MODE
@@ -162,6 +204,8 @@ class EV:
         # half runs. Survives a confirmation, so "open the drive and tell me
         # what's in it" still answers after a spoken yes.
         self._pending_followup: str = ""
+        # Stopwatch for the turn in progress, or None outside one.
+        self._clock: TurnClock | None = None
 
     # -- lifecycle --------------------------------------------------------
     def _boot(self) -> StartupReport:
@@ -245,6 +289,15 @@ class EV:
         )
         if greeting:
             await self.say(greeting)
+
+        # Before the backlog, because "here is what is outstanding" makes no
+        # sense from something that is not allowed to do any of it.
+        if is_locked_down():
+            await self.say(
+                "Heads up, I'm locked down - I can talk and look but not act. "
+                "Say 'unlock' to lift it."
+            )
+            self.ui.warn(f"Lockdown active: {lockdown_reason()}")
 
         summary = self.backlog.summary()
         if summary:
@@ -349,8 +402,10 @@ class EV:
             return ""
 
         try:
+            self._clock = TurnClock()
             with self.ui.status("Transcribing..."):
                 transcript = await self.transcriber.transcribe(utterance.wav)
+            self._clock.lap("stt")
             # Deliberately *not* fed to the decoding prompt here. That
             # happens in `_route`, once E.V. knows the words were meant for
             # it: a conversation happening across the room would otherwise
@@ -404,8 +459,19 @@ class EV:
             return
         self.ui.speech(spoken)
 
+        # Lapped before playback rather than after: what matters is how long
+        # the user waited for the first sound, not how long the sentence
+        # takes to read out.
+        clock = self._clock
+        self._clock = None
         async with self._barge_in():
+            speaking = asyncio.get_running_loop().time()
             await self.speaker.say(spoken)
+        if clock is not None:
+            clock.stages.append(
+                ("voice", asyncio.get_running_loop().time() - speaking)
+            )
+            self._log_timing(clock)
 
         # Replying keeps the conversation open, so the user's next sentence
         # needs no wake phrase.
@@ -413,6 +479,13 @@ class EV:
         # Throttled internally, so this is a no-op on most turns. It bounds
         # how much of a session a power cut can erase.
         self.memory.touch()
+
+    def _log_timing(self, clock: TurnClock) -> None:
+        """One line per turn, on the terminal when asked and always in the log."""
+        report = clock.report()
+        log.info("turn: %s", report)
+        if config.TURN_TIMING:
+            self.ui.note(f"timing: {report}")
 
     async def _watch_for_barge_in(self) -> None:
         """Cut playback the moment the user starts talking over E.V.
@@ -547,7 +620,7 @@ class EV:
 
         await self._route(transcript, command)
 
-    async def _route(self, transcript: str, command: str) -> None:
+    async def _route(self, transcript: "Transcript | str", command: str) -> None:
         """Decide what one addressed utterance means, and act on it.
 
         Split out of `_tick` so an utterance heard *during* a running tool can
@@ -566,7 +639,11 @@ class EV:
         # transcript from across the room should stay silent, exactly like any
         # other utterance that was not addressed here.
         if getattr(transcript, "rejected", False):
-            self.ui.warn(f"Didn't catch that clearly ({transcript.why()}).")
+            # `why` is a `Transcript` method, and `transcript` is only one of
+            # those when it came from the recogniser - a typed command or a
+            # held utterance arrives as a plain `str`.
+            why = transcript.why() if isinstance(transcript, Transcript) else "unclear"
+            self.ui.warn(f"Didn't catch that clearly ({why}).")
             await self.say("Didn't catch that. Say it again?")
             return
 
@@ -658,6 +735,29 @@ class EV:
             await self.say(response_for(intent))
             return
 
+        if intent is Intent.LOCKDOWN:
+            # Matched locally, like every other control phrase, and for the
+            # sharpest version of the usual reason: this is the phrase
+            # someone says while watching E.V. do something they did not ask
+            # for. Sending it to the model first would mean asking the thing
+            # that is misbehaving for permission to stop it.
+            self.session.pending = None
+            self._pending_followup = ""
+            engage_lockdown("the user said so")
+            await self.say(response_for(intent))
+            self.ui.note(
+                "Lockdown: tools that change anything are refused. "
+                "Say 'unlock' to lift it."
+            )
+            return
+
+        if intent is Intent.UNLOCK:
+            released = release_lockdown()
+            await self.say(
+                response_for(intent) if released else "Nothing was locked."
+            )
+            return
+
         if intent is Intent.SHUTDOWN:
             await self.say(response_for(intent))
             self.request_stop()
@@ -726,6 +826,8 @@ class EV:
             await self.say(str(exc))
             return
 
+        if self._clock is not None:
+            self._clock.lap("brain")
         log.info("tool=%s args=%s", call.name, call.arguments)
         self.ui.action(call.name, _describe(call))
 
@@ -756,8 +858,15 @@ class EV:
         # an empty panel reads as a crash.
         self.ui.speech(reply or stream.spoken or "(nothing came back)")
 
+        clock = self._clock
+        self._clock = None
         async with self._barge_in():
             spoken = await stream.finish()
+        if clock is not None:
+            # No "voice" lap here: a streamed reply started talking while the
+            # model was still writing it, which is the whole point of the
+            # streaming path and is already inside the brain lap.
+            self._log_timing(clock)
 
         self.session.mark_exchange()
         self.brain.remember(command, spoken or reply)
@@ -898,6 +1007,13 @@ class EV:
         talking over a slow tool is usually giving the next command, and
         throwing it away would be its own bug.
         """
+        if self.mic is None:
+            # `_start_cancel_watch` already checked, but this runs as its own
+            # task: by the time it does, `stop()` may have closed the device
+            # and set this to None. Narrowing it here is also what tells the
+            # type checker that `self.mic.listen` below is real.
+            return
+
         cancellable = call.name in CANCELLABLE
         # A tool that returns almost immediately never needs this; opening the
         # microphone for it is pure overhead.
@@ -971,7 +1087,13 @@ class EV:
         # Speech and observation go to different channels. Putting the machine
         # detail in the assistant role is what taught the model to say
         # "Spoke:" out loud - see `ev.brain`.
-        self.brain.remember(command, result.speech, result.detail)
+        #
+        # `untrusted` rides along so a page, a file or a screen is fenced on
+        # the way back into the request rather than arriving looking like
+        # something the user said.
+        self.brain.remember(
+            command, result.speech, result.detail, untrusted=result.untrusted
+        )
 
         if result.cancelled:
             # The half that did not run is exactly the kind of thing the
@@ -1022,8 +1144,34 @@ class EV:
         held = ToolCall(
             pending.get("tool", "terminal_command"), dict(pending.get("args", {}))
         )
+        # How firm a yes this one needs. "Go" is a fine way to confirm
+        # opening an app and a poor way to confirm a delete: it is one
+        # syllable, the microphone is open, and the room is full of them.
+        strict = config.STRICT_CONFIRM_HIGH_RISK and is_high_risk(
+            str(pending.get("args", {}).get("reason", ""))
+        )
+        yes = is_affirmative(reply, strict=strict)
 
-        if reply and not is_affirmative(reply) and not is_negative(reply):
+        # A confirmation answered by a transcript the recogniser itself was
+        # unsure of is not a confirmation. Re-asking costs one sentence;
+        # guessing costs whatever the command does.
+        if (
+            yes
+            and config.CONFIRM_REQUIRES_CLEAR_AUDIO
+            and getattr(reply, "uncertain", False)
+        ):
+            self.session.pending = pending
+            self._pending_followup = followup
+            self.ui.warn("That yes was unclear; asking again.")
+            await self.say("I didn't hear that clearly. Confirm?")
+            if not self.text_mode:
+                second = await self._next_utterance(wait_s=8.0)
+                if second:
+                    self.ui.user(second, engaged=True)
+                await self._resolve_pending(second)
+            return
+
+        if reply and not yes and not is_negative(reply):
             # Not an answer at all - the user moved on. Drop the held command
             # and handle this as a fresh request, instead of silently eating
             # it as a "no" and leaving them wondering where their command went.
@@ -1045,7 +1193,7 @@ class EV:
             await self.handle(reply)
             return
 
-        if not reply or not is_affirmative(reply):
+        if not reply or not yes:
             await self.say("Cancelled.")
             self.brain.remember(
                 pending["command"],
@@ -1056,13 +1204,19 @@ class EV:
 
         args = {**held.arguments, "confirmed": True}
         args.pop("reason", None)
+        audit("confirmed", tool=held.name, command=str(pending["command"])[:200])
         ack = self._start_ack(held)
         try:
             result: ToolResult = await self._run_tool(held, args)
         finally:
             await self._finish_ack(ack)
         await self.say(result.speech)
-        self.brain.remember(pending["command"], result.speech, result.detail)
+        self.brain.remember(
+            pending["command"],
+            result.speech,
+            result.detail,
+            untrusted=result.untrusted,
+        )
         if not result.ok:
             self._log_backlog(pending["command"], held, "failed", result.detail)
             return
@@ -1112,6 +1266,7 @@ def check_config() -> int:
     import importlib.util
     import os
     import shutil
+    from pathlib import Path
 
     from tools.app_launcher import app_index as get_app_index
 
@@ -1312,6 +1467,61 @@ def check_config() -> int:
         f"OK   acknowledgement: {'on' if config.ACK_ENABLED else 'off'} "
         f"(spoken after {config.ACK_DELAY_S:.2f}s on a slow tool)"
     )
+
+    # The guardrails, stated plainly. Every one of them is invisible when it
+    # is working, which is exactly why a readiness report is the only place
+    # the user ever finds out whether they are on.
+    from tools.guard import audit_path, is_locked_down
+
+    if config.LOCKDOWN_ENABLED:
+        state = "ENGAGED - tools that change anything will refuse" if is_locked_down() else "ready"
+        notes.append(f"OK   lockdown: {state} (say 'lockdown' / 'unlock')")
+    else:
+        problems.append(
+            "MISS lockdown: EV_LOCKDOWN_ENABLED is false - there is no spoken "
+            "way to take E.V.'s tools away mid-session"
+        )
+
+    if config.GUARD_ENABLED:
+        notes.append(
+            f"OK   runaway limiter: {config.GUARD_MAX_ACTIONS} actions per "
+            f"{int(config.GUARD_WINDOW_S)}s, {config.GUARD_MAX_REPEATS} identical in a row"
+        )
+    else:
+        notes.append("WARN runaway limiter: disabled (EV_GUARD_ENABLED=false)")
+
+    if config.AUDIT_ENABLED:
+        path = audit_path()
+        size = path.stat().st_size if path.exists() else 0
+        notes.append(f"OK   audit log: {path} ({size} bytes)")
+    else:
+        notes.append(
+            "WARN audit log: disabled (EV_AUDIT_ENABLED=false) - nothing "
+            "records what E.V. did while you were not watching"
+        )
+
+    notes.append(
+        f"OK   redaction: {'on' if config.REDACT_SECRETS else 'off'}  "
+        f"untrusted fencing: {'on' if config.UNTRUSTED_FENCING else 'off'}"
+    )
+    if not config.REDACT_SECRETS:
+        problems.append(
+            "MISS redaction: EV_REDACT_SECRETS is false - a file read that "
+            "turns out to hold a key will send it to the model"
+        )
+    if not config.UNTRUSTED_FENCING:
+        problems.append(
+            "MISS untrusted fencing: EV_UNTRUSTED_FENCING is false - page and "
+            "file text reaches the model looking like the user said it"
+        )
+
+    # FILE_ROOTS defaulting to the whole profile is a deliberate choice and a
+    # broad one. Worth saying out loud once rather than leaving to be found.
+    if any(root == Path.home() for root in config.FILE_ROOTS):
+        notes.append(
+            "WARN files: FILE_ROOTS is your whole home folder. Credential "
+            "files are refused by name, but a narrower EV_FILE_ROOTS is safer"
+        )
 
     # Screen control has no sandbox and no undo, so the readiness report says
     # out loud what is armed rather than leaving it buried in a config file.

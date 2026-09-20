@@ -54,6 +54,50 @@ _PROTECTED_NAMES = {
     "id_rsa",
     "id_ed25519",
     ".env",
+    # Everything below is the same class of thing as the lines above it: a
+    # file that is *inside* FILE_ROOTS by construction, because FILE_ROOTS
+    # defaults to the user's profile, and that hands over an account to
+    # anyone who can read it. `.env` was already here; these are the rest of
+    # the set on an ordinary developer's machine.
+    ".env.local",
+    ".env.production",
+    ".git-credentials",
+    ".netrc",
+    "_netrc",
+    ".npmrc",
+    ".pypirc",
+    ".pgpass",
+    ".kube",
+    ".docker",
+    ".gradle",
+    "id_ecdsa",
+    "id_dsa",
+    "credentials.json",
+    "client_secret.json",
+    "service-account.json",
+    "secrets.json",
+    "secrets.yaml",
+    "secrets.yml",
+    # Chromium and Firefox keep saved passwords and session cookies in
+    # these, unencrypted enough to matter.
+    "login data",
+    "cookies",
+    "key4.db",
+    "logins.json",
+}
+
+# Protection by extension as well as by name, because a private key is a
+# private key whatever someone called the file. Name-only matching missed
+# every `deploy.pem` on the machine.
+_PROTECTED_SUFFIXES = {".pem", ".key", ".pfx", ".p12", ".jks", ".keystore", ".ppk"}
+
+
+# What each gated action is, in the words `tools.safety.HIGH_RISK_REASONS`
+# uses. A delete takes an unambiguous spoken yes; a bulk rename does not.
+_CONFIRM_REASON = {
+    "delete": "deletes files",
+    "batch_move": "moves or overwrites files",
+    "batch_rename": "renames files in bulk",
 }
 
 
@@ -125,8 +169,10 @@ def _check(path: Path) -> Path:
     # the normal case for a create.
     resolved = Path(os.path.abspath(os.path.realpath(str(path))))
 
-    if resolved.name.lower() in _PROTECTED_NAMES or any(
-        part.lower() in _PROTECTED_NAMES for part in resolved.parts
+    if (
+        resolved.name.lower() in _PROTECTED_NAMES
+        or resolved.suffix.lower() in _PROTECTED_SUFFIXES
+        or any(part.lower() in _PROTECTED_NAMES for part in resolved.parts)
     ):
         raise PathRefused(f"'{resolved.name}' is protected")
 
@@ -770,6 +816,10 @@ def file_manager(
         return ToolResult.confirm(
             f"That'll {what} {friendly(target)}. Confirm?",
             f"Awaiting confirmation to {verb} {target}.",
+            # Named so the core loop can tell a delete from a rename when it
+            # decides how firm a yes it needs. Popped before the call is
+            # replayed - see `ev_core._resolve_pending`.
+            reason=_CONFIRM_REASON.get(verb, "changes files"),
             action=verb,
             path=str(target),
             destination=str(other) if other else "",

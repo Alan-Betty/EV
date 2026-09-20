@@ -335,7 +335,55 @@ def _repair_path(text: str) -> str | None:
     return None
 
 
-def open_app(app: str = "", arguments: str = "", **_: object) -> ToolResult:
+def _came_from_the_internet(path: str) -> bool:
+    """True when Windows recorded that this file was downloaded.
+
+    Windows writes a `Zone.Identifier` alternate data stream next to
+    anything a browser or mail client saved, which is how Explorer knows to
+    show the "this file came from another computer" banner. Reading it is an
+    `os.path.exists` on the stream name - no library, no registry, no
+    parsing - and it is a far better signal than guessing from the folder,
+    because it says where the file *came from* rather than where it sits.
+
+    Absent on other platforms and on files that were built locally, which is
+    the correct answer in both cases.
+    """
+    if not IS_WINDOWS or not path:
+        return False
+    try:
+        return os.path.exists(f"{path}:Zone.Identifier")
+    except (OSError, ValueError):
+        return False
+
+
+def _hold_if_downloaded(exe: str, pretty: str, app: str, arguments: str) -> ToolResult | None:
+    """Ask before running a binary that arrived from the internet.
+
+    `open_app` is the one tool that starts an arbitrary process, and
+    `FILE_ROOTS` does not help here: it defaults to the user's profile, so
+    the Downloads folder is inside it by construction. Every other guard in
+    E.V. is about what a *known* program is told to do; this is about
+    whether the program should be started at all.
+
+    The confirmation is the point rather than a refusal. Downloading an
+    installer and then asking E.V. to run it is an ordinary thing to want.
+    Doing it without being asked, because a web page suggested it, is not.
+    """
+    if not config.CONFIRM_DOWNLOADED_APPS or not _came_from_the_internet(exe):
+        return None
+    return ToolResult.confirm(
+        f"{pretty} was downloaded from the internet. Confirm?",
+        f"Awaiting confirmation to launch '{exe}', which carries a "
+        "Zone.Identifier mark, so it was downloaded rather than installed.",
+        reason="runs a downloaded program",
+        app=app,
+        arguments=arguments,
+    )
+
+
+def open_app(
+    app: str = "", arguments: str = "", confirmed: bool = False, **_: object
+) -> ToolResult:
     if not app.strip():
         return ToolResult.failure("You didn't say which app.")
 
@@ -377,6 +425,10 @@ def open_app(app: str = "", arguments: str = "", **_: object) -> ToolResult:
 
         exe = resolve_executable(candidate)
         if exe:
+            if not confirmed:
+                held = _hold_if_downloaded(exe, pretty, app, arguments)
+                if held is not None:
+                    return held
             try:
                 popen_detached([exe, *extra])
                 return ToolResult.success(
@@ -411,6 +463,10 @@ def open_app(app: str = "", arguments: str = "", **_: object) -> ToolResult:
     # 3. The name exactly as said, in case it is on PATH but unaliased.
     exe = resolve_executable(spoken.replace(" ", "")) or resolve_executable(spoken)
     if exe:
+        if not confirmed:
+            held = _hold_if_downloaded(exe, pretty, app, arguments)
+            if held is not None:
+                return held
         try:
             popen_detached([exe, *extra])
             return ToolResult.success(_launched(pretty), f"Launched {exe}")

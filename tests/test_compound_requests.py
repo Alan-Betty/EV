@@ -149,7 +149,7 @@ class ScriptedBrain:
         self.asked.append((transcript, extra_context))
         return self.calls.pop(0) if self.calls else ToolCall("chat", {"reply": "Done."})
 
-    def remember(self, user, assistant, observation="") -> None:
+    def remember(self, user, assistant, observation="", untrusted=False) -> None:
         pass
 
 

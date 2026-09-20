@@ -23,7 +23,16 @@ from tools.computer_use import (
     take_screenshot,
 )
 from tools.dev_tools import dev_workflow
+from tools import guard
 from tools.file_manager import file_manager
+from tools.guard import (
+    SIDE_EFFECT_TOOLS,
+    UNTRUSTED_OUTPUT,
+    engage_lockdown,
+    is_locked_down,
+    redact,
+    release_lockdown,
+)
 from tools.memory import manage_todo, recall_fact, remember, remember_fact
 from tools.schemas import (
     TOOL_NAMES,
@@ -94,6 +103,10 @@ _ALLOWED_ARGS["remember"] = {"action", "key", "value"}
 # have no sandbox and no undo, so the spoken yes is the only thing standing
 # between a misheard word and a purchase.
 for _gated in (
+    # `open_app` is gated for one case only - a binary Windows marked as
+    # downloaded - but the argument still has to be declared here or the
+    # spoken yes would be filtered out on its way back in.
+    "open_app",
     "terminal_command",
     "file_manager",
     "backlog",
@@ -170,26 +183,65 @@ def dispatch(
             kwargs[key] = str(value)
     kwargs = {key: ("" if value is None else value) for key, value in kwargs.items()}
 
+    # Lockdown still allows E.V. to look, but not to leave a file behind
+    # doing it. Dropped rather than refused: the screenshot is the useful
+    # half and the write is incidental to it.
+    if name == "take_screenshot" and is_locked_down():
+        kwargs.pop("save_as", None)
+
+    # Before the tool, and therefore before the tool's own confirmation gate.
+    # A locked-down E.V. that asked "Confirm?" and then refused the yes would
+    # be worse than one that says no straight away.
+    refused = guard.check(name, kwargs)
+    if refused is not None:
+        return refused
+
     # After coercion, so the token arrives as an object rather than as the
     # string "<tools.base.CancelToken object at 0x...>".
     if cancel is not None and name in CANCELLABLE:
         kwargs["cancel"] = cancel
 
+    guard.note(name, kwargs)
     try:
-        return handler(**kwargs)
+        result = handler(**kwargs)
     except TypeError as exc:
         log.exception("Bad arguments for %s", name)
-        return ToolResult.failure("Wrong arguments for that one.", f"TypeError: {exc}")
+        result = ToolResult.failure(
+            "Wrong arguments for that one.", f"TypeError: {exc}"
+        )
     except Exception as exc:  # a broken tool must not kill the assistant
         log.exception("Tool %s blew up", name)
-        return ToolResult.failure(
+        result = ToolResult.failure(
             "That didn't work.", f"{type(exc).__name__} in {name}: {exc}"
         )
+
+    # Two marks, both applied centrally rather than in fifteen tools.
+    #
+    # Redaction: a secret in a tool result is nearly always an accident - a
+    # file that turned out to be a `.env`, a command that echoed a token -
+    # and `detail` is replayed to the model on every subsequent turn, so one
+    # leak becomes a leak in every request that follows it.
+    #
+    # `untrusted` marks the results that carry text written by someone who is
+    # not the user. `ev.brain` fences those so the model reads them as data.
+    result.speech = redact(result.speech)
+    result.detail = redact(result.detail)
+    if name in UNTRUSTED_OUTPUT:
+        result.untrusted = True
+
+    guard.record(name, kwargs, result)
+    return result
 
 
 __all__ = [
     "CANCELLABLE",
     "CancelToken",
+    "SIDE_EFFECT_TOOLS",
+    "UNTRUSTED_OUTPUT",
+    "engage_lockdown",
+    "is_locked_down",
+    "redact",
+    "release_lockdown",
     "REGISTRY",
     "TOOL_SPECS",
     "TOOL_NAMES",

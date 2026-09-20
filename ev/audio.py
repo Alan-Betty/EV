@@ -467,13 +467,25 @@ class Microphone:
 
         preroll_frames = max(1, config.PREROLL_MS // config.FRAME_MS)
         min_speech_frames = max(1, config.MIN_SPEECH_MS // config.FRAME_MS)
-        hang_frames = max(1, config.SILENCE_HANG_MS // config.FRAME_MS)
+        # Two hangs, not one - see SILENCE_HANG_MS. The long one covers the
+        # pause people take right after saying the name, before they have
+        # decided what they want; the short one ends an utterance that
+        # already contains a sentence.
+        short_hang = max(1, config.SILENCE_HANG_MS // config.FRAME_MS)
+        long_hang = max(
+            short_hang,
+            max(1, config.SILENCE_HANG_LONG_MS // config.FRAME_MS),
+        )
+        settled_frames = max(1, config.SILENCE_HANG_AFTER_MS // config.FRAME_MS)
         max_frames = int(config.MAX_UTTERANCE_S * 1000 / config.FRAME_MS)
 
         preroll: list[bytes] = []
         collected: list[bytes] = []
         speech_frames = 0
         silence_frames = 0
+        # Voiced frames only. `collected` counts the silence too, and a
+        # trailing pause is exactly what must not buy a shorter wait.
+        voiced_frames = 0
         triggered = False
         deadline = time.monotonic() + max_wait_s if max_wait_s else None
 
@@ -513,8 +525,12 @@ class Microphone:
             collected.append(frame)
             if is_speech:
                 silence_frames = 0
+                voiced_frames += 1
             else:
                 silence_frames += 1
+                hang_frames = (
+                    short_hang if voiced_frames >= settled_frames else long_hang
+                )
                 if silence_frames >= hang_frames:
                     break
 

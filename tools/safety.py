@@ -50,6 +50,27 @@ _BLOCKED: tuple[tuple[str, str], ...] = (
     (r"(curl|wget|iwr|invoke-webrequest)[^|]*\|\s*(sudo\s+)?(ba)?sh\b", "pipe-to-shell from the internet"),
     (r"(curl|wget|iwr|invoke-webrequest)[^|]*\|\s*(iex|invoke-expression)", "pipe-to-shell from the internet"),
     (r"\b(iex|invoke-expression)\s*\(\s*(new-object\s+net\.webclient|iwr|invoke-webrequest)", "remote code execution"),
+    # An encoded command is the one shape that defeats every pattern above
+    # it, because there is nothing left to read. Whatever it decodes to may
+    # be perfectly innocent; it cannot be *checked*, and a classifier that
+    # cannot read its input has no business saying yes.
+    (r"\s-e(nc|ncodedcommand)?\s+[a-z0-9+/=]{24,}", "base64-encoded command"),
+    (r"\bfrombase64string\b", "base64-decoded command"),
+    # Turning the machine's own defences off is never a step towards the
+    # thing a user asked a voice assistant for.
+    # No `\b` before the dash: a word boundary needs a word character on one
+    # side, and " -disable" has a space on one side and a hyphen on the
+    # other, so `\b-disable` never matches anything at all.
+    (r"\bset-mppreference\b[^|]*\s-disable\w+", "disables Windows Defender"),
+    (r"\badd-mppreference\b[^|]*-exclusion", "excludes a path from Defender"),
+    (r"\bwevtutil\s+cl\b|\bclear-eventlog\b", "erases the event log"),
+    (r"\bsdelete\b|\bshred\b", "unrecoverable file wipe"),
+    # Download-and-execute in one breath. The two halves are separately
+    # reviewable; together they are the standard shape of a compromise.
+    (r"\bcertutil\b[^|]*-urlcache[^|]*-f\s+https?://", "downloads a file with certutil"),
+    (r"\bbitsadmin\b[^|]*\s/transfer\b", "downloads a file with bitsadmin"),
+    (r"\b(mshta|regsvr32)\b[^|]*\bhttps?://", "runs remote code through a signed binary"),
+    (r"\bdownloadstring\b|\bdownloadfile\b", "downloads and runs code"),
 )
 
 # Patterns that are legitimate but destructive enough to need a yes.
@@ -73,7 +94,67 @@ _REVIEW: tuple[tuple[str, str], ...] = (
     (r"\bset-executionpolicy\b", "changes PowerShell execution policy"),
     (r"\bschtasks\b|\bregister-scheduledtask\b", "creates a scheduled task"),
     (r">\s*[^>|\s]+", "redirects output over a file"),
+    # A second interpreter is a hole straight through everything above: the
+    # patterns read a command line, and `python -c "..."` is a command line
+    # whose contents are a different language. Legitimate often enough to be
+    # worth asking about rather than refusing.
+    (r"\b(python|python3|py|node|deno|bun|ruby|perl|php)\b\s+(-c|-e|--eval)\b", "runs code through another interpreter"),
+    (r"\b(powershell|pwsh|cmd)\b[^|]*\s(-command|/c|/k)\b", "runs a nested shell"),
+    (r"\bwsl\b|\bwmic\b", "runs a command through another subsystem"),
+    # Downloading is not running, but it is how running usually starts, and
+    # a file arriving on the machine unannounced is worth one question.
+    (r"\b(invoke-webrequest|iwr|curl|wget)\b[^|]*\s(-outfile|-o|--output)\b", "downloads a file"),
+    (r"\bstart-bitstransfer\b", "downloads a file"),
+    (r"\b(msiexec|rundll32|installutil)\b", "runs an installer or a system binary directly"),
+    (r"\b(ssh|scp|sftp|ftp|telnet|nc|ncat|netcat)\b", "opens a connection to another machine"),
+    (r"\bstart-process\b", "starts another program"),
+    (r"\bnew-service\b|\bnssm\b", "installs a service"),
+    (r"\bgit\s+config\b[^|]*\b(credential|url\.)", "changes git credentials"),
 )
+
+
+# Reasons that describe something irreversible or expensive. A spoken "go"
+# is a fine way to confirm opening an app; it is a poor way to confirm a
+# delete, because "go" is one syllable and the microphone is open. These are
+# the verdicts `ev_core` holds to a stricter yes - see `is_affirmative`.
+HIGH_RISK_REASONS: frozenset[str] = frozenset(
+    {
+        "deletes files",
+        "removes a directory",
+        "shuts down or reboots the machine",
+        "changes user accounts",
+        "edits the registry",
+        "installs or removes software",
+        "runs with elevated privileges",
+        "spends money",
+        "sends something other people will see",
+        "destroys something",
+        "handles a credential",
+        "ends the session or the machine",
+        "downloads a file",
+        "runs code through another interpreter",
+        "runs an installer or a system binary directly",
+    }
+)
+
+
+def is_high_risk(reason: str) -> bool:
+    """True when a confirmation for `reason` should take an unambiguous yes."""
+    return (reason or "").strip().lower() in HIGH_RISK_REASONS
+
+
+# Where one command ends and the next begins. Classification happens per
+# segment, because the alternative is trivially bypassable: several of the
+# blocked patterns are anchored to the end of the string so that a wipe of a
+# whole drive can be told apart from a delete inside a build folder, and
+# appending `; echo done` used to slide straight past that anchor.
+_SEPARATORS = re.compile(r"(?:&&|\|\||[;&|\n])")
+
+
+def _segments(command: str) -> list[str]:
+    """Split a command line into the individual commands it will run."""
+    parts = [part.strip() for part in _SEPARATORS.split(command)]
+    return [part for part in parts if part]
 
 
 # ---------------------------------------------------------------------------
@@ -160,18 +241,34 @@ def classify_gui(description: str) -> Verdict:
 
 
 def classify(command: str) -> Verdict:
-    """Classify a shell command by how much damage it could do."""
+    """Classify a shell command by how much damage it could do.
+
+    The whole line is read first, then each `;`-, `&&`- or pipe-separated
+    command in it on its own. Both passes are needed and neither is
+    redundant: a pipeline that fetches a script and pipes it into a shell is
+    only a risk when the halves are read together, while the patterns
+    anchored to the end of the line only match when a trailing `; echo done`
+    that someone appended is not part of the string being matched. The worst
+    verdict found anywhere wins.
+    """
     text = " ".join(command.lower().split())
     if not text:
         return Verdict(Risk.BLOCKED, "empty command")
 
+    candidates = [text]
+    segments = _segments(text)
+    if len(segments) > 1:
+        candidates.extend(segments)
+
     for pattern, reason in _BLOCKED:
-        if re.search(pattern, text):
-            return Verdict(Risk.BLOCKED, reason)
+        for candidate in candidates:
+            if re.search(pattern, candidate):
+                return Verdict(Risk.BLOCKED, reason)
 
     for pattern, reason in _REVIEW:
-        if re.search(pattern, text):
-            return Verdict(Risk.REVIEW, reason)
+        for candidate in candidates:
+            if re.search(pattern, candidate):
+                return Verdict(Risk.REVIEW, reason)
 
     return Verdict(Risk.SAFE, "no destructive pattern matched")
 
@@ -180,6 +277,16 @@ _AFFIRMATIVE = {
     "yes", "yeah", "yep", "yup", "sure", "confirm", "confirmed", "do it",
     "go ahead", "go", "affirmative", "ok", "okay", "please do", "run it",
     "y", "proceed",
+}
+
+# The subset that survives a noisy room. Everything dropped from here is a
+# word that gets said *at* someone rather than to them - "go", "ok", "sure",
+# "y" - and a one-syllable filler picked up off a television is not a
+# decision to delete anything. Used for the confirmations that cannot be
+# undone; see `HIGH_RISK_REASONS`.
+_STRONG_AFFIRMATIVE = {
+    "yes", "yeah", "yep", "yup", "confirm", "confirmed", "do it",
+    "go ahead", "affirmative", "please do", "run it", "proceed",
 }
 
 _NEGATIVE = {
@@ -204,16 +311,23 @@ def is_negative(text: str) -> bool:
     return words[0] in _NEGATIVE or " ".join(words[:2]) in _NEGATIVE
 
 
-def is_affirmative(text: str) -> bool:
-    """True only for a clear yes. Anything ambiguous counts as a no."""
+def is_affirmative(text: str, strict: bool = False) -> bool:
+    """True only for a clear yes. Anything ambiguous counts as a no.
+
+    `strict` narrows the accepted words to the ones nobody says by accident.
+    It is for the confirmations with nothing behind them - a delete, a
+    purchase, a send - where the cost of a false yes is the whole point of
+    asking. Everywhere else the wider list is kinder and costs nothing.
+    """
+    vocabulary = _STRONG_AFFIRMATIVE if strict else _AFFIRMATIVE
     cleaned = re.sub(r"[^a-z' ]", "", text.lower()).strip()
     if not cleaned:
         return False
-    if cleaned in _AFFIRMATIVE:
+    if cleaned in vocabulary:
         return True
     # Allow a leading yes with trailing words ("yes, do it"), but never if a
     # negation appears anywhere in the utterance.
     if any(word in cleaned.split() for word in _NEGATIVE):
         return False
     first_two = " ".join(cleaned.split()[:2])
-    return cleaned.split()[0] in _AFFIRMATIVE or first_two in _AFFIRMATIVE
+    return cleaned.split()[0] in vocabulary or first_two in vocabulary

@@ -980,6 +980,10 @@ def _gate(description: str, confirmed: bool, speech: str, **data: Any) -> ToolRe
     return ToolResult.confirm(
         speech,
         f"Awaiting confirmation: {description} ({verdict.reason}).",
+        # Carried so the core loop knows how firm a yes this one needs. It
+        # is popped before the call is replayed, like every other key here
+        # that is not a schema property.
+        reason=verdict.reason,
         **data,
     )
 
