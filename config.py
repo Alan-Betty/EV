@@ -640,6 +640,218 @@ COMPUTER_PASTE_THRESHOLD = _env_int("EV_COMPUTER_PASTE_THRESHOLD", 60)
 
 
 # ---------------------------------------------------------------------------
+# Autonomous missions (agent_task)
+# ---------------------------------------------------------------------------
+# `screen_task` finishes a job inside one application and `browser_task`
+# finishes one inside a page. An errand like "find a gaming mouse under 5000
+# with an infinite scroll wheel and put it in my basket" is neither: it is
+# search, judgement, a site, a page, and a check that the right thing landed.
+# `agent_task` is the loop that keeps choosing between those tools until the
+# screen itself shows the errand is done.
+#
+# Everything here is a ceiling. An autonomous run is the one thing in E.V.
+# that can spend real time and real money without anybody watching it, so it
+# gets a round budget, a wall-clock budget, a stall detector and a kill
+# switch - and it leans on the confirmation gates rather than replacing them.
+AGENT_MODE_ENABLED = _env_bool("EV_AGENT_MODE_ENABLED", True)
+# Rounds of look-think-act. Each round is one vision call plus one sub-task,
+# and a sub-task is itself a small loop, so this is a much bigger ceiling than
+# it looks.
+AGENT_MAX_ROUNDS = _env_int("EV_AGENT_MAX_ROUNDS", 12)
+AGENT_TIMEOUT_S = _env_float("EV_AGENT_TIMEOUT_S", 900.0)
+# How many actions one sub-task may take before the mission looks again.
+# Small on purpose: the mission's judgement is better than the driver's, and
+# the driver is the half that cannot tell it is going the wrong way.
+AGENT_SUBTASK_STEPS = _env_int("EV_AGENT_SUBTASK_STEPS", 6)
+# Whether taking over the whole screen asks first. Leave it on.
+AGENT_CONFIRM_START = _env_bool("EV_AGENT_CONFIRM_START", True)
+# How long a mission will sit out a vision rate limit before giving up and
+# reporting what it managed. Unlike a spoken command there is nobody standing
+# at the microphone, so waiting is free and quitting half way through an
+# errand is not.
+AGENT_BUDGET_WAIT_S = _env_float("EV_AGENT_BUDGET_WAIT_S", 75.0)
+# Consecutive rounds that change nothing on screen before the run is called
+# stuck. Two, like `screen_task`: one is a slow page, two is a wall.
+AGENT_STALL_ROUNDS = _env_int("EV_AGENT_STALL_ROUNDS", 2)
+# Let the screen settle between rounds, so the next frame shows the state the
+# last sub-task left rather than the one before it.
+AGENT_ROUND_PAUSE_S = _env_float("EV_AGENT_ROUND_PAUSE_S", 0.8)
+# How much of a sub-task's result is carried into the next round's prompt.
+# Enough for a page read to be useful, capped because it is paid for on every
+# remaining round.
+AGENT_OBSERVATION_CHARS = _env_int("EV_AGENT_OBSERVATION_CHARS", 1200)
+# How many finished steps the supervisor is shown each round. Eight was too
+# few for an errand that searches, judges, opens a page and acts on it: the
+# step it most needed to remember had already scrolled out of the window.
+AGENT_HISTORY_LINES = _env_int("EV_AGENT_HISTORY_LINES", 12)
+
+# Whether an errand that could be done on a web page is done there, through
+# the DOM, instead of by looking at pixels. On by default, and the reason is
+# arithmetic rather than taste: a vision round costs ~1900 tokens against a
+# per-minute window of 8000, so four of them empty it - while a DOM round
+# costs one cheap text completion on a bucket of its own. The same errand
+# goes from four rounds to twenty before anything is rate limited.
+AGENT_PREFER_BROWSER = _env_bool("EV_AGENT_PREFER_BROWSER", True)
+# Rounds and time for the browser half. Higher than the vision ceilings
+# because each round is perhaps a hundredth of the cost.
+AGENT_WEB_MAX_ROUNDS = _env_int("EV_AGENT_WEB_MAX_ROUNDS", 20)
+AGENT_WEB_TIMEOUT_S = _env_float("EV_AGENT_WEB_TIMEOUT_S", 420.0)
+# Actions the planner may run before it has to look again. Filling a box and
+# pressing Enter needs no fresh look between the two; clicking a result it
+# has not seen yet does.
+AGENT_WEB_ACTIONS_PER_ROUND = _env_int("EV_AGENT_WEB_ACTIONS_PER_ROUND", 4)
+# How many elements the page scan stamps and how many of them reach the
+# prompt. The scan limit is the higher of the two so that the count in "and
+# 40 more" is true rather than an artefact of where the scan stopped.
+AGENT_WEB_SCAN_LIMIT = _env_int("EV_AGENT_WEB_SCAN_LIMIT", 120)
+AGENT_WEB_MAX_ELEMENTS = _env_int("EV_AGENT_WEB_MAX_ELEMENTS", 45)
+AGENT_WEB_TEXT_CHARS = _env_int("EV_AGENT_WEB_TEXT_CHARS", 2000)
+# Product titles run to ninety characters and say everything useful in the
+# first sixty; forty-five elements of that is most of a round's prompt.
+AGENT_WEB_LABEL_CHARS = _env_int("EV_AGENT_WEB_LABEL_CHARS", 60)
+# One "screen" of scrolling, in pixels.
+AGENT_WEB_SCROLL_PX = _env_int("EV_AGENT_WEB_SCROLL_PX", 700)
+# Let the page settle after an action, so the next scan sees what the click
+# did rather than what was there before it.
+AGENT_WEB_SETTLE_S = _env_float("EV_AGENT_WEB_SETTLE_S", 0.6)
+# How long an action that might navigate waits for the new page before the
+# scan runs. Short on purpose: a page that never goes quiet - an open socket,
+# a polling advert - must not stop the loop, and the scan retries anyway.
+AGENT_WEB_NAV_WAIT_S = _env_float("EV_AGENT_WEB_NAV_WAIT_S", 6.0)
+# How many times one look retries before giving up on the page, and how long
+# it waits between attempts. This is what carries a run past a bot check:
+# amazon.in answers an automated browser with an AWS WAF challenge that has
+# no content at all and turns into the real shop about two seconds later, so
+# a single impatient look reads the whole site as empty.
+AGENT_WEB_SCAN_TRIES = _env_int("EV_AGENT_WEB_SCAN_TRIES", 3)
+# How long a look waits for the requests a page fires after it has loaded.
+# A single-page shop has its skeleton at domcontentloaded and its products a
+# second later over XHR; without this the planner is handed an empty shop.
+AGENT_WEB_IDLE_WAIT_S = _env_float("EV_AGENT_WEB_IDLE_WAIT_S", 2.5)
+# Whether the browser answers yes to a page's own confirm() boxes. Off: "Are
+# you sure you want to delete this?" is the question a person should answer,
+# and a loop that always says yes is a loop with no confirmation gate at all.
+# Plain alerts are always accepted - there is nothing to decide - and what
+# any of them said is shown to the planner either way.
+AGENT_WEB_ACCEPT_CONFIRMS = _env_bool("EV_AGENT_WEB_ACCEPT_CONFIRMS", False)
+AGENT_WEB_EMPTY_WAIT_S = _env_float("EV_AGENT_WEB_EMPTY_WAIT_S", 1.5)
+
+# The repeat guard. A shop answers "add to basket" by changing a cart badge
+# and nothing else, so the page is genuinely different after every click and
+# the stall detector - correctly - sees progress. That is how one mouse got
+# into a basket four times: each click was individually reasonable, the
+# history said "clicked 20" three rounds running, and nothing in the loop
+# knew those were the same button. Actions that cannot be undone by looking
+# away are remembered by what the button *said* and refused a second time.
+AGENT_WEB_REPEAT_GUARD = _env_bool("EV_AGENT_WEB_REPEAT_GUARD", True)
+# How many completed steps the planner is shown. Eight was too few for an
+# errand that searches, sorts, opens a product and adds it: the thing it most
+# needed to remember had already scrolled out of the window.
+AGENT_WEB_HISTORY_LINES = _env_int("EV_AGENT_WEB_HISTORY_LINES", 12)
+
+# The one place the DOM route spends a vision call: `look`, for a page whose
+# answer is not in its text. An "added to cart" toast that fades, a captcha,
+# a layout that reads as nonsense - all of them are visible and none of them
+# are readable. Bounded per errand, because the whole point of this route is
+# that it does not pay for frames.
+AGENT_WEB_LOOK_ENABLED = _env_bool("EV_AGENT_WEB_LOOK_ENABLED", True)
+AGENT_WEB_LOOK_MAX = _env_int("EV_AGENT_WEB_LOOK_MAX", 3)
+AGENT_WEB_LOOK_WIDTH = _env_int("EV_AGENT_WEB_LOOK_WIDTH", 1100)
+AGENT_WEB_LOOK_QUALITY = _env_int("EV_AGENT_WEB_LOOK_QUALITY", 70)
+# A look costs about what a screen-task step costs, so it is refused when the
+# minute's budget is already too thin to carry one.
+AGENT_WEB_LOOK_MIN_BUDGET = _env_int("EV_AGENT_WEB_LOOK_MIN_BUDGET", 2500)
+
+# The planner behind the browser loop. Deliberately a model of its own:
+# Groq meters per model, not per account, so a twenty-round errand on this
+# bucket leaves the brain's bucket - and the vision one - untouched.
+AGENT_PLANNER_MODEL = _env("EV_AGENT_PLANNER_MODEL", "openai/gpt-oss-120b")
+# More buckets, not a bigger one. Measured on a free key, every ordinary Groq
+# model is metered at 8000 tokens a minute - separately - so three models is
+# three windows and about three times the errand before anything is refused.
+# The brain's own default is last on purpose: sharing its bucket is the thing
+# this list exists to avoid.
+AGENT_PLANNER_FALLBACKS = [
+    name.strip()
+    for name in _env(
+        "EV_AGENT_PLANNER_FALLBACKS",
+        "qwen/qwen3.8-27b,openai/gpt-oss-20b",
+    ).split(",")
+    if name.strip()
+]
+# The remaining-token header counts what a request RESERVES, not what it
+# spends, so `max_tokens` is charged in full whether or not it is used. A
+# plan object is six short lines; 700 was a third of every round's cost for
+# nothing.
+AGENT_PLANNER_MAX_TOKENS = _env_int("EV_AGENT_PLANNER_MAX_TOKENS", 450)
+AGENT_PLANNER_TIMEOUT_S = _env_float("EV_AGENT_PLANNER_TIMEOUT_S", 45.0)
+AGENT_PLANNER_TEMPERATURE = _env_float("EV_AGENT_PLANNER_TEMPERATURE", 0.1)
+# How hard a reasoning model is allowed to think before answering. "low" on
+# purpose: the planner is reading a page it has already been handed and
+# writing six lines of JSON about it, so reasoning tokens come straight out
+# of the output budget and, when they exhaust it, leave a truncated object
+# that JSON mode rejects with a 400. Blank disables the parameter for
+# providers that do not know it.
+AGENT_PLANNER_REASONING = _env("EV_AGENT_PLANNER_REASONING", "low")
+
+# The overlay: a red frame round the screen and a badge naming the errand.
+# A pointer moving on its own with nothing on screen to explain it looks
+# exactly like a compromised machine, which is why this is on by default.
+AGENT_OVERLAY_ENABLED = _env_bool("EV_AGENT_OVERLAY_ENABLED", True)
+AGENT_OVERLAY_COLOUR = _env("EV_AGENT_OVERLAY_COLOUR", "#ff3b30")
+AGENT_OVERLAY_BORDER_PX = _env_int("EV_AGENT_OVERLAY_BORDER_PX", 6)
+# The panel is opaque by default. It used to be 0.92, which let the page
+# behind it show through the text it was there to be read against - a badge
+# saying what a machine is doing to your screen is the last thing that should
+# be hard to read. Transparency in the overlay is drawn rather than set: the
+# frame fades because its rings are mixed, not because the window is faint.
+AGENT_OVERLAY_OPACITY = _env_float("EV_AGENT_OVERLAY_OPACITY", 1.0)
+# Click-through by default: a badge that can be clicked is also a badge that
+# can intercept a click meant for the page underneath it. Set false to get a
+# real STOP button back, on a machine where the hotkey is already taken.
+AGENT_OVERLAY_CLICKTHROUGH = _env_bool("EV_AGENT_OVERLAY_CLICKTHROUGH", True)
+# How long the mission waits for Tk to come up before starting anyway.
+AGENT_OVERLAY_START_S = _env_float("EV_AGENT_OVERLAY_START_S", 3.0)
+
+# How the overlay is drawn. A run that moves the pointer under someone's
+# hands is the most alarming thing E.V. does, and a badge that looks like a
+# debug print does not help: what it is announcing is that this is
+# deliberate, supervised and stoppable. So it is a panel with rounded
+# corners, a live dot, a round counter and a clock, and the frame round the
+# screen is a band that fades outwards rather than a hard red box.
+AGENT_OVERLAY_WIDTH = _env_int("EV_AGENT_OVERLAY_WIDTH", 620)
+AGENT_OVERLAY_CORNER_PX = _env_int("EV_AGENT_OVERLAY_CORNER_PX", 14)
+# The frame is drawn as this many 1px rings, each dimmer than the last, so
+# it reads as a glow instead of an outline. The whole window is then made
+# translucent, which is what keeps it from covering the work underneath.
+AGENT_OVERLAY_GLOW_LAYERS = _env_int("EV_AGENT_OVERLAY_GLOW_LAYERS", 16)
+AGENT_OVERLAY_GLOW_ALPHA = _env_float("EV_AGENT_OVERLAY_GLOW_ALPHA", 0.72)
+# Viewfinder brackets at the four corners. They are what makes the frame
+# read as a deliberate instrument rather than an error dialog.
+AGENT_OVERLAY_BRACKET_PX = _env_int("EV_AGENT_OVERLAY_BRACKET_PX", 72)
+# The live dot breathes at this rate. Off is a perfectly reasonable taste,
+# and cheaper on a machine already doing real work.
+AGENT_OVERLAY_PULSE = _env_bool("EV_AGENT_OVERLAY_PULSE", True)
+AGENT_OVERLAY_TICK_MS = _env_int("EV_AGENT_OVERLAY_TICK_MS", 90)
+# Fading in stops the badge from arriving like a pop-up.
+AGENT_OVERLAY_FADE_S = _env_float("EV_AGENT_OVERLAY_FADE_S", 0.25)
+# top or bottom. Bottom keeps it clear of a browser's own address bar,
+# which is where a lot of the work happens.
+AGENT_OVERLAY_POSITION = _env("EV_AGENT_OVERLAY_POSITION", "top").strip().lower()
+AGENT_OVERLAY_MARGIN_PX = _env_int("EV_AGENT_OVERLAY_MARGIN_PX", 18)
+
+# The kill switch, registered with the window manager so it lands whatever
+# has focus - including a full-screen application that owns every other key.
+# It is one of three exits: this, "stop everything" out loud, and Ctrl+C.
+AGENT_HOTKEY_ENABLED = _env_bool("EV_AGENT_HOTKEY_ENABLED", True)
+AGENT_KILL_HOTKEY = _env("EV_AGENT_KILL_HOTKEY", "ctrl+alt+q")
+# Whether the kill switch also locks E.V. down, so nothing else runs until
+# the user says "unlock". On by default: someone reaching for a kill switch
+# wants everything to stop, not just the thing that is running.
+AGENT_KILL_LOCKS_DOWN = _env_bool("EV_AGENT_KILL_LOCKS_DOWN", True)
+
+
+# ---------------------------------------------------------------------------
 # Browser automation (Playwright)
 # ---------------------------------------------------------------------------
 # Structured web work goes through the DOM rather than through pixels: it is
@@ -996,12 +1208,8 @@ words you want said.
 TONE EXAMPLES - match this register
 User: "open chrome and find me a gaming mouse"
 You: "Chrome's up. Let's find you one with an unreasonable number of buttons."
-User: "what's my python version"
-You: "Three thirteen point two. You're current, nice."
 User: "delete the whole build folder"
 You: "That wipes the folder. Confirm?"
-User: "thanks"
-You: "Anytime."
 User: "I've been up for nineteen hours"
 You: "Nineteen. That's a lot of hours. Want a coffee shop, or are we \
 pretending that's fine?"
@@ -1022,15 +1230,15 @@ arguments - a guessed path opens the wrong window and looks like success. If \
 you do not know where something is, let file_manager 'find' or 'open' look.
 - "open my email", "check my calendar", "open my drive" are web_search with \
 engine mail, calendar or drive and no query. Do not ask which provider.
-- take_screenshot is how you look at the screen: what is on it, what an \
-error says, what an inbox contains. Use it before any mouse_action, and pass \
-region to read small text.
-- mouse_action and keyboard_action drive the real pointer and keyboard. Last \
-resort, no undo. Coordinates are fractions 0 to 1; always fill in label.
+- take_screenshot is how you look at the screen - an error, an inbox, what \
+is on it. Use it before any mouse_action; pass region to read small text.
+- mouse_action and keyboard_action drive the real pointer. Last resort, no \
+undo. Coordinates are fractions 0 to 1; always fill in label.
 - screen_task does a whole desktop job: opens apps, focuses windows, clicks \
 and types, looking between steps. "Open Notepad and type hello" is ONE \
-screen_task and the goal is that whole sentence, not an open_app that drops \
-the typing.
+screen_task, the goal being that whole sentence. agent_task is the bigger \
+one: it takes the screen and keeps going across apps and pages, judging as it \
+goes, until the whole errand is done.
 - browser_task beats screen_task on a website: it reads the page, not the \
 pixels. To learn what is IN a page, an inbox or a calendar or results, use \
 browser_task ending in a read step. web_search only opens a page.

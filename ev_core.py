@@ -63,6 +63,7 @@ from ev.tts import Speaker, SpeechStream, clean_for_speech
 from ev.ui import UI
 from tools import CANCELLABLE, CancelToken, ToolResult, dispatch
 from tools.computer_use import close_vision_client
+from tools.web_agent import close_planner_client
 from tools.guard import (
     audit,
     engage_lockdown,
@@ -84,7 +85,7 @@ def _describe(call: ToolCall) -> str:
         "label", "task", "question", "keys",
     )
     parts = [
-        f"{key}={value}"
+        f"{key}={value}" 
         for key, value in call.arguments.items()
         if key in interesting and str(value).strip()
     ]
@@ -121,7 +122,7 @@ _UNCLEAR_AUDIO = (
 # to happen, before the first click rather than after it, is the difference
 # between "it's working" and "something has taken over my mouse".
 SCREEN_TOOLS: frozenset[str] = frozenset(
-    {"screen_task", "browser_task", "mouse_action", "keyboard_action"}
+    {"screen_task", "browser_task", "mouse_action", "keyboard_action", "agent_task"}
 )
 
 
@@ -357,6 +358,7 @@ class EV:
 
     async def stop(self) -> None:
         self._running = False
+        self.ui.end_status()
         self.speaker.stop()
         if self.mic is not None:
             await asyncio.to_thread(self.mic.close)
@@ -368,9 +370,11 @@ class EV:
         # The vision client is opened lazily by the first screenshot and may
         # never exist at all; closing it is a no-op when it does not.
         close_vision_client()
+        close_planner_client()
 
     def request_stop(self) -> None:
         self._running = False
+        self.ui.end_status()
         self.speaker.stop()
 
     # -- input ------------------------------------------------------------
@@ -379,20 +383,26 @@ class EV:
         if self.mic is None:
             return ""
 
-        # The spinner is only shown on the blocking idle wait. While a
-        # conversation is open this polls every couple of seconds, and a
-        # spinner that tears down and rebuilds that often just flickers.
-        if wait_s is None:
-            with self.ui.status("Listening..."):
-                utterance = await asyncio.to_thread(
-                    self.mic.listen, wait_s, lambda: not self._running
-                )
+        # The spinner is shown only while the conversation is open, and that
+        # is not a detail of presentation. Animated the whole time, it says
+        # E.V. is listening to the room - which it is, but not to *you*:
+        # outside the window nothing is acted on without the wake phrase, and
+        # a spinner that spins through that is a machine claiming attention
+        # it is not paying. Inside the window it is the honest signal that
+        # the next thing said needs no name in front of it.
+        listening = self.session.engaged and not self.session.in_standby
+        if listening:
+            self.ui.begin_status("Listening...")
         else:
-            utterance = await asyncio.to_thread(
-                self.mic.listen, wait_s, lambda: not self._running
-            )
+            self.ui.end_status()
+
+        utterance = await asyncio.to_thread(
+            self.mic.listen, wait_s, lambda: not self._running
+        )
         if utterance is None:
             return ""
+        # Whatever happens next prints, and the spinner has to be gone first.
+        self.ui.end_status()
 
         # In standby the only thing worth hearing is a couple of words. A
         # cough or a passing sentence is not, and transcribing it costs a Groq
@@ -403,7 +413,17 @@ class EV:
 
         try:
             self._clock = TurnClock()
-            with self.ui.status("Transcribing..."):
+            # Shown on the same terms as the listening one. An unaddressed
+            # sentence is still transcribed - detecting the wake phrase means
+            # having the words - but announcing that on screen is the same
+            # claim of attention, made about a conversation that was not with
+            # E.V. at all.
+            watching = (
+                self.ui.status("Transcribing...")
+                if listening
+                else contextlib.nullcontext()
+            )
+            with watching:
                 transcript = await self.transcriber.transcribe(utterance.wav)
             self._clock.lap("stt")
             # Deliberately *not* fed to the decoding prompt here. That
@@ -1035,7 +1055,26 @@ class EV:
                 continue
 
             self.ui.user(str(heard), engaged=True)
-            if match_intent(heard, self.session.mode) is not Intent.CANCEL:
+            intent = match_intent(heard, self.session.mode)
+
+            if intent is Intent.LOCKDOWN:
+                # The one phrase that must work best while a tool is
+                # running, because that is when it is said. "Stop" is about
+                # the thing in front of the user; "stop everything" is about
+                # everything after it too, and holding it until the running
+                # tool finished would answer the wrong question - an
+                # autonomous run would keep going for another minute while
+                # E.V. sat on the sentence asking it not to.
+                engage_lockdown("the user said so")
+                self.session.pending = None
+                self._pending_followup = ""
+                token.cancel()
+                self.speaker.stop()
+                self.ui.warn("Lockdown: everything stops until you say unlock.")
+                await self.say(response_for(Intent.LOCKDOWN))
+                return
+
+            if intent is not Intent.CANCEL:
                 # Held for `_tick`, which uses it instead of listening again.
                 self._queued_utterance = heard
                 return
@@ -1617,6 +1656,67 @@ def check_config() -> int:
         notes.append(
             "WARN browser_task: disabled (EV_BROWSER_AUTOMATION_ENABLED=false)"
         )
+
+    if config.AGENT_MODE_ENABLED:
+        from tools.overlay import parse_hotkey
+
+        notes.append(
+            f"OK   autonomous missions: on, up to {config.AGENT_MAX_ROUNDS} "
+            f"rounds or {config.AGENT_TIMEOUT_S:.0f}s; overlay "
+            f"{'on' if config.AGENT_OVERLAY_ENABLED else 'OFF'}"
+        )
+        # Which route a mission takes first is the difference between an
+        # errand that runs for twenty rounds and one that is rate limited
+        # after four, so it belongs in the readiness report rather than in
+        # the logs.
+        if config.AGENT_PREFER_BROWSER and config.BROWSER_AUTOMATION_ENABLED:
+            from tools.web_agent import planner_rotation
+
+            if importlib.util.find_spec("playwright") is None:
+                notes.append(
+                    "WARN missions: browser-first is on but playwright is not "
+                    "installed, so every errand will fall back to vision and "
+                    "meet the per-minute limit in about four rounds"
+                )
+            else:
+                notes.append(
+                    f"OK   mission route: browser first, up to "
+                    f"{config.AGENT_WEB_MAX_ROUNDS} rounds with no vision cost"
+                )
+                notes.append(
+                    f"OK   planner: {' -> '.join(planner_rotation())}"
+                )
+                # Both of these are quiet when they are wrong: an errand with
+                # the guard off simply does the irreversible thing twice, and
+                # one with no looks left decides from text it cannot read.
+                looks = (
+                    f"up to {config.AGENT_WEB_LOOK_MAX} screenshot(s)"
+                    if config.AGENT_WEB_LOOK_ENABLED
+                    else "no screenshots"
+                )
+                guard = "on" if config.AGENT_WEB_REPEAT_GUARD else "OFF"
+                notes.append(f"OK   browser errands: repeat guard {guard}, {looks}")
+        else:
+            notes.append(
+                "WARN mission route: vision only - each round costs ~1900 "
+                "tokens, so expect about four before the per-minute limit"
+            )
+        # The kill switch is the one setting where a typo is silent and
+        # expensive: the run still happens, and the way out of it does not.
+        if not config.AGENT_HOTKEY_ENABLED:
+            notes.append(
+                "WARN kill switch: hotkey disabled - stopping a mission means "
+                "saying 'stop everything' or Ctrl+C"
+            )
+        elif parse_hotkey(config.AGENT_KILL_HOTKEY) is None:
+            problems.append(
+                f"MISS kill switch: EV_AGENT_KILL_HOTKEY='{config.AGENT_KILL_HOTKEY}' "
+                "is not a modifier plus a key, so no hotkey will be registered"
+            )
+        else:
+            notes.append(f"OK   kill switch: {config.AGENT_KILL_HOTKEY}")
+    else:
+        notes.append("WARN autonomous missions: disabled (EV_AGENT_MODE_ENABLED=false)")
 
     print("\nE.V. configuration check\n" + "-" * 44)
     for line in notes:

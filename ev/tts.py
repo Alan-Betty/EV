@@ -243,6 +243,11 @@ class Speaker:
         self._speaking = False
         self._cancel = False
         self._warned_once = False
+        # Which reply the speaker is on. Every `stop()` moves it, and every
+        # piece of audio carries the number it was queued under, so a clip
+        # whose turn has passed can be recognised as stale by a thread that
+        # started too late to be told any other way. See `_play`.
+        self._generation = 0
         # The stream currently holding the floor, if any. `stop()` needs it:
         # killing the MP3 that is playing stops one sentence, while the rest
         # of the reply is already queued behind it and plays straight after.
@@ -304,6 +309,34 @@ class Speaker:
                 self._speaking = False
         return spoken
 
+    async def _play(self, path: str) -> None:
+        """Play one file, unless the reply it belonged to has been abandoned.
+
+        This exists because of a race with exactly one symptom, and it is the
+        worst one available: two voices at once. `asyncio.to_thread` hands the
+        work to a worker thread and cancelling the await does not stop that
+        thread - so a barge-in can land in the gap between "the clip was
+        queued" and "the clip has an alias the player can close", and the
+        stop then finds nothing to stop. The thread wakes afterwards, opens
+        its own alias, and plays the abandoned sentence underneath whatever
+        E.V. is saying by then.
+
+        The generation is the fix and it has to be captured **here**, on the
+        loop, before the thread exists. Read inside the thread it would be
+        the number after the stop, which is the question nobody asked.
+        """
+        generation = self._generation
+
+        def stale() -> bool:
+            return self._cancel or generation != self._generation
+
+        def run() -> None:
+            if stale():
+                return
+            self._player.play(path, True, config.TTS_TIMEOUT_S + 30, stale)
+
+        await asyncio.to_thread(run)
+
     def _note_playback_start(self) -> None:
         """Tell the caller the floor has just been taken. Never raises."""
         hook = self.on_playback_start
@@ -338,9 +371,7 @@ class Speaker:
                 break
 
             try:
-                await asyncio.to_thread(
-                    self._player.play, path, True, config.TTS_TIMEOUT_S + 30
-                )
+                await self._play(path)
             except Exception as exc:
                 self._report_failure(exc)
                 break
@@ -511,13 +542,20 @@ class Speaker:
     def stop(self) -> None:
         """Cut playback short, for barge-in or shutdown.
 
-        Three things have to stop, not one. Killing the clip that is playing
+        Four things have to stop, not one. Killing the clip that is playing
         only ends the current sentence; a streamed reply has the rest of
         itself queued behind that clip and would carry straight on into it,
-        which is the opposite of yielding the floor. So: refuse further
-        chunks, empty the stream's queue, then kill the audio device.
+        which is the opposite of yielding the floor. And a clip that was
+        handed to a worker thread a moment ago has not started yet, so there
+        is nothing for the device to kill - it would begin playing *after*
+        the stop, over the top of the next reply. So: move the generation on,
+        refuse further chunks, empty the stream queue, then kill the device.
         """
         self._cancel = True
+        # First, and before anything can be queued against the new state: a
+        # clip that reaches a worker thread after this line is stale by
+        # definition, and `_play` will not start it.
+        self._generation += 1
         # Before the player, so nothing new can be queued in the window
         # between killing the clip and the stream noticing it should stop.
         stream, self._stream = self._stream, None
@@ -652,9 +690,7 @@ class SpeechStream:
                         break
 
                     try:
-                        await asyncio.to_thread(
-                            speaker._player.play, path, True, config.TTS_TIMEOUT_S + 30
-                        )
+                        await speaker._play(path)
                     except Exception as exc:
                         speaker._report_failure(exc)
                         break

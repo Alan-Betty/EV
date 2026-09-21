@@ -66,6 +66,13 @@ SIDE_EFFECT_TOOLS: frozenset[str] = frozenset(
         "keyboard_action",
         "screen_task",
         "browser_task",
+        # An autonomous mission is the largest side effect there is: it
+        # drives the screen across applications for minutes at a time. It
+        # counts once towards the limiter, because its own sub-tools are
+        # called directly rather than through `dispatch` - and it checks
+        # `is_locked_down` between rounds itself, so the phrase still stops
+        # a run that is already under way.
+        "agent_task",
         "backlog",
         "remember_fact",
         "manage_todo",
@@ -79,6 +86,7 @@ SIDE_EFFECT_TOOLS: frozenset[str] = frozenset(
 # `ev.brain.Brain.remember`.
 UNTRUSTED_OUTPUT: frozenset[str] = frozenset(
     {
+        "agent_task",
         "browser_task",
         "file_manager",
         "take_screenshot",

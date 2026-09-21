@@ -173,9 +173,13 @@ def _segments(command: str) -> list[str]:
 # Nothing here is BLOCKED. A GUI action has no equivalent of "format C:" that
 # is never legitimate - a user may genuinely want the thing bought, sent or
 # deleted. What they must not get is it happening without being asked.
+# One word of that first pattern is worth its own note: the shop button that
+# actually takes the money says "Place your order", not "Place the order".
+# Matching only the second let a real checkout past a gate written to catch
+# exactly it.
 _GUI_REVIEW: tuple[tuple[str, str], ...] = (
     (
-        r"\b(buy|purchase|checkout|check\s+out|pay|payment|place\s+(the\s+)?order|"
+        r"\b(buy|purchase|checkout|check\s+out|pay|payment|place\s+(\w+\s+)?order|"
         r"complete\s+(the\s+)?(order|purchase)|proceed\s+to\s+(checkout|payment)|"
         r"confirm\s+(and\s+)?(pay|purchase|order)|subscribe|renew\b|upgrade\s+plan)\b",
         "spends money",

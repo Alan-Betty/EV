@@ -227,3 +227,117 @@ def test_an_empty_transcript_costs_nothing():
     assert assistant.ui.echoed == []
     assert assistant.routed == []
     assert assistant.transcriber.noted == []
+
+
+# ---------------------------------------------------------------------------
+# And attention has to look like attention
+# ---------------------------------------------------------------------------
+class SpinnerUI(RecordingUI):
+    """A console that records which spinners were run, and for how long."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.live: str = ""
+        self.started: list[str] = []
+        self.transient: list[str] = []
+
+    def begin_status(self, label: str) -> None:
+        if self.live != label:
+            self.started.append(label)
+        self.live = label
+
+    def end_status(self) -> None:
+        self.live = ""
+
+    def status(self, label: str):
+        self.transient.append(label)
+        import contextlib as _contextlib
+
+        return _contextlib.nullcontext()
+
+
+class OneUtteranceMic:
+    """A microphone that hands over one clip and then only silence."""
+
+    def __init__(self, clips: int = 1) -> None:
+        self.left = clips
+        self.listens = 0
+
+    def listen(self, wait_s=None, stop=None):
+        self.listens += 1
+        if self.left <= 0:
+            return None
+        self.left -= 1
+        return type("Clip", (), {"wav": b"RIFF", "duration_s": 1.0})()
+
+
+class EchoTranscriber(FakeTranscriber):
+    def __init__(self, text: str = "what time is it") -> None:
+        super().__init__()
+        self.text = text
+
+    async def transcribe(self, _wav):
+        return Transcript(self.text)
+
+
+def _listener(engaged: bool, clips: int = 1) -> ev_core.EV:
+    assistant = ev_core.EV.__new__(ev_core.EV)
+    assistant.ui = SpinnerUI()
+    assistant.speaker = FakeSpeaker()
+    assistant.transcriber = EchoTranscriber()
+    assistant.session = Session()
+    assistant.mic = OneUtteranceMic(clips)
+    assistant.text_mode = False
+    assistant._running = True
+    assistant._clock = None
+    if engaged:
+        assistant.session.engage()
+    return assistant
+
+
+def test_the_listening_spinner_runs_only_inside_the_conversation_window():
+    """Animated while idle, it claims an attention E.V. is not paying.
+
+    Outside the window nothing is acted on without the wake phrase, so a
+    spinner through that says "I am listening to you" about a room E.V. is
+    only filtering. Inside the window it is the honest signal that the next
+    sentence needs no name in front of it.
+    """
+    engaged = _listener(engaged=True)
+    asyncio.run(engaged._next_utterance(wait_s=2.0))
+    assert engaged.ui.started == ["Listening..."]
+
+    idle = _listener(engaged=False)
+    asyncio.run(idle._next_utterance(wait_s=None))
+    assert idle.ui.started == []
+
+
+def test_transcribing_an_unaddressed_utterance_is_not_announced():
+    """It is still transcribed - the wake phrase is in the words - but a
+    spinner about it is the same claim of attention, made about somebody
+    else's conversation."""
+    idle = _listener(engaged=False)
+    asyncio.run(idle._next_utterance(wait_s=None))
+    assert idle.ui.transient == []
+
+    engaged = _listener(engaged=True)
+    asyncio.run(engaged._next_utterance(wait_s=2.0))
+    assert engaged.ui.transient == ["Transcribing..."]
+
+
+def test_the_spinner_is_down_before_anything_is_printed():
+    """`rich` allows one live display at a time, and a panel drawn under a
+    running spinner is a panel fighting it for the cursor."""
+    assistant = _listener(engaged=True)
+    asyncio.run(assistant._next_utterance(wait_s=2.0))
+    assert assistant.ui.live == ""
+
+
+def test_a_quiet_window_does_not_restart_the_spinner_every_poll():
+    """The window is several trips round the loop: E.V. polls on a short
+    timeout so it can expire. Rebuilt each time, the spinner is a flicker."""
+    assistant = _listener(engaged=True, clips=0)
+    for _ in range(3):
+        asyncio.run(assistant._next_utterance(wait_s=2.0))
+    assert assistant.ui.started == ["Listening..."]
+    assert assistant.mic.listens == 3

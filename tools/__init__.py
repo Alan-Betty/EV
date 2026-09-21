@@ -34,6 +34,7 @@ from tools.guard import (
     release_lockdown,
 )
 from tools.memory import manage_todo, recall_fact, remember, remember_fact
+from tools.mission import agent_task
 from tools.schemas import (
     TOOL_NAMES,
     TOOL_SPECS,
@@ -72,6 +73,7 @@ REGISTRY: dict[str, Callable[..., ToolResult]] = {
     "keyboard_action": keyboard_action,
     "screen_task": screen_task,
     "browser_task": browser_task,
+    "agent_task": agent_task,
     "backlog": backlog,
     "remember_fact": remember_fact,
     "recall_fact": recall_fact,
@@ -95,6 +97,14 @@ _ALLOWED_ARGS: dict[str, set[str]] = {
 # because there is nothing left to derive them from, and an empty set would
 # mean every argument silently dropped and the tool running on nothing.
 _ALLOWED_ARGS["remember"] = {"action", "key", "value"}
+# Two arguments `agent_task` accepts that the model is deliberately not shown.
+# `notes` is the progress a paused mission carries through a confirmation, so
+# that saying yes resumes the errand instead of restarting it, and
+# `max_rounds` is the ceiling echoed back with it. Both arrive only in the
+# data of the tool's own `ToolResult.confirm`, which the core loop replays -
+# so there is nothing for the model to get wrong, and nothing to pay for in
+# the schema on every turn.
+_ALLOWED_ARGS["agent_task"] |= {"notes", "max_rounds", "start"}
 # `confirmed` is injected by the core loop after a spoken yes, so it is
 # never something the model can set for itself.
 #
@@ -117,6 +127,9 @@ for _gated in (
     "keyboard_action",
     "screen_task",
     "browser_task",
+    # The biggest one of all: this is the yes that hands E.V. the whole
+    # screen for the length of an errand.
+    "agent_task",
 ):
     _ALLOWED_ARGS[_gated].add("confirmed")
 
@@ -133,7 +146,16 @@ for _gated in (
 # checks between steps and `browser_task` between page actions - both are
 # points where the work is coherent and stopping leaves nothing half-written.
 CANCELLABLE: frozenset[str] = frozenset(
-    {"terminal_command", "file_manager", "screen_task", "browser_task"}
+    {
+        "terminal_command",
+        "file_manager",
+        "screen_task",
+        "browser_task",
+        # A mission checks between rounds *and* hands the same token down to
+        # whichever sub-tool is running, so "stop" lands inside a sub-task
+        # rather than waiting for it to finish first.
+        "agent_task",
+    }
 )
 
 

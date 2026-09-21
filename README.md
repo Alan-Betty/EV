@@ -220,6 +220,7 @@ acknowledgement, and the task is cancelled before it ever speaks.
 | `keyboard_action` | Types text or sends hotkeys to whatever has focus. Typed text is checked against the same blocked patterns as `terminal_command`. |
 | `screen_task` | The autonomous loop: capture, decide, act, look again. It opens apps, waits for windows, focuses them, clicks, types and sends shortcuts, so "open Notepad and type hello" is one call rather than a launch that drops the typing. Bounded by a step count and a timeout. |
 | `browser_task` | Drives a real browser through the DOM — navigate, fill, filter, click by visible text, read results back. Keeps a profile between tasks, so it starts signed in to whatever you signed it in to. Better than pixels for anything on the web. |
+| `agent_task` | The loop above those two. Takes over, draws an overlay saying so, and keeps choosing what to do next until the errand is actually finished: *"find me a gaming mouse under 5000 and put it in my basket"*. On a website it works through the DOM and spends **no vision tokens at all**; the screen is for desktop work and for when the browser route gets stuck. Bounded by rounds, a wall clock and a stall detector, and stoppable at any moment. |
 | `backlog` | Reads back, ticks off, or retries what the last session left unfinished. |
 | `remember` | Keeps a small fact about you between sessions, or looks one up. |
 | `chat` | Speaks a reply when no action is called for. |
@@ -296,6 +297,61 @@ actions at once, all of them are classified before any of them runs.
 **A backlog entry is a reminder, never a signed permission slip.** A replayed
 item drops its confirmation, so a delete declined on Monday is asked about again
 on Tuesday.
+
+### How a mission actually runs
+
+A web errand never looks at the screen. The page is already text, so E.V.
+reads it: the URL, the title, every element you could click or type into -
+each one numbered - and the visible words. The planner answers `click 12` or
+`fill 3 = gaming mouse`, and the number is attached to the real element, so
+it cannot miss the way a guessed CSS selector can.
+
+That is worth roughly twenty rounds where looking at the screen was worth
+four, because a screenshot costs about 1,900 tokens of a per-minute budget of
+8,000 and a page read costs a fraction of that on a separate budget. Measured
+end to end on real sites: the cheapest book in a category in 2 rounds, the
+cheapest gaming mouse on Amazon in 3, a named phone added to a shop basket
+and verified in 6.
+
+The screen loop is still there for desktop work, and a mission falls back to
+it by itself when the browser route reports that it is the wrong tool.
+
+```bash
+EV_LIVE_BROWSER=1 python -m pytest tests/test_web_agent_live.py -q
+```
+
+runs the browser layer against real sites (example.com, books.toscrape.com,
+DuckDuckGo, Wikipedia, and a full log-in-and-add-to-cart flow on
+saucedemo.com). The rest of the suite is offline and stays offline.
+
+### Letting it run on its own
+
+`agent_task` is the only thing here that works unattended for minutes at a
+time, so it asks once, before anything moves — *"I'll take over the screen and
+run this until it's done. Confirm?"* — and what that yes covers is the errand
+you described. Every sub-goal is classified again on the way past, and one
+carrying a **new** kind of risk stops the run and asks: a basket errand does
+not authorise the checkout that turns up at round nine. Saying yes there
+resumes from where it got to rather than starting again, because the loop
+re-reads the screen instead of replaying itself.
+
+While it runs, a red frame is drawn round the screen and a badge names the
+errand and the round. Both are click-through, so neither the frame nor the
+badge can ever intercept a click meant for the page underneath, and neither
+takes focus away from whatever is being typed into.
+
+**The kill switch works from anywhere**, because you will be watching the
+thing E.V. is driving, not E.V.:
+
+| Route | What it does |
+|---|---|
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Q</kbd> | Registered with the window manager, so it lands even from a full-screen app. `EV_AGENT_KILL_HOTKEY` changes it. |
+| *"stop everything"* | Matched locally, acted on the instant it is heard — not after the running tool finishes. |
+| <kbd>Ctrl</kbd>+<kbd>C</kbd> | The usual. |
+
+All three cancel the run where it stands and lock E.V. down, so nothing else
+runs until you say *"unlock"*. Someone reaching for a kill switch means
+everything, not this click.
 
 ---
 
@@ -420,6 +476,9 @@ tools/
   file_manager.py     file_manager — root-scoped file and folder control
   computer_use.py     the eyes and hands: screenshots, vision, mouse, keys
   browser_automation.py  browser_task — Playwright, DOM-level web work
+  mission.py          agent_task — the autonomous loop above the others
+  web_agent.py        the same loop through the DOM, with no vision cost
+  overlay.py          the takeover overlay and the global kill switch
   dev_tools.py        VS Code + integrated terminal + Claude Code
   terminal.py         terminal_command
   backlog.py          backlog — read back, tick off, retry
@@ -443,6 +502,9 @@ tests/
   test_browser_automation.py the step DSL, the gate, and teardown
   test_open_routing.py       opening folders, mail, and no false successes
   test_compound_requests.py  the second half of a two-part request
+  test_mission.py            autonomous runs, scoped consent, kill switch
+  test_web_agent.py          the DOM loop: page reading, actions, planner
+  test_web_agent_live.py     a real browser on real sites (opt-in)
 ```
 
 </details>

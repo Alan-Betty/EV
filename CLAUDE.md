@@ -13,7 +13,8 @@ python ev_core.py --text           # typed input, same brain and tools
 python ev_core.py --say "open notepad"   # one command, then exit
 python ev_core.py -v               # debug logging
 
-python -m pytest tests/ -q                       # full suite, 625 tests, offline
+python -m pytest tests/ -q                       # full suite, 693 tests, offline
+EV_LIVE_BROWSER=1 python -m pytest tests/test_web_agent_live.py -q  # real browser
 python -m pytest tests/test_file_manager.py -q   # one file
 python -m pytest tests/test_smoke.py -k safety   # one test or group
 
@@ -193,6 +194,14 @@ went from ~3988 to 4095 and the test failed, correctly. Two redundant tone
 bullets, one tone example and `file_manager`'s description — which listed its
 own `action` enum a second time — came out, and the floor is now ~3975, lower
 than before the rules were added. Measure after any change here.
+
+`agent_task` was paid for the same way and the arithmetic is worth repeating,
+because it is the part people skip. Its schema is ~130 tokens and the prompt
+rule another ~25, against 25 tokens of headroom — so the two-turn assertion
+failed the moment it was added, which is the test doing its job. Thirteen tool
+descriptions were compressed to cover it: examples that repeated the
+description, an `enum` restated in prose, two tone examples in the prompt.
+The floor is now ~3955, lower again than before the tool existed.
 
 ### Confirmation and safety
 
@@ -434,6 +443,268 @@ was the worst available answer to "what's in my inbox". The model gets the
 whole lot on the next turn, which is the compound-request machinery below
 doing its job.
 
+### Autonomous missions: the loop above the loops
+
+"Find me a gaming mouse under five thousand with an infinite scroll wheel and
+put it in my Amazon basket" is not a bigger `screen_task`. `screen_task`
+finishes a job inside one application and `browser_task` finishes one inside a
+page; this is a search, a judgement about which result satisfies a condition
+nobody enumerated, a site, a page, a click, and then a check that the thing in
+the basket is the thing that was asked for. The half that was missing was
+never the clicking. It was deciding what to do next after looking at what just
+happened.
+
+[tools/mission.py](tools/mission.py) is therefore a **supervisor, not a third
+driver**. It first asks where the errand belongs: a web errand goes to
+[tools/web_agent.py](tools/web_agent.py), which runs the whole thing through
+the DOM with no vision call at all (see below), and everything else runs the
+vision loop here - look once, pick **one** sub-goal, hand it to `screen_task`
+or `browser_task`, look again. Both are called
+`confirmed=True`, which is exactly what the one up-front yes bought: a driver
+stopping to ask about its own third click would turn an autonomous errand back
+into a conversation.
+
+Four things make that safe enough to leave alone with a desktop, and they are
+not the same four that make `screen_task` safe.
+
+**The confirmation is scoped rather than blanket.** Taking the screen is asked
+about once, up front, and what that yes covers is the errand the user
+described: `classify_gui(goal)` is remembered as `allowed`, every sub-goal is
+classified again, and one carrying a *different* reason stops the run and
+asks. A basket errand does not authorise the checkout that appears at round
+nine. The progress so far rides in the confirmation as `notes`, so saying yes
+resumes rather than restarts - which works only because the loop is stateless
+in the same way `screen_task` is: it re-reads the screen and carries on from
+wherever things actually got to. `notes` and `max_rounds` are deliberately not
+in `TOOL_SPECS`; they are added to `_ALLOWED_ARGS` by hand, so a paused run can
+carry its history back in and the model cannot write itself a history that
+never happened.
+
+**Lockdown is checked by the mission itself.** The sub-tools are called as
+module functions rather than through `dispatch`, which is what keeps the
+runaway limiter from counting a fifteen-minute errand as fifteen minutes of
+looping - but it also means `guard.check` is not consulted on the way past. So
+the round loop reads `is_locked_down()` itself. Without that, an autonomous run
+would be the one place where "stop everything" did not work, which is precisely
+the place it is shouted.
+
+**It waits out a rate limit instead of giving up.** `screen_task` stops one
+step short of the vision wall because somebody is standing at the microphone
+waiting for a sentence. A mission has nobody waiting, so the arithmetic
+inverts: sixty seconds of waiting beats abandoning an errand half done with
+the desktop in a state nobody has described. `AGENT_BUDGET_WAIT_S` bounds it,
+and a mission that really is out of budget reports what it managed, which the
+core loop then backlogs.
+
+**"Done" has to be seen, not remembered.** The step prompt requires `evidence`
+- what on *this* frame shows the goal reached. A model asked whether it has
+finished will say yes; a model asked what it can see that proves it will
+usually notice that it cannot see anything of the kind.
+
+Beyond that it is bounded on four axes at once - rounds, wall clock, a stall
+detector reading `Frame.fingerprint` across rounds rather than the model's
+opinion of its own progress, and the vision budget - and `ask` is a first-class
+outcome. A captcha, a password or a two-factor code is not a step to be
+guessed at; it is the one thing only the user has, and the run stops and says
+so.
+
+### The browser route: why a mission almost never looks at the screen
+
+The first version of `agent_task` planned every round from a screenshot, and
+it was rate limited after four of them. That is not a tuning problem, it is
+arithmetic: a vision step costs ~1900 tokens against a per-minute window of
+8000. Four rounds is not an errand.
+
+On a web page none of that expense buys anything, because the page is
+*already* structured text. [tools/web_agent.py](tools/web_agent.py) is the
+same look-think-act loop with the looking replaced: `observe()` asks the page
+what is on it, and the planner is an ordinary text model. Measured on real
+errands a round costs ~600-1600 prompt tokens plus the `max_tokens` reserve,
+against ~1900 for a frame, and it lands on a different rate-limit bucket
+entirely. `agent_task` therefore asks `web_agent.choose_route` where the
+errand belongs before it does anything, runs the browser loop when the answer
+is "web", and keeps the vision loop for the desktop and as the fallback when
+the browser route says `desktop`, `fail` or `error`.
+
+Six things make the DOM route work, and five of them were found by running it
+against real shops rather than by reasoning about it.
+
+**Elements are numbered, not described.** The scan stamps every interactive
+element with `data-ev="<n>"` and the planner answers `click 12`. A selector
+the model invents can be wrong; a number it read off the inventory two
+hundred milliseconds ago cannot be, because the attribute is still on the
+element. `looks_like_selector` is the one exception, for `read`: a
+tag-qualified selector like `div.s-main-slot` is CSS, while "Add to basket"
+is a phrase, and telling those apart needs a list of HTML tag names rather
+than a regex.
+
+**The main region first, and its text first.** Amazon's `body.innerText`
+opens with two thousand characters of category menu, so a 2600-character
+budget was spent before the first product was mentioned - and the element
+list was nav links. Preferring `main, #search, [role=main], …` for both puts
+products at the top of both lists and was the single largest accuracy change
+in the module.
+
+**Four links, one destination.** A shop gives every product an image link, a
+title link, a rating link and a price link, all pointing at the same page.
+The planner clicked a price link, went nowhere it meant to go, and the stall
+detector - correctly - ended the run. Keeping the best-labelled link per
+`href` collapses that, and is also what lets forty-five slots hold forty-five
+*products*.
+
+**A look is patient, and so is a navigation.** Three separate states look
+identical to an impatient scan and all three fix themselves by waiting: a
+context destroyed by the navigation that is in flight, a single-page shop
+whose products arrive over XHR a second after `domcontentloaded`, and
+`amazon.in`, which answers an automated browser with an AWS WAF challenge -
+HTTP 202, no title, no links - that runs its own JavaScript and becomes the
+real shop about two seconds later. Every navigating action settles
+(`domcontentloaded`, then briefly `networkidle`), and a scan that comes back
+empty is simply taken again.
+
+**What the page refuses, and what it says.** A shop hides its native
+`<select>` behind a styled div, so Playwright judges it invisible and the
+errand dies on a fifteen-second timeout; a click or a tick that times out is
+retried once with `force`, and a missing element is not - "hidden" and "not
+there" are different problems. `select_option` matches values and labels
+exactly, so "Low to High" never matched `price-asc-rank` or "Price: Low to
+High"; the options are now read off the element and matched on substance. And
+a `alert()` is invisible to a DOM reader, which is how "Add to cart" - whose
+only feedback is an alert - got clicked three times for one request. Dialogs
+are answered, and what they said is handed to the next round.
+
+**The planner is on buckets of its own.** Measured on a free key, every
+ordinary Groq model is metered at 8000 tokens a minute *separately*, so
+`AGENT_PLANNER_FALLBACKS` rotates across three of them on a 429 before it
+waits - roughly three times the errand, with the brain's own bucket left
+alone. Two further economies came from measurement rather than instinct: the
+remaining-token header counts what a request **reserves**, so `max_tokens`
+is charged in full whether or not it is used; and a reasoning model spends
+its output budget thinking before it writes, which on `gpt-oss` exhausted
+the budget mid-object and made the JSON mode reject its own truncated reply
+with a 400. `reasoning_effort: low` fixed a bug that looked like a network
+error.
+
+Measured end to end on real sites, with no vision call at all: the cheapest
+book in a catalogue category in **2 planner calls**, the cheapest gaming
+mouse on amazon.in (sort by price, read the result) in **3**, and adding a
+named phone to a shop's basket and verifying it in **6**.
+
+### One mouse, one basket
+
+"Find me a gaming mouse under five thousand with an infinite scroll wheel and
+put it in my Amazon basket" worked, and then did it three more times. Four
+of the same mouse in a real basket is the most expensive bug this project has
+produced, and every layer that should have caught it was working correctly.
+
+The stall detector saw the page change after every click, because it did: a
+shop answers "add to basket" by counting a badge up. The per-call safety
+gates each read one action in isolation, and one click on a basket button is
+not a mistake. And the planner, reading its own history, saw `clicked 20` -
+a number stamped by a scan that no longer existed, belonging by then to a
+different element or to nothing at all. Nothing in the loop was in a position
+to notice that the button under the pointer was the button it had just
+pressed.
+
+Three changes, and the first is the one that matters most:
+
+- **The history says what was on the button.** `describe_action` puts the
+  label back: `clicked 20 "Add to basket"` is still true in ten rounds' time,
+  and `clicked 20` was never true for longer than one. The same labels are
+  handed to `_risky`, which had been classifying the string `click 20` - no
+  classifier on earth reads a purchase in a digit. That hole is why
+  `classify_gui` now matches "Place your order" as well as "place the order":
+  the first is what the button on a real shop says.
+- **An irreversible click is refused the second time.** `is_commit` reads the
+  *label*, because the verb is always "click", and `commit_key` is host, path
+  and label together. Both halves are load bearing in opposite directions:
+  without the path, "add a mouse and a keyboard" adds only the mouse, since
+  the second product page carries a button with the same words on it; without
+  the label there is nothing to compare at all. The refusal is told to the
+  planner in the next look rather than only written down - one it does not
+  hear about is one it will try again - and the ledger is rebuilt from the
+  history a paused run carries back in, so saying yes to a confirmation does
+  not buy a second mouse.
+- **It can look at the page.** `look <question>` screenshots the viewport and
+  asks the vision model, which is the deliberate exception to this route
+  costing no frames: bounded per errand by `AGENT_WEB_LOOK_MAX`, refused when
+  the minute's vision budget is thin, and documented to the planner as being
+  for what the page text cannot answer - a confirmation toast that has
+  already faded, a count drawn as a picture. It exists so that "I am not sure
+  the first one worked" has an answer other than clicking again.
+
+The prompt carries the matching rules, and `ALREADY DONE` is a block of its
+own rather than a line in the history: buried in a list of twelve steps, the
+one line that must not happen twice reads like all the others.
+
+`tests/test_web_agent.py` is the offline half - a page object with
+Playwright's shape - and every regression above has a test there.
+`tests/test_web_agent_live.py` is the other half: a real Chromium against
+example.com, books.toscrape.com, duckduckgo, wikipedia and saucedemo,
+including a full log-in-and-add-to-cart flow. It is skipped unless
+`EV_LIVE_BROWSER=1`, because the suite is offline and stays offline.
+
+### The overlay, and a kill switch that works from anywhere
+
+A pointer moving on its own with nothing on screen to explain it is
+indistinguishable from a machine somebody else has taken over. So
+[tools/overlay.py](tools/overlay.py) draws a band round the whole screen and
+a panel naming the errand, the round, the elapsed time and the last thing
+done - in stdlib `tkinter`, because the dependency policy does not get
+suspended for chrome.
+
+It is drawn carefully on purpose, and that is not vanity. What the overlay is
+announcing is that this is deliberate, supervised and stoppable, and a badge
+that looks like a debug print says the opposite of all three. Everything is
+on canvases rather than assembled from widgets, for two reasons that are not
+taste: a canvas can have rounded corners and a Tk frame cannot, and one
+canvas item's colour can be changed ten times a second without the layout
+being done again - which is what the live dot and the round bar cost. The
+frame is a stack of one-pixel rings mixed from the accent towards the key
+colour, so it fades outwards instead of ending in a line, with brighter
+viewfinder brackets at the corners; Tk has no alpha per shape, so every soft
+edge here is a colour mixed towards what is behind it rather than a
+transparency. The panel is opaque. It used to be 92% and the page behind it
+showed through the text it was there to be read against, which is the one
+thing a warning must never be.
+
+Three things about it are load-bearing, and each was a way to break the thing
+it is announcing:
+
+- **It must never take focus.** Everything E.V. types goes to the focused
+  window, so a HUD that stole focus would swallow the work it is narrating.
+  `WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW` via `ctypes`, on both windows.
+- **It must never eat a click.** The full-screen window is keyed out with
+  `-transparentcolor`, which on Windows makes those pixels invisible *and*
+  click-through, and `WS_EX_TRANSPARENT` covers the rest. The badge is
+  click-through by default for the same reason - a STOP button sitting over
+  the page E.V. is about to click is a button that intercepts it. Where colour
+  keying is unavailable the frame is **not drawn at all** rather than drawn as
+  a transparent sheet that swallows everything.
+- **It must survive being on top of a launch.** Every 120ms the windows are
+  put back on top with `SetWindowPos(..., SWP_NOACTIVATE)`. `lift()` would do
+  the same job and hand the overlay focus, which is the one thing it must not
+  take.
+
+Tk owns a thread of its own and updates cross into it through a queue drained
+by `root.after`, because widgets may only be touched from the thread that made
+them. Every entry point swallows its own failures: a missing Tk, an absent
+display or a hostile window manager costs the announcement, never the run.
+
+**The kill switch has three routes in, and they are deliberately different
+kinds of thing.** `RegisterHotKey` (default `ctrl+alt+q`) reaches E.V. even
+when a full-screen application owns every other keystroke, and needs no new
+dependency - a keyboard hook library would have been the obvious way and the
+wrong one. "Stop everything" is matched locally in `ev.session` as before, and
+`_watch_for_cancel` now acts on `Intent.LOCKDOWN` the moment it hears it
+rather than queueing it for after the tool: holding that phrase until an
+autonomous run finished would answer the wrong question by about a minute.
+Ctrl+C is the third. All three land on the same latch, which cancels the token
+every sub-tool already honours and - by default, `AGENT_KILL_LOCKS_DOWN` -
+locks E.V. down, because a person reaching for a kill switch means everything,
+not this click. A hotkey with no modifier is refused outright: `RegisterHotKey`
+would take a bare letter and swallow it system-wide for the length of the run.
+
 ### Compound requests, and the token budget that shapes them
 
 "Open my mail and give me a summary of the important things" is two jobs. The
@@ -636,6 +907,20 @@ each easy to leave out:
   `Speaker.stop()` cancels the registered `SpeechStream` *before* stopping the
   player, `SpeechStream.cancel()` drains its queue, and `feed()` refuses
   anything the model streams afterwards.
+- **And it has to reach the clip that has not started yet.** This is the one
+  that sounds like two E.V.s at once. Playback runs through
+  `asyncio.to_thread`, and cancelling the await does not stop the thread - so
+  a barge-in can land in the window between a clip being queued and that clip
+  having an MCI alias the player could close. The stop finds nothing to stop,
+  the thread wakes afterwards, opens an alias of its own and plays the
+  abandoned sentence underneath the reply that replaced it. `Speaker` keeps a
+  generation counter that `stop()` moves on; `Speaker._play` captures it **on
+  the loop, before the thread exists** - read inside the thread it would be
+  the number after the stop - and hands the player a callable that answers
+  "this clip's turn has passed". `_MciPlayer` asks it after taking its lock
+  and before opening the device, and tracks every alias it has open rather
+  than only the last, because a stop aimed at "the current one" is what let
+  the other one keep playing.
 - **The audio that triggered it is kept.** `listen()` normally flushes first,
   so a command starts from live audio. On a barge-in the queued frames *are*
   the opening of the user's sentence, so `mic.hold_audio()` suppresses exactly
@@ -662,7 +947,21 @@ wake-check first, echo second, and an unaddressed transcript is also kept out
 of `note_transcript`, so the room cannot steer the decoding prompt for the
 command that follows it.
 
-What this does **not** do is stop the transcription. Detecting "E.V." in an
+The spinner is the same argument made about the same moment. `Listening...`
+now runs only while the conversation window is open. Animated the whole time,
+it says E.V. is listening to *you*, which outside the window it is not:
+nothing is acted on there without the wake phrase, so the animation was
+claiming an attention it was not paying. Inside the window it is the honest
+version of the same signal - the next sentence needs no name in front of it.
+`Transcribing...` is shown on the same terms, because an unaddressed sentence
+is still transcribed and announcing that on screen is the same claim of
+attention, made about somebody else's conversation. The spinner is held open
+across polls rather than rebuilt on each one (`ui.begin_status` /
+`ui.end_status`), since the engaged loop re-listens every couple of seconds
+and a spinner torn down that often is a flicker; `rich` allows one live
+display at a time, so `ui.status` retires it before starting its own.
+
+What none of this does is **stop the transcription**. Detecting "E.V." in an
 utterance means having the words of that utterance, and `ev.wake` matches
 against the transcript because the project runs no local model by design - a
 local wake-word engine is exactly the resident-memory dependency the whole

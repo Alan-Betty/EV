@@ -87,26 +87,57 @@ _VERBS = {
 # A selector the model wrote deliberately, rather than a phrase to match by
 # sight. Anything else is turned into a text match, which is how a person
 # describes a button out loud.
-_EXPLICIT_SELECTOR = re.compile(r"^(css=|text=|xpath=|role=|id=|#|\.[a-zA-Z]|//|\[)")
-
-
-# Bare words that are structural elements rather than something a person
-# would read off the screen. "read body" means the whole page, and turning it
-# into a search for the visible word "body" is how "summarise my inbox" timed
-# out on a perfectly good Gmail tab.
-_STRUCTURAL_TAGS = frozenset(
-    {"body", "main", "article", "table", "ul", "ol", "form", "header", "footer", "nav"}
+# What counts as a selector the model wrote on purpose, rather than a phrase
+# to match by sight. The tag-qualified forms matter as much as the rest and
+# were missing: `div.s-main-slot`, `h2 a`, `span[data-price]` and
+# `li.product > a` are all ordinary CSS that a planner writes constantly, and
+# each of them used to be turned into a search for that literal *text*, which
+# never matches and costs a whole round to a timeout.
+_EXPLICIT_SELECTOR = re.compile(
+    r"""^(?:
+        (?:css|text|xpath|role|id)=   # an engine the model named itself
+      | [#.][a-zA-Z_-]                # #id or .class
+      | //                            # xpath
+      | \[                            # [attribute]
+      | [a-zA-Z][\w-]*[.#\[:]          # tag.class, tag#id, tag[attr], tag:nth
+      | [a-zA-Z][\w-]*\s*[>~+]\s*      # tag > child, tag ~ sibling
+      | [a-zA-Z][\w-]*\s+[.#\[]        # "div .price", "ul [role]"
+    )""",
+    re.VERBOSE,
 )
+
+# The one shape the pattern above cannot judge: bare tag names, alone or
+# nested. "h2 a" is a selector and "Sign in" is a button, and nothing about
+# the characters tells them apart - only knowing which words are HTML tags
+# does. Kept short on purpose: every name here is a word no button says.
+_TAGS = frozenset(
+    """a article aside body button div em footer form h1 h2 h3 h4 h5 h6 header
+    img input label li main nav ol option p section select span strong table
+    tbody td textarea th thead tr ul""".split()
+)
+
+
+def looks_like_selector(target: str) -> bool:
+    """True when this is CSS the model meant, not words it read on screen."""
+    text = (target or "").strip()
+    if not text:
+        return False
+    if _EXPLICIT_SELECTOR.match(text):
+        return True
+    parts = text.split()
+    return bool(parts) and all(part.lower() in _TAGS for part in parts)
 
 
 def _as_selector(target: str) -> str:
     text = target.strip().strip('"').strip("'")
     if not text:
         return text
-    if _EXPLICIT_SELECTOR.match(text):
-        return text
-    if text.lower() in _STRUCTURAL_TAGS:
-        return text.lower()
+    if looks_like_selector(text):
+        # Bare tag names are lowercased: "read Body" means the whole page,
+        # and a tag name is not a thing anyone types with a capital on
+        # purpose.
+        parts = text.split()
+        return text.lower() if all(p.lower() in _TAGS for p in parts) else text
     # Playwright's text engine matches on the accessible visible text, which
     # is the thing the user would have named.
     return f"text={text}"
@@ -137,7 +168,13 @@ def parse_steps(raw: str) -> list[Step]:
             log.debug("Dropping unparseable browser step: %r", line)
             continue
 
-        target, _, value = rest.partition("=")
+        # Only the verbs that take a value are split on `=`. A URL is full
+        # of them - `goto amazon.in/s?k=mouse` was being cut down to
+        # `amazon.in/s?k`, which loads a different page rather than failing.
+        if verb in {"fill", "select"}:
+            target, _, value = rest.partition("=")
+        else:
+            target, value = rest, ""
         steps.append(Step(verb, target.strip(), value.strip()))
     return steps
 

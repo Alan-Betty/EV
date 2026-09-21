@@ -378,3 +378,85 @@ def test_nothing_barge_in_says_breaches_the_speech_boundary():
     """Every string on this path reaches the speaker unchanged, or not at all."""
     for phrase in ("Go ahead.", "Standing by."):
         assert clean_for_speech(phrase) == phrase
+
+
+# ---------------------------------------------------------------------------
+# Two voices at once: the clip that was already on its way
+# ---------------------------------------------------------------------------
+class RecordingPlayer:
+    """A player that records what it was asked to play and how it was gated."""
+
+    def __init__(self) -> None:
+        self.played: list[str] = []
+        self.gates: list = []
+        self.stops = 0
+
+    def play(self, path, block=True, timeout=30.0, aborted=None):
+        self.gates.append(aborted)
+        if aborted is not None and aborted():
+            return False
+        self.played.append(path)
+        return True
+
+    def stop(self) -> None:
+        self.stops += 1
+
+
+def _wired_speaker() -> Speaker:
+    """A Speaker with a fake device, since the suite runs with audio off."""
+    speaker = Speaker()
+    speaker._player = RecordingPlayer()
+    speaker.enabled = True
+    return speaker
+
+
+def test_a_clip_queued_before_a_stop_is_never_played():
+    """The failure this prevents is the only one that sounds like two E.V.s.
+
+    `asyncio.to_thread` hands playback to a worker thread, and cancelling the
+    await does not stop that thread. So a barge-in can land in the gap
+    between a clip being queued and that clip having an alias the player
+    could close: the stop finds nothing to stop, and the abandoned sentence
+    starts playing afterwards, underneath the reply that replaced it.
+    """
+
+    async def run() -> None:
+        speaker = _wired_speaker()
+        await speaker._play("first.mp3")
+        assert speaker._player.played == ["first.mp3"]
+
+        speaker.stop()
+        # A new reply clears the cancel flag, which is what used to make the
+        # stale clip look current again. The generation does not clear.
+        speaker._cancel = False
+        # The gate that clip was handed still answers for the reply it
+        # belonged to, which is the whole point: a worker thread waking up
+        # late asks this, not the speaker.
+        stale = speaker._player.gates[0]
+        assert stale() is True
+        assert speaker._player.play("abandoned.mp3", aborted=stale) is False
+        assert speaker._player.played == ["first.mp3"]
+
+    asyncio.run(run())
+
+
+def test_a_fresh_reply_still_plays_after_an_interruption():
+    """The guard must not be a one-way door: the next sentence is wanted."""
+
+    async def run() -> None:
+        speaker = _wired_speaker()
+        speaker.stop()
+        spoken = await speaker.say("Go ahead.")
+        assert spoken == "Go ahead."
+        assert speaker._player.played  # the new generation is allowed through
+
+    asyncio.run(run())
+
+
+def test_the_player_refuses_a_clip_whose_turn_has_passed():
+    """The same contract at the device end, where the thread actually lands."""
+    from ev.audio import _SubprocessPlayer
+
+    player = _SubprocessPlayer(["true", "{}"])
+    assert player.play("anything.mp3", aborted=lambda: True) is False
+    assert player._process is None

@@ -21,6 +21,7 @@ import threading
 import time
 import wave
 from dataclasses import dataclass
+from typing import Callable
 
 import config
 from tools.base import IS_WINDOWS
@@ -554,7 +555,17 @@ class _MciPlayer:
     """MP3 playback through Windows' built-in MCI, via ctypes.
 
     Each clip gets a unique alias so a stale handle from a barged-in clip can
-    never silence the next one.
+    never silence the next one - and every alias that is still open is
+    tracked, because MCI will happily play two of them at once. That is not
+    hypothetical: two at once is what E.V. talking over itself sounds like.
+
+    `aborted` is the other half of the same problem. Playback runs on a
+    worker thread, and a thread that has been asked for but has not yet
+    reached its first line is invisible to `stop()`: there is no alias to
+    close yet, so the stop lands on nothing and the clip starts afterwards,
+    underneath the reply that replaced it. The callback is checked at the one
+    moment that window is open - after the lock is taken and before the
+    device is opened - so a clip whose turn has passed is never started.
     """
 
     def __init__(self) -> None:
@@ -573,6 +584,7 @@ class _MciPlayer:
         self._winmm.mciSendStringW.restype = ctypes.c_uint
         self._ctypes = ctypes
         self._alias: str | None = None
+        self._open: set[str] = set()
         self._counter = 0
         self._lock = threading.Lock()
 
@@ -589,12 +601,23 @@ class _MciPlayer:
             return f"MCI error {code}"
         return buffer.value or f"MCI error {code}"
 
-    def play(self, path: str, block: bool = True, timeout: float = 30.0) -> bool:
+    def play(
+        self,
+        path: str,
+        block: bool = True,
+        timeout: float = 30.0,
+        aborted: Callable[[], bool] | None = None,
+    ) -> bool:
         if not os.path.exists(path) or os.path.getsize(path) == 0:
             log.warning("Refusing to play a missing or empty file: %s", path)
             return False
 
         with self._lock:
+            # Asked inside the lock, so it cannot be answered in the middle
+            # of a `stop()` that is already under way.
+            if aborted is not None and aborted():
+                log.debug("Not starting %s: playback had already been stopped", path)
+                return False
             self._counter += 1
             alias = f"evtts{self._counter}"
             # `type mpegvideo` is what MCI calls its MP3/media decoder.
@@ -605,10 +628,12 @@ class _MciPlayer:
                     log.warning("MCI could not open %s: %s", path, self._error(code))
                     return False
             self._alias = alias
+            self._open.add(alias)
             code, _ = self._send(f"play {alias}")
             if code != 0:
                 log.warning("MCI could not play %s: %s", path, self._error(code))
                 self._send(f"close {alias}")
+                self._open.discard(alias)
                 self._alias = None
                 return False
 
@@ -622,8 +647,10 @@ class _MciPlayer:
 
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
+            if aborted is not None and aborted():
+                break
             with self._lock:
-                if self._alias != alias:
+                if alias not in self._open:
                     return True  # stopped by a barge-in
                 _, mode = self._send(f"status {alias} mode")
             if started and mode != "playing":
@@ -633,7 +660,9 @@ class _MciPlayer:
             time.sleep(0.04)
 
         with self._lock:
+            self._send(f"stop {alias}")
             self._send(f"close {alias}")
+            self._open.discard(alias)
             if self._alias == alias:
                 self._alias = None
         return True
@@ -666,11 +695,20 @@ class _MciPlayer:
             log.debug("MCI warm failed: %s", exc)
 
     def stop(self) -> None:
+        """Silence everything this player has open, not only the last clip.
+
+        One alias was enough while playback was strictly serial. It stopped
+        being enough the moment a clip could be started by a thread that
+        outlived the call which asked for it: that clip registers itself over
+        the top of the previous alias, and a stop aimed at "the current one"
+        leaves the other one playing.
+        """
         with self._lock:
-            if self._alias:
-                self._send(f"stop {self._alias}")
-                self._send(f"close {self._alias}")
-                self._alias = None
+            for alias in list(self._open):
+                self._send(f"stop {alias}")
+                self._send(f"close {alias}")
+            self._open.clear()
+            self._alias = None
 
 
 class _SubprocessPlayer:
@@ -681,11 +719,19 @@ class _SubprocessPlayer:
         self._process = None
         self._lock = threading.Lock()
 
-    def play(self, path: str, block: bool = True, timeout: float = 30.0) -> bool:
+    def play(
+        self,
+        path: str,
+        block: bool = True,
+        timeout: float = 30.0,
+        aborted: Callable[[], bool] | None = None,
+    ) -> bool:
         import subprocess
 
         argv = [path if part == "{}" else part for part in self._template]
         with self._lock:
+            if aborted is not None and aborted():
+                return False
             try:
                 self._process = subprocess.Popen(
                     argv,

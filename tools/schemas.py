@@ -32,8 +32,8 @@ TOOL_SPECS: list[ToolSpec] = [
                 "arguments": {
                     "type": "string",
                     "description": (
-                        "Extra arguments. Only a path you were actually told "
-                        "- never one you construct. Empty if unsure."
+                        "Extra arguments. Only a path you were told, never "
+                        "one you construct. Empty if unsure."
                     ),
                 },
             },
@@ -44,10 +44,9 @@ TOOL_SPECS: list[ToolSpec] = [
         "name": "web_search",
         "description": (
             "Open a browser on a search, a URL, or a site the user lives "
-            "in: 'find me a gaming mouse', 'open my email', 'check my "
-            "calendar'. For those last two set engine to mail, calendar or "
-            "drive and leave query empty. Never ask which provider - open "
-            "the default."
+            "in. For 'open my email' or 'check my calendar' set engine to "
+            "mail, calendar or drive and leave query empty. Never ask which "
+            "provider - open the default."
         ),
         "parameters": {
             "type": "object",
@@ -98,8 +97,7 @@ TOOL_SPECS: list[ToolSpec] = [
         "name": "dev_workflow",
         "description": (
             "Developer macro: open VS Code on a folder, spawn an integrated "
-            "terminal, start the Claude Code CLI, optionally type a prompt. "
-            "For 'launch VS Code and start Claude on my API project'."
+            "terminal, start the Claude Code CLI, optionally type a prompt."
         ),
         "parameters": {
             "type": "object",
@@ -113,10 +111,7 @@ TOOL_SPECS: list[ToolSpec] = [
                 },
                 "prompt": {
                     "type": "string",
-                    "description": (
-                        "Prompt for Claude Code once it starts. Omit if they "
-                        "only asked to start it."
-                    ),
+                    "description": "Prompt for Claude Code once it starts.",
                 },
                 "start_claude": {
                     "type": "boolean",
@@ -131,7 +126,7 @@ TOOL_SPECS: list[ToolSpec] = [
         "description": (
             "Run a shell command. Last resort: open_app for programs, "
             "web_search for the browser, file_manager for files. Good for "
-            "git status, ipconfig, checking a package version."
+            "git status or a package version."
         ),
         "parameters": {
             "type": "object",
@@ -152,8 +147,8 @@ TOOL_SPECS: list[ToolSpec] = [
                 "background": {
                     "type": "boolean",
                     "description": (
-                        "True detaches a long command into its own window. "
-                        "False reads the output back."
+                        "True detaches it into its own window; false "
+                        "reads the output back."
                     ),
                 },
             },
@@ -167,11 +162,10 @@ TOOL_SPECS: list[ToolSpec] = [
             # enum below it word for word, and the enum is the copy the
             # model actually has to satisfy. Paying for it twice on every
             # turn bought nothing - see the token budget note in CLAUDE.md.
-            "Anything to do with the user's files and folders. "
-            "'what's on my Desktop', 'open "
-            "Explorer at my GitHub folder', 'copy every invoice to "
-            "Documents'. Always prefer this over terminal_command, and one "
-            "batch action over many single calls."
+            "Anything to do with the user's files and folders: 'what's on "
+            "my Desktop', 'copy every invoice to Documents'. Always prefer "
+            "this over terminal_command, and one batch action over many "
+            "single calls."
         ),
         "parameters": {
             "type": "object",
@@ -180,8 +174,8 @@ TOOL_SPECS: list[ToolSpec] = [
                     "type": "string",
                     "description": (
                         "'open' shows a folder in Explorer, or reads a file "
-                        "out. 'list' names a folder's contents without "
-                        "showing it. 'create'/'append' need 'content'; "
+                        "out; 'list' names its contents without showing it. "
+                        "'create'/'append' need 'content'; "
                         "'copy'/'move'/'rename' need 'destination'; 'find' "
                         "needs 'pattern'. Batch actions act on every file in "
                         "'path' matching 'pattern'."
@@ -207,10 +201,10 @@ TOOL_SPECS: list[ToolSpec] = [
                 "path": {
                     "type": "string",
                     "description": (
-                        "The file or folder as the user said it: 'Downloads', "
-                        "'my github folder', 'Documents/notes.txt'. Never "
-                        "invent an absolute path. Omitted, a new file lands "
-                        "in Documents."
+                        "The file or folder as the user said it: "
+                        "'Downloads', 'Documents/notes.txt'. Never invent an "
+                        "absolute path. Omitted, a new file lands in "
+                        "Documents."
                     ),
                 },
                 "destination": {
@@ -220,8 +214,7 @@ TOOL_SPECS: list[ToolSpec] = [
                 "content": {
                     "type": "string",
                     "description": (
-                        "The full text to write - what the user actually "
-                        "asked for, never a placeholder."
+                        "The full text to write, never a placeholder."
                     ),
                 },
                 "pattern": {
@@ -246,9 +239,8 @@ TOOL_SPECS: list[ToolSpec] = [
         "name": "backlog",
         "description": (
             "What E.V. itself left unfinished - interrupted commands and "
-            "failures. E.V. files these by itself; use this for 'what's "
-            "outstanding', 'retry the first one'. The user's own list is "
-            "manage_todo."
+            "failures: 'what's outstanding', 'retry the first one'. The "
+            "user's own list is manage_todo."
         ),
         "parameters": {
             "type": "object",
@@ -277,7 +269,7 @@ TOOL_SPECS: list[ToolSpec] = [
         "name": "remember_fact",
         "description": (
             "Store one lasting fact about the user: 'remember I take my "
-            "coffee black', 'my name is Alan', 'call me at the office'."
+            "coffee black', 'my name is Alan'."
         ),
         "parameters": {
             "type": "object",
@@ -308,9 +300,9 @@ TOOL_SPECS: list[ToolSpec] = [
     {
         "name": "manage_todo",
         "description": (
-            "The user's own to-do list, kept between sessions: 'add milk to "
-            "my list', 'what's on my list', 'that one's done'. Not the "
-            "backlog, which is what E.V. itself left unfinished."
+            "The user's own to-do list, kept between sessions: 'add milk "
+            "to my list', 'what's on my list'. Not the backlog, which is "
+            "what E.V. itself left unfinished."
         ),
         "parameters": {
             "type": "object",
@@ -331,9 +323,9 @@ TOOL_SPECS: list[ToolSpec] = [
     {
         "name": "take_screenshot",
         "description": (
-            "Look at the screen and answer a question about it: 'what's on "
-            "my screen', 'what does that error say'. Use it before any "
-            "mouse_action, so you aim at something you have seen."
+            "Look at the screen and answer a question about it: 'what does "
+            "that error say'. Use it before any mouse_action, so you aim at "
+            "something you have seen."
         ),
         "parameters": {
             "type": "object",
@@ -354,8 +346,8 @@ TOOL_SPECS: list[ToolSpec] = [
                 "save_as": {
                     "type": "string",
                     "description": (
-                        "Only if the user asked for it to be kept, e.g. "
-                        "'Pictures/bug.png'. Looking needs no file."
+                        "Only if the user asked for it to be kept. "
+                        "Looking needs no file."
                     ),
                 },
             },
@@ -387,11 +379,11 @@ TOOL_SPECS: list[ToolSpec] = [
                 },
                 "x": {
                     "type": "string",
-                    "description": "Fraction across the screen: 0 left, 1 right.",
+                    "description": "Fraction across: 0 left, 1 right.",
                 },
                 "y": {
                     "type": "string",
-                    "description": "Fraction down the screen: 0 top, 1 bottom.",
+                    "description": "Fraction down: 0 top, 1 bottom.",
                 },
                 "to_x": {"type": "string", "description": "Drag end x. 'drag' only."},
                 "to_y": {"type": "string", "description": "Drag end y. 'drag' only."},
@@ -438,8 +430,8 @@ TOOL_SPECS: list[ToolSpec] = [
                 "label": {
                     "type": "string",
                     "description": (
-                        "What this is for, in a few words. Shown to the user "
-                        "when it needs approving."
+                        "What this is for. Shown to the user when it "
+                        "needs approving."
                     ),
                 },
             },
@@ -452,8 +444,8 @@ TOOL_SPECS: list[ToolSpec] = [
             "A whole desktop job: looks, acts, looks again. Opens apps, "
             "focuses windows, clicks, types, sends shortcuts. Use it when a "
             "request needs more than one of those: 'open Notepad and type "
-            "hello', 'open my project in VS Code and run the script'. State "
-            "the whole goal in one call. For a web page use browser_task."
+            "hello'. State the whole goal in one call. For a web page use "
+            "browser_task."
         ),
         "parameters": {
             "type": "object",
@@ -479,7 +471,6 @@ TOOL_SPECS: list[ToolSpec] = [
         "description": (
             "Automate a website through the page rather than the pixels: "
             "navigate, fill forms, click by visible text, read results back. "
-            "'search Amazon for a mouse and add the top one to my cart'. "
             "Prefer it over screen_task on the web; use web_search when the "
             "user only wants a page opened."
         ),
@@ -489,8 +480,8 @@ TOOL_SPECS: list[ToolSpec] = [
                 "task": {
                     "type": "string",
                     "description": (
-                        "The whole errand in one sentence. It is shown in the "
-                        "confirmation, so make it honest."
+                        "The whole errand in one sentence; it is shown in "
+                        "the confirmation."
                     ),
                 },
                 "url": {
@@ -507,8 +498,8 @@ TOOL_SPECS: list[ToolSpec] = [
                         "select, check, press, wait, scroll, read. A target "
                         "with no CSS syntax matches visible text. 'read' "
                         "returns every match; end with one to learn what is "
-                        "on the page. Example: 'goto amazon.co.uk' / 'fill "
-                        "#search = wireless mouse' / 'press Enter' / 'read "
+                        "on the page. Example: 'goto amazon.co.uk' / "
+                        "'fill #search = mouse' / 'press Enter' / 'read "
                         ".s-result-item'."
                     ),
                 },
@@ -518,6 +509,29 @@ TOOL_SPECS: list[ToolSpec] = [
                 },
             },
             "required": [],
+        },
+    },
+    {
+        "name": "agent_task",
+        "description": (
+            "Take the screen and keep working across apps and pages until a "
+            "whole errand is done: 'find a gaming mouse under 5000 with an "
+            "infinite scroll wheel and put it in my basket'. For jobs that "
+            "need judgement between steps; screen_task and browser_task are "
+            "the single-job versions."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": (
+                        "The whole errand in one sentence, naming where to "
+                        "start and what decides when it is done."
+                    ),
+                },
+            },
+            "required": ["task"],
         },
     },
     {
@@ -688,6 +702,17 @@ _TRIGGERS: dict[str, tuple[str, ...]] = {
         "amazon", "youtube", "reddit", "cart", "checkout",
         "summaris", "summariz", "url", "tab",
     ),
+    # An errand rather than an action: words that describe an outcome
+    # somebody wants reached, with the steps left unsaid. Generous on
+    # purpose - a false positive costs tokens on one turn, a false negative
+    # costs the user a job E.V. could have finished by itself.
+    "agent_task": (
+        "buy", "order", "cart", "basket", "checkout", "book", "reserve",
+        "apply", "sign up", "subscribe", "compare", "cheapest", "under",
+        "best", "research", "shop", "shopping", "find me", "get me",
+        "sort out", "handle", "take over", "keep going", "until", "figure out",
+        "work out", "on your own", "autonomous", "whole thing", "for me",
+    ),
 }
 
 # Tools that only make sense offered together. The model's job on a GUI
@@ -699,6 +724,11 @@ _TRIGGERS: dict[str, tuple[str, ...]] = {
 _FAMILIES: tuple[frozenset[str], ...] = (
     frozenset({"take_screenshot", "mouse_action", "keyboard_action", "screen_task"}),
     frozenset({"remember_fact", "recall_fact", "manage_todo"}),
+    # An errand on a website is the one place where "one scripted run" and
+    # "keep going until it is done" are both plausible, and the choice
+    # between them is the model's to make. Showing only one turns that
+    # choice into whichever word happened to match.
+    frozenset({"browser_task", "agent_task"}),
 )
 
 # `if words` is load-bearing. An empty alternation compiles to `\b(?:)`,

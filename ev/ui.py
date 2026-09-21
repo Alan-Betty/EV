@@ -93,6 +93,11 @@ class UI:
         # Spinners are pointless when stdout is a pipe, and actively harmful
         # when something else is mid-prompt on the same line.
         self._spinners = self.rich and config.UI_SPINNERS
+        # The one spinner that outlives a single call. `rich` allows exactly
+        # one live display at a time, so it is held here and torn down by
+        # anything that wants its own.
+        self._live = None
+        self._live_label = ""
         # Decided once: a console that cannot encode block glyphs would
         # otherwise raise on the banner before anything else happens.
         unicode_ok = _can_encode(HEADER_UNICODE + "".join(GLYPHS_UNICODE.values()))
@@ -209,7 +214,7 @@ class UI:
     # -- status spinner ---------------------------------------------------
     @contextlib.contextmanager
     def status(self, label: str) -> Iterator[None]:
-        """Animated `[Listening...]` / `[Thinking...]` / `[Executing...]`.
+        """Animated `[Thinking...]` / `[Transcribing...]` / `[Executing...]`.
 
         A context manager so the spinner is always torn down, including on an
         exception, leaving the cursor where the next line expects it.
@@ -217,10 +222,48 @@ class UI:
         if not self._spinners:
             yield
             return
+        # `rich` permits one live display at a time, so a spinner that is
+        # being held open elsewhere is retired rather than fought with.
+        self.end_status()
         with self._console.status(
             f"[cyan]{label}[/]", spinner="dots", spinner_style="cyan"
         ):
             yield
+
+    def begin_status(self, label: str) -> None:
+        """Start a spinner that outlives the call that started it.
+
+        The listening spinner spans a whole conversation window, which is
+        several trips round the loop: E.V. polls the microphone on a short
+        timeout so the window can expire, and a spinner torn down and rebuilt
+        every couple of seconds is a flicker rather than an animation. Calling
+        this again with the same label is deliberately a no-op.
+        """
+        if not self._spinners:
+            return
+        if self._live is not None:
+            if self._live_label == label:
+                return
+            self.end_status()
+        try:
+            live = self._console.status(
+                f"[cyan]{label}[/]", spinner="dots", spinner_style="cyan"
+            )
+            live.start()
+        except Exception:  # pragma: no cover - a spinner is never load bearing
+            return
+        self._live, self._live_label = live, label
+
+    def end_status(self) -> None:
+        """Take down the long-running spinner, if there is one. Never raises."""
+        live, self._live = self._live, None
+        self._live_label = ""
+        if live is None:
+            return
+        try:
+            live.stop()
+        except Exception:  # pragma: no cover - teardown races
+            pass
 
     def prompt(self, engaged: bool, standby: bool) -> str:
         """The text-mode input prompt. Returned, not printed, for `input()`."""

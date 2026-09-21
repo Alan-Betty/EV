@@ -282,6 +282,10 @@ def test_dispatch_never_lets_the_model_set_confirmed(monkeypatch):
 def test_classify_gui_flags_spending_sending_and_deleting():
     for text in (
         "click Place order",
+        # What the button on a real shop says, as opposed to what a test
+        # author would write. Matching only "place the order" let an actual
+        # checkout past the gate written to catch exactly it.
+        "click Place your order",
         "click Buy now",
         "click Proceed to checkout",
         "click Send",

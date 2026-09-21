@@ -287,10 +287,14 @@ def test_only_tools_that_can_stop_are_offered_the_token():
         {
             "terminal_command",
             "file_manager",
-            # Both autonomous loops check between steps, which is a point
-            # where the work is coherent and nothing is half-written.
+            # Every autonomous loop checks between steps, which is a point
+            # where the work is coherent and nothing is half-written. A
+            # mission checks between rounds and hands the same token down to
+            # whichever sub-tool is running, so a stop lands inside a
+            # sub-task rather than waiting for it to end.
             "screen_task",
             "browser_task",
+            "agent_task",
         }
     )
     # Launching a program cannot be undone, so it is deliberately absent.
