@@ -13,7 +13,7 @@ python ev_core.py --text           # typed input, same brain and tools
 python ev_core.py --say "open notepad"   # one command, then exit
 python ev_core.py -v               # debug logging
 
-python -m pytest tests/ -q                       # full suite, 693 tests, offline
+python -m pytest tests/ -q                       # full suite, ~750 tests, offline
 EV_LIVE_BROWSER=1 python -m pytest tests/test_web_agent_live.py -q  # real browser
 python -m pytest tests/test_file_manager.py -q   # one file
 python -m pytest tests/test_smoke.py -k safety   # one test or group
@@ -59,8 +59,11 @@ coordinate ruler and the region zoom are Pillow calls on a frame that was
 already being encoded. No new package was added for any of it.
 
 Playwright is the one genuinely heavy dependency in the tree, which is why it
-is optional, imported inside `browser_task`, and torn down in a `finally`
-when the task ends - between tasks it costs an unused import path.
+is optional and imported inside `browser_task`. A run that fails is torn down
+at once; one that finishes, or stops to ask for a sign-in, leaves its window
+up on the kept browser (see "Getting web errands to the browser") until the
+user closes it or E.V. exits - with `EV_BROWSER_KEEP_OPEN=false` it is torn
+down after every task, as it always used to be.
 
 ### The speech-purity boundary
 
@@ -201,7 +204,9 @@ rule another ~25, against 25 tokens of headroom — so the two-turn assertion
 failed the moment it was added, which is the test doing its job. Thirteen tool
 descriptions were compressed to cover it: examples that repeated the
 description, an `enum` restated in prose, two tone examples in the prompt.
-The floor is now ~3955, lower again than before the tool existed.
+The floor is now ~3955, lower again than before the tool existed. (It is
+~3929 since the browser routing fix below, which paid for itself, and
+~3933 since the prompt learnt that it really can take the screen.)
 
 ### Confirmation and safety
 
@@ -644,6 +649,67 @@ example.com, books.toscrape.com, duckduckgo, wikipedia and saucedemo,
 including a full log-in-and-add-to-cart flow. It is skipped unless
 `EV_LIVE_BROWSER=1`, because the suite is offline and stays offline.
 
+### Getting web errands to the browser
+
+"Do it in the browser" stopped reaching Playwright, nothing failed loudly,
+and it was four gaps rather than one. Each is pinned in
+`tests/test_browser_routing.py`.
+
+- **The route planner's "web" was thrown away.** `choose_route` parsed its
+  answer with `parse_plan`, which validates against the *step* vocabulary -
+  where "web" is not a mode - so every web answer, URL and all, became `{}`.
+  `guess_route` then decided, and it says "desktop" for anything off its word
+  list: "star the playwright repo on github" ran through the vision loop.
+  It now reads the raw object with `_json_object`. `guess_route` also knows
+  more sites and matches the shape of a domain.
+- **The browser tools were never shown.** `select_tools` offered
+  `browser_task` only for a short word list, so "go to wikipedia", "log into
+  netflix", "navigate to example.com" or "open the first result" reached a
+  model holding only `web_search` - which opened a page and reported
+  success. The list is wider and `_DOMAIN` matches any URL-shaped word. On
+  top of that the prompt used to *teach* the wrong answer: its first tone
+  example was the Amazon errand answered with "Chrome's up." The rule now
+  says outright that `web_search` cannot see or touch a page, and anything
+  past opening it is `browser_task` or `agent_task`.
+- **A goal with no script was refused.** `browser_task` needed the model to
+  write CSS selectors for a page it had never seen, and a call with only a
+  `task` answered "I need to know what to do in the browser". A goal alone
+  now runs `web_agent.web_mission`, the DOM planner, with confirmation
+  scoped the way `agent_task` scopes it. A script still runs as a script.
+- **The browser closed under the user.** "Play lofi on YouTube" played for
+  half a second. Playwright's sync objects belong to the thread that made
+  them, so `web_agent._KEEPER` owns the browser on a thread of its own
+  (`ev-browser`): every run - scripted or planned - is handed to it, and it
+  keeps the window after `done` or `ask` (a sign-in or captcha is exactly
+  when the window must stay). It closes on failure, when the user closes the
+  window (polled every few seconds by asking a page for its title, since the
+  sync API only notices a closed page when something pumps it), after
+  `EV_BROWSER_KEEP_OPEN_IDLE_S` if that is set, and at exit. The next errand
+  reuses it, which also skips a Chromium cold start. `release()` waits for
+  the close to finish, because the persistent profile is locked while that
+  browser lives. `conftest.py` turns it off, since a fake page kept by one
+  test would be handed to the next.
+
+- **A script that sticks is handed on, not abandoned.** Given a goal, the
+  model still sometimes writes a script as well - blind, for a page it has
+  never seen - and on amazon.in `click Search` matched four elements, the
+  first off screen, so the errand ended at step three with Amazon open and
+  nothing happening. A stuck step now keeps the kept browser on that page and
+  passes it to `web_mission` with the script's progress as history. An
+  ambiguous text match is also narrowed with `>> visible=true` before the
+  click, so the guess is less often wrong in the first place.
+
+Two confirmation holes surfaced on the way, and both are about what a yes
+carries. `dispatch` accepted `confirmed` - and `notes` - from the model,
+because both are in `_ALLOWED_ARGS` for the replay to get through; so a
+model call carrying `"confirmed": true` skipped its own gate. `ev_core`
+now passes every model call through `tools.from_model`, which strips
+`CONFIRMATION_ONLY_ARGS`; only the replay of a spoken yes supplies them.
+And a mission paused on a *new* risk resumed with only the original risk
+allowed, so the step just agreed to was held again, and asked about again.
+`approved` now rides in the confirmation (`web_agent.allow` / `allows`) and
+counts only when `confirmed` is set.
+
 ### The overlay, and a kill switch that works from anywhere
 
 A pointer moving on its own with nothing on screen to explain it is
@@ -690,6 +756,17 @@ Tk owns a thread of its own and updates cross into it through a queue drained
 by `root.after`, because widgets may only be touched from the thread that made
 them. Every entry point swallows its own failures: a missing Tk, an absent
 display or a hostile window manager costs the announcement, never the run.
+
+**It goes up whenever E.V. has the screen, not only for missions.**
+`overlay.taking_over` wraps `screen_task`, every visible `browser_task` and
+`agent_task`. It is re-entrant: a mission hands sub-goals to `screen_task`
+and `browser_task`, and a nested call shares the outer takeover and updates
+its status line, rather than stacking a second frame and failing to register
+the hotkey a second time. A headless browser run gets none, since there is
+nothing on screen to explain. Single `mouse_action` / `keyboard_action` calls
+get none either: one click is over before Tk has drawn the frame, so all it
+would add is a flicker. `conftest.py` turns the overlay and hotkey off for
+the suite.
 
 **The kill switch has three routes in, and they are deliberately different
 kinds of thing.** `RegisterHotKey` (default `ctrl+alt+q`) reaches E.V. even

@@ -36,6 +36,15 @@ def _reset_guard(monkeypatch):
     from tools import guard
 
     monkeypatch.setattr(config, "AUDIT_ENABLED", False, raising=False)
+    # The kept browser lives on a thread of its own and outlives the call
+    # that opened it - so left on, a fake page from one test would be handed
+    # to the next. Tests of the keeper turn it back on and release it.
+    monkeypatch.setattr(config, "BROWSER_KEEP_OPEN", False, raising=False)
+    # Every screen and browser tool now announces itself with the overlay,
+    # so left on, any test that reaches one would start Tk on a real display
+    # and register a real system-wide hotkey.
+    monkeypatch.setattr(config, "AGENT_OVERLAY_ENABLED", False, raising=False)
+    monkeypatch.setattr(config, "AGENT_HOTKEY_ENABLED", False, raising=False)
     guard.reset()
     yield
     guard.reset()

@@ -28,7 +28,7 @@ send2trash>=1.8           # file_manager deletes go to the Recycle Bin, so a
                           # are permanent.
 
 # --- optional, uncomment as needed ------------------------------------------
-# playwright>=1.40         # browser_task: DOM-level web automation. The
+playwright>=1.63.0        # browser_task: DOM-level web automation. The
 #                          # heaviest thing E.V. can reach for, so it is
 #                          # opt-in, imported lazily, and the browser is torn
 #                          # down when the task ends. After installing:

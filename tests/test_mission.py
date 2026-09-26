@@ -424,7 +424,7 @@ def test_the_kill_switch_fires_once(monkeypatch):
 
 def test_pressing_the_kill_switch_stops_the_run_and_locks_down(monkeypatch):
     """Not just this mission: a person reaching for it means everything."""
-    from tools import guard
+    from tools import guard, overlay
 
     plan = (
         '{"observation": "a page", "next": {"mode": "gui", "goal": "click the thing"}}'
@@ -433,7 +433,7 @@ def test_pressing_the_kill_switch_stops_the_run_and_locks_down(monkeypatch):
     monkeypatch.setattr(config, "AGENT_KILL_LOCKS_DOWN", True)
 
     killers: list = []
-    real_takeover = mission.Takeover
+    real_takeover = overlay.Takeover
 
     class Rigged(real_takeover):
         def __enter__(self):
@@ -441,7 +441,7 @@ def test_pressing_the_kill_switch_stops_the_run_and_locks_down(monkeypatch):
             killers.append(handle)
             return handle
 
-    monkeypatch.setattr(mission, "Takeover", Rigged)
+    monkeypatch.setattr(overlay, "Takeover", Rigged)
 
     def press_it(**kwargs):
         killers[0]._fire()  # as if the user hit the hotkey mid-sub-task

@@ -67,8 +67,8 @@ from tools.computer_use import (
 # because they are implementation detail of the step loop; imported here
 # because a second implementation of either is a second thing to get wrong.
 from tools.computer_use import _parse_step, _screen_context
-from tools.guard import audit, engage_lockdown, is_locked_down
-from tools.overlay import Takeover
+from tools.guard import audit, is_locked_down
+from tools.overlay import Takeover, taking_over
 from tools.safety import classify_gui
 from tools import web_agent
 
@@ -223,8 +223,15 @@ def _paused(
     history: list[str],
     start: str,
     rounds: int,
+    approved: str = "",
 ) -> ToolResult:
-    """Stop and ask, carrying the progress so a yes resumes rather than restarts."""
+    """Stop and ask, carrying the progress so a yes resumes rather than restarts.
+
+    `approved` is every risk agreed to so far, the one being asked about
+    included. Without it a yes resumed the run with only the original
+    errand's risk allowed, so the same step was held again and the user was
+    asked the same question until they gave up.
+    """
     return ToolResult.confirm(
         question,
         detail,
@@ -232,6 +239,7 @@ def _paused(
         start=start,
         max_rounds=str(rounds),
         notes="; ".join(history[-8:]),
+        approved=approved,
     )
 
 
@@ -284,6 +292,7 @@ def agent_task(
     start: str = "",
     max_rounds: str = "",
     notes: str = "",
+    approved: str = "",
     confirmed: bool = False,
     cancel: CancelToken | None = None,
     **_: object,
@@ -328,7 +337,12 @@ def agent_task(
     # agreed to, and a sub-goal that introduces a *different* one stops the
     # run and asks again below.
     verdict = classify_gui(goal)
-    allowed = verdict.reason if verdict.needs_confirmation else ""
+    # What a paused run was already told yes to rides back in `approved`, and
+    # only counts when a spoken yes is what brought it back.
+    allowed = web_agent.allow(
+        verdict.reason if verdict.needs_confirmation else "",
+        approved if confirmed else "",
+    )
     if not confirmed and config.AGENT_CONFIRM_START:
         return ToolResult.confirm(
             f"I'll take over the screen and run this until it's done: "
@@ -347,10 +361,11 @@ def agent_task(
     token = cancel if cancel is not None else CancelToken()
 
     def kill() -> None:
-        """Both kill-switch routes land here, from a thread of their own."""
-        token.cancel()
-        if config.AGENT_KILL_LOCKS_DOWN:
-            engage_lockdown("the kill switch was pressed during a mission")
+        """Both kill-switch routes land here, from a thread of their own.
+
+        `taking_over` has already cancelled the token and locked E.V. down by
+        the time this runs; what is left is the mission's own record of it.
+        """
         audit("mission_killed", task=goal[:200])
 
     history: list[str] = [line for line in (notes or "").split("; ") if line.strip()]
@@ -361,7 +376,7 @@ def agent_task(
     deadline = time.monotonic() + config.AGENT_TIMEOUT_S
     audit("mission_start", task=goal[:200], rounds=rounds, resumed=bool(history))
 
-    with Takeover(goal, kill) as hud:
+    with taking_over(goal, token, kill) as hud:
         if not hud.drawing:
             log.info("Mission running without an overlay")
 
@@ -397,6 +412,7 @@ def agent_task(
                     f"agent_task '{goal}' {outcome.detail}. Confirming carries "
                     "on from where it got to.",
                     history, start, rounds,
+                    approved=web_agent.allow(allowed, outcome.reason),
                 )
             # `desktop`, `fail` and `error` are the three that the screen may
             # still be able to finish; everything else is an answer.
@@ -567,7 +583,9 @@ def agent_task(
             # as already-agreed; a new one stops the run.
             if config.COMPUTER_CONFIRM_RISKY:
                 sub_verdict = classify_gui(_move_risk(move))
-                if sub_verdict.needs_confirmation and sub_verdict.reason != allowed:
+                if sub_verdict.needs_confirmation and not web_agent.allows(
+                    allowed, sub_verdict.reason
+                ):
                     audit(
                         "mission_paused",
                         task=goal[:200],
@@ -585,6 +603,7 @@ def agent_task(
                         history,
                         start,
                         rounds,
+                        approved=web_agent.allow(allowed, sub_verdict.reason),
                     )
 
             described = _describe_move(move)

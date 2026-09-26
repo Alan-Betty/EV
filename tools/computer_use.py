@@ -54,6 +54,7 @@ import config
 from tools import window
 from tools.base import IS_WINDOWS, CancelToken, ToolResult, was_cancelled
 from tools.safety import classify, classify_gui
+from tools.overlay import taking_over
 
 log = logging.getLogger("ev.tools.computer_use")
 
@@ -1400,6 +1401,8 @@ An action is one of these:
 {"action":"fail","speech":"why this cannot be done from here"}
 
 Rules:
+- The red border and the status panel belong to E.V.'s own overlay. Ignore
+  them; they are not part of any application, and nothing is ever clicked there.
 - Coordinates are FRACTIONS of the whole screen, 0 to 1. Read them off the grid:
   the yellow labels along the top are x, the ones down the left are y. On a
   zoomed image those labels still mean fractions of the whole screen, so use
@@ -1679,6 +1682,22 @@ def screen_task(
     if held is not None:
         return held
 
+    # The frame and the kill switch go up before the first look, for the
+    # whole run: a pointer moving on its own with nothing on screen to say
+    # why is indistinguishable from a machine somebody else has taken over.
+    token = cancel if cancel is not None else CancelToken()
+    with taking_over(goal, token) as hud:
+        return _drive_screen(goal, max_steps, confirmed, token, hud)
+
+
+def _drive_screen(
+    goal: str,
+    max_steps: str,
+    confirmed: bool,
+    cancel: CancelToken,
+    hud: Any,
+) -> ToolResult:
+    """The look-act loop behind `screen_task`, run under the overlay."""
     ceiling = int(_number(max_steps, config.SCREEN_TASK_MAX_STEPS))
     ceiling = max(
         1, min(ceiling or config.SCREEN_TASK_MAX_STEPS, config.SCREEN_TASK_MAX_STEPS)
@@ -1736,6 +1755,7 @@ def screen_task(
                 f"{'; '.join(history)}. Not finished - the rest still needs doing.",
             )
 
+        hud.note(f"Step {len(history) + 1} of {ceiling}: looking at the screen.")
         try:
             frame = capture_screen(
                 region=zoom,
@@ -1872,8 +1892,9 @@ def screen_task(
             if len(history) >= ceiling:
                 break
 
-            result = _apply_step(action, cancel)
             described = _describe_step(action)
+            hud.note(described)
+            result = _apply_step(action, cancel)
             history.append(described if result.ok else f"{described} (failed)")
             if not result.ok:
                 return ToolResult.failure(

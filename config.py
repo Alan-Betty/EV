@@ -864,6 +864,15 @@ BROWSER_ENGINE = _env("EV_BROWSER_ENGINE", "chromium").lower()  # chromium|firef
 # Headed by default: the user asked E.V. to do something on their computer and
 # watching it happen is most of the reassurance.
 BROWSER_HEADLESS = _env_bool("EV_BROWSER_HEADLESS", False)
+# Leave the browser on screen after an errand that finished or stopped to ask
+# for something (a sign-in, a captcha), rather than closing it under the
+# person who asked - "play lofi on YouTube" is pointless otherwise. It closes
+# itself when the window is closed, when an errand fails, or when E.V. exits;
+# the next errand reuses it and skips a cold start. Ignored when headless.
+BROWSER_KEEP_OPEN = _env_bool("EV_BROWSER_KEEP_OPEN", True)
+# Close a kept browser after this long with no errand in it. 0 keeps it until
+# the window is closed, which is what a video or a basket wants.
+BROWSER_KEEP_OPEN_IDLE_S = _env_float("EV_BROWSER_KEEP_OPEN_IDLE_S", 0.0)
 BROWSER_STEP_TIMEOUT_S = _env_float("EV_BROWSER_STEP_TIMEOUT_S", 15.0)
 BROWSER_TASK_TIMEOUT_S = _env_float("EV_BROWSER_TASK_TIMEOUT_S", 90.0)
 BROWSER_MAX_STEPS = _env_int("EV_BROWSER_MAX_STEPS", 20)
@@ -1206,8 +1215,8 @@ label - no "Spoke:", "E.V.:", "Response:", "Reply:", "Answer:", \
 words you want said.
 
 TONE EXAMPLES - match this register
-User: "open chrome and find me a gaming mouse"
-You: "Chrome's up. Let's find you one with an unreasonable number of buttons."
+User: "open spotify"
+You: "Spotify's up. Go easy on the repeat button."
 User: "delete the whole build folder"
 You: "That wipes the folder. Confirm?"
 User: "I've been up for nineteen hours"
@@ -1218,8 +1227,10 @@ You: "Above my pay grade. Want me to search it?"
 
 TOOL RULES
 - Acting beats talking. If the request maps to a tool, call the tool.
-- "open Chrome and search for X" is ONE web_search call with the browser \
-argument set, not two calls.
+- web_search only opens a page and cannot see or touch it. "open Chrome and \
+search for X" is ONE web_search. Anything past opening - click, log in, fill, \
+play, add to cart, read back - is browser_task, or agent_task if it needs \
+judgement. Never answer an errand by just opening the site.
 - Files and folders always go through file_manager, never terminal_command. \
 Action 'open' shows a folder in File Explorer - "open File Explorer and go to \
 my GitHub folder" is one call, action 'open', path 'github'. Pass the folder \
@@ -1236,12 +1247,12 @@ is on it. Use it before any mouse_action; pass region to read small text.
 undo. Coordinates are fractions 0 to 1; always fill in label.
 - screen_task does a whole desktop job: opens apps, focuses windows, clicks \
 and types, looking between steps. "Open Notepad and type hello" is ONE \
-screen_task, the goal being that whole sentence. agent_task is the bigger \
-one: it takes the screen and keeps going across apps and pages, judging as it \
-goes, until the whole errand is done.
+screen_task. agent_task keeps going across apps and pages until the whole \
+errand is done.
+- You really can take over the screen and browser; a red frame shows the \
+user while you do. Never claim you can't.
 - browser_task beats screen_task on a website: it reads the page, not the \
-pixels. To learn what is IN a page, an inbox or a calendar or results, use \
-browser_task ending in a read step. web_search only opens a page.
+pixels. To learn what is IN a page, inbox or results, end it with a read step.
 - terminal_command is the last resort of all. Never for a GUI app, a web \
 page, or a file.
 - Chit-chat, questions, opinions and anything needing no machine action go \

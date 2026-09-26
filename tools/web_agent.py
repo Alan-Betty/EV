@@ -43,11 +43,14 @@ vision loop for the rest of the errand rather than clicking hopefully.
 
 from __future__ import annotations
 
+import atexit
 import json
 import logging
+import queue
 import re
 import threading
 import time
+from concurrent.futures import Future
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -372,6 +375,148 @@ class BrowserSession:
         self._browser = None
         self._playwright = None
         self.page = None
+
+    def alive(self) -> bool:
+        """Whether any page of this browser is still open.
+
+        Asked of each page rather than read off `context.pages`, because the
+        sync API only learns that the user closed the window when something
+        pumps its connection - and a call that fails on a closed page is
+        exactly such a pump.
+        """
+        try:
+            pages = list(self.page.context.pages) if self.page is not None else []
+        except Exception:
+            return False
+        for page in pages:
+            try:
+                if not page.is_closed():
+                    page.title()
+                    return True
+            except Exception:
+                continue
+        return False
+
+
+# ---------------------------------------------------------------------------
+# The kept browser
+# ---------------------------------------------------------------------------
+# An errand that ends on a video, a basket or a sign-in page used to close the
+# browser the moment it finished - so "play lofi on YouTube" played for half
+# a second, and "it's in your basket" left nothing on screen to check it
+# against. Playwright's sync objects belong to the thread that made them, so
+# a browser that outlives the tool call has to live on a thread of its own:
+# every run is handed to it, and it closes the browser itself when the user
+# closes the window, when an errand ends badly, or when E.V. exits.
+#
+# A second run reuses the open browser, which also skips a Chromium cold start.
+_KEEP_ON = frozenset({"done", "ask"})
+_KEEPER_POLL_S = 3.0
+
+
+def keeping() -> bool:
+    """Whether runs go through the kept browser rather than a throwaway one."""
+    return bool(config.BROWSER_KEEP_OPEN) and not config.BROWSER_HEADLESS
+
+
+class _Keeper:
+    """One thread that owns the browser between errands."""
+
+    def __init__(self) -> None:
+        self._jobs: "queue.Queue[tuple[Any, Any, Future]]" = queue.Queue()
+        self._thread: threading.Thread | None = None
+        self._start = threading.Lock()
+
+    def run(self, body: Any, keep: Any = None) -> Any:
+        """Run `body(session)` on the browser thread and hand back its result.
+
+        `keep(result)` decides whether the browser stays up afterwards; an
+        exception always closes it, because a browser in an unknown state is
+        not one to hand the next errand.
+        """
+        with self._start:
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = threading.Thread(
+                    target=self._loop, name="ev-browser", daemon=True
+                )
+                self._thread.start()
+        done: Future = Future()
+        self._jobs.put((body, keep, done))
+        return done.result()
+
+    def release(self, timeout: float = 10.0) -> None:
+        """Close the kept browser, if there is one, and wait until it has.
+
+        The wait matters: the persistent profile is locked while that
+        browser lives, so a scripted run started before it has gone would
+        fall back to a fresh, signed-out browser.
+        """
+        if self._thread is None or not self._thread.is_alive():
+            return
+        done: Future = Future()
+        self._jobs.put((None, None, done))
+        try:
+            done.result(timeout=timeout)
+        except Exception as exc:  # pragma: no cover - teardown races
+            log.debug("Releasing the kept browser: %s", exc)
+
+    def _loop(self) -> None:
+        session: BrowserSession | None = None
+        idle_since = time.monotonic()
+
+        def drop() -> None:
+            nonlocal session
+            if session is not None:
+                session.close()
+            session = None
+
+        while True:
+            try:
+                body, keep, done = self._jobs.get(
+                    timeout=_KEEPER_POLL_S if session is not None else None
+                )
+            except queue.Empty:
+                limit = config.BROWSER_KEEP_OPEN_IDLE_S
+                idle = limit > 0 and time.monotonic() - idle_since > limit
+                if idle or not session.alive():
+                    log.info("Closing the kept browser")
+                    drop()
+                continue
+
+            if body is None:
+                drop()
+                done.set_result(None)
+                continue
+            try:
+                if session is not None and not session.alive():
+                    drop()
+                if session is None:
+                    fresh = BrowserSession()
+                    session = fresh.__enter__()
+                result = body(session)
+            except BaseException as exc:
+                drop()
+                done.set_exception(exc)
+                continue
+            try:
+                wanted = bool(keep(result)) if keep is not None else False
+            except Exception:
+                wanted = False
+            if not wanted:
+                drop()
+            idle_since = time.monotonic()
+            done.set_result(result)
+
+
+_KEEPER = _Keeper()
+
+
+def release_browser() -> None:
+    """Close the kept browser now. Safe to call when there is none."""
+    _KEEPER.release()
+
+
+atexit.register(release_browser)
 
 
 def observe(page: Any, note: str = "") -> Observation:
@@ -1206,8 +1351,8 @@ def ask_planner(prompt: str, system: str = _PLANNER_SYSTEM) -> str:
         raise PlannerError("The planner sent back something unreadable.") from exc
 
 
-def parse_plan(raw: str) -> dict[str, Any]:
-    """Pull the plan object out of a reply, fences, prose and all."""
+def _json_object(raw: str) -> dict[str, Any]:
+    """The first JSON object in a reply, fences, prose and all, or {}."""
     text = (raw or "").strip()
     if text.startswith("```"):
         text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
@@ -1222,8 +1367,12 @@ def parse_plan(raw: str) -> dict[str, Any]:
             parsed = json.loads(match.group(0))
         except json.JSONDecodeError:
             return {}
-    if not isinstance(parsed, dict):
-        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def parse_plan(raw: str) -> dict[str, Any]:
+    """Pull the plan object out of a reply, fences, prose and all."""
+    parsed = _json_object(raw)
     mode = str(parsed.get("mode", "") or "").strip().lower()
     if mode not in {"act", "done", "ask", "fail", "desktop"}:
         # A reply carrying actions and no mode is an "act" that forgot to say
@@ -1259,16 +1408,20 @@ def choose_route(goal: str) -> dict[str, str]:
     fail - a planner that cannot be reached means the caller falls back to
     its own heuristic rather than the errand stopping.
     """
-    plan = parse_plan(
+    # Not `parse_plan`: that normalises against the *step* vocabulary, where
+    # "web" is not a mode, so it threw away every web answer - and the URL
+    # with it - leaving `guess_route` to decide, which says "desktop" for
+    # anything off its word list. Every errand the planner correctly sent to
+    # the browser was run through the vision loop instead.
+    plan = _json_object(
         ask_planner(f"Errand: {goal.strip()}\n\nWhere should this run?", _ROUTE_SYSTEM)
     )
-    mode = str(plan.get("mode", "") or "").strip().lower()
-    if mode not in {"web", "desktop"}:
-        # `parse_plan` normalises against the *step* vocabulary, where "web"
-        # is not a mode, so read the raw field too rather than discarding a
-        # perfectly good answer on a vocabulary mismatch.
-        mode = "web" if "web" in str(plan.get("mode", "")).lower() else ""
-    if not mode:
+    raw_mode = str(plan.get("mode", "") or "").strip().lower()
+    if raw_mode in {"web", "desktop"}:
+        mode = raw_mode
+    elif "web" in raw_mode or "browser" in raw_mode:
+        mode = "web"
+    else:
         return {}
     return {
         "mode": mode,
@@ -1294,7 +1447,12 @@ _WEB_WORDS = (
     "website", "web page", "webpage", "online", "search for", "buy", "order",
     "cart", "basket", "checkout", "price", "cheapest", "under ", "book a",
     "booking", "flight", "hotel", "sign up", "log in", "login", "browse",
+    "github", "netflix", "linkedin", "twitter", "instagram", "facebook",
+    "ebay", "go to", "navigate", "visit",
 )
+
+
+_DOMAIN_SHAPE = re.compile(r"\b[a-z0-9-]+\.(?:com|in|org|net|io|co|dev|app|ai|uk|tv)\b")
 
 
 def guess_route(goal: str) -> str:
@@ -1302,7 +1460,7 @@ def guess_route(goal: str) -> str:
     text = " ".join((goal or "").lower().split())
     if any(word in text for word in _DESKTOP_WORDS):
         return "desktop"
-    if any(word in text for word in _WEB_WORDS):
+    if any(word in text for word in _WEB_WORDS) or _DOMAIN_SHAPE.search(text):
         return "web"
     return "desktop"
 
@@ -1342,6 +1500,22 @@ class WebOutcome:
     committed: list[str] = field(default_factory=list)
 
 
+def allow(*reasons: str) -> str:
+    """Risks the user has agreed to, as one string a confirmation can carry."""
+    seen: list[str] = []
+    for chunk in reasons:
+        for reason in (chunk or "").split("\n"):
+            reason = reason.strip()
+            if reason and reason not in seen:
+                seen.append(reason)
+    return "\n".join(seen)
+
+
+def allows(allowed: str, reason: str) -> bool:
+    """Whether `reason` is one of the risks in `allowed`."""
+    return bool(reason) and reason in (allowed or "").split("\n")
+
+
 def _risky(
     actions: list[Action],
     goal: str,
@@ -1364,7 +1538,7 @@ def _risky(
     for action in actions:
         named = label_for(action, labels) or action.target
         verdict = classify_gui(f"{action.verb} {named} {action.value}")
-        if verdict.needs_confirmation and verdict.reason != allowed:
+        if verdict.needs_confirmation and not allows(allowed, verdict.reason):
             return True, verdict.reason, describe_action(action, labels)
         if action.verb == "fill" and action.value:
             shell = classify(action.value)
@@ -1415,271 +1589,275 @@ def web_mission(
             except Exception:  # pragma: no cover - the overlay is cosmetic
                 pass
 
-    try:
-        session = BrowserSession()
-    except BrowserError as exc:  # pragma: no cover - constructor cannot raise
-        return WebOutcome("error", str(exc), str(exc), done)
+    def body(browser: Any) -> WebOutcome:
+        page = browser.page
+        landing = (start or "").strip()
+        if landing:
+            try:
+                page.goto(
+                    _normalise_url(landing),
+                    timeout=int(config.BROWSER_STEP_TIMEOUT_S * 1000),
+                    wait_until="domcontentloaded",
+                )
+                done.append(f"opened {landing}")
+            except Exception as exc:
+                log.info("Could not open %s: %s", landing, exc)
+                done.append(f"could not open {landing}")
 
-    try:
-        with session as browser:
-            page = browser.page
-            landing = (start or "").strip()
-            if landing:
-                try:
-                    page.goto(
-                        _normalise_url(landing),
-                        timeout=int(config.BROWSER_STEP_TIMEOUT_S * 1000),
-                        wait_until="domcontentloaded",
-                    )
-                    done.append(f"opened {landing}")
-                except Exception as exc:
-                    log.info("Could not open %s: %s", landing, exc)
-                    done.append(f"could not open {landing}")
+        plan_line = ""
+        previous = ""
+        unchanged = 0
+        # Something the loop itself learnt last round that the page will
+        # not say for itself: that a repeat was refused, or that a read
+        # came back word for word identical. Both are the shape of
+        # mistake a planner cannot see from one page.
+        carried = ""
+        last_read = ""
 
-            plan_line = ""
-            previous = ""
-            unchanged = 0
-            # Something the loop itself learnt last round that the page will
-            # not say for itself: that a repeat was refused, or that a read
-            # came back word for word identical. Both are the shape of
-            # mistake a planner cannot see from one page.
-            carried = ""
-            last_read = ""
-
-            for index in range(1, rounds + 1):
-                if stopping():
-                    return WebOutcome(
-                        "stopped", "Stopped.", "the kill switch was pressed", done,
-                        " ".join(gathered),
-                        committed=list(committed.values()),
-                    )
-                if time.monotonic() > deadline:
-                    return WebOutcome(
-                        "ceiling", "Ran out of time in the browser.",
-                        f"hit the {config.AGENT_WEB_TIMEOUT_S:.0f}s browser ceiling",
-                        done, " ".join(gathered),
-                        committed=list(committed.values()),
-                    )
-
-                say(f"Round {index} of {rounds}: reading the page.")
-                # A click may have opened a tab since the last round, and
-                # the page worth reading is the one it opened.
-                page = browser.current_page() or page
-                # Whatever the page said in an alert since the last look is
-                # part of what happened, and often the only trace of it.
-                spoke = browser.take_dialogs()
-                sight = observe(page, note=" ".join(x for x in (spoke, carried) if x))
-                carried = ""
-                # Number to words, for this scan only. Everything the loop
-                # says about what it did is said in these terms, because the
-                # numbers are gone by the next round and the words are not.
-                labels = {
-                    str(item.get("i")): str(item.get("label", ""))
-                    for item in sight.elements
-                }
-
-                # Two rounds that change nothing mean the clicks are landing
-                # on something dead. The planner cannot tell from one page
-                # that it is going nowhere; only the comparison can.
-                if previous and sight.signature() == previous:
-                    unchanged += 1
-                    # Appended rather than assigned. What the loop learnt -
-                    # that a repeat was refused, that a read came back
-                    # identical - is exactly what is true on a page that has
-                    # not changed, so overwriting it here threw away the one
-                    # note that explained why.
-                    stall = (
-                        "the page has NOT changed since your last actions, so they "
-                        "did nothing - try a different route"
-                    )
-                    sight.note = f"{sight.note} {stall}".strip() if sight.note else stall
-                else:
-                    unchanged = 0
-                previous = sight.signature()
-                if unchanged >= config.AGENT_STALL_ROUNDS:
-                    return WebOutcome(
-                        "fail", "That page isn't going anywhere.",
-                        f"the page did not change across {unchanged} rounds",
-                        done, " ".join(gathered),
-                        committed=list(committed.values()),
-                    )
-
-                prompt = (
-                    f"Errand: {goal}\n"
-                    + (f"Your plan: {plan_line}\n" if plan_line else "")
-                    + f"Round {index} of at most {rounds}.\n"
-                    + "Done so far: "
-                    + f"{'; '.join(done[-config.AGENT_WEB_HISTORY_LINES:]) if done else 'nothing yet'}\n"
-                    # Separated from the history and named for what it is:
-                    # buried in a list of twelve steps, the one line that
-                    # must not happen twice reads like all the others.
-                    + (
-                        "ALREADY DONE - these cannot be undone and must NEVER "
-                        f"be repeated: {'; '.join(milestones)}\n"
-                        if milestones
-                        else ""
-                    )
-                    + "\n"
-                    + fence(sight.render(config.AGENT_WEB_MAX_ELEMENTS, config.AGENT_WEB_TEXT_CHARS))
-                    + "\n\nWhat next?"
+        for index in range(1, rounds + 1):
+            if stopping():
+                return WebOutcome(
+                    "stopped", "Stopped.", "the kill switch was pressed", done,
+                    " ".join(gathered),
+                    committed=list(committed.values()),
+                )
+            if time.monotonic() > deadline:
+                return WebOutcome(
+                    "ceiling", "Ran out of time in the browser.",
+                    f"hit the {config.AGENT_WEB_TIMEOUT_S:.0f}s browser ceiling",
+                    done, " ".join(gathered),
+                    committed=list(committed.values()),
                 )
 
-                try:
-                    plan = parse_plan(ask_planner(prompt))
-                except PlannerError as exc:
-                    status = "budget" if exc.rate_limited else "error"
-                    return WebOutcome(
-                        status, str(exc), f"the planner failed: {exc}", done,
-                        " ".join(gathered),
-                        committed=list(committed.values()),
-                    )
+            say(f"Round {index} of {rounds}: reading the page.")
+            # A click may have opened a tab since the last round, and
+            # the page worth reading is the one it opened.
+            page = browser.current_page() or page
+            # Whatever the page said in an alert since the last look is
+            # part of what happened, and often the only trace of it.
+            spoke = browser.take_dialogs()
+            sight = observe(page, note=" ".join(x for x in (spoke, carried) if x))
+            carried = ""
+            # Number to words, for this scan only. Everything the loop
+            # says about what it did is said in these terms, because the
+            # numbers are gone by the next round and the words are not.
+            labels = {
+                str(item.get("i")): str(item.get("label", ""))
+                for item in sight.elements
+            }
 
-                if not plan:
-                    return WebOutcome(
-                        "error", "I couldn't work out the next move.",
-                        f"the planner returned no usable plan at round {index}",
-                        done, " ".join(gathered),
-                        committed=list(committed.values()),
-                    )
-                if not plan_line:
-                    plan_line = str(plan.get("plan", "") or "").strip()[:200]
+            # Two rounds that change nothing mean the clicks are landing
+            # on something dead. The planner cannot tell from one page
+            # that it is going nowhere; only the comparison can.
+            if previous and sight.signature() == previous:
+                unchanged += 1
+                # Appended rather than assigned. What the loop learnt -
+                # that a repeat was refused, that a read came back
+                # identical - is exactly what is true on a page that has
+                # not changed, so overwriting it here threw away the one
+                # note that explained why.
+                stall = (
+                    "the page has NOT changed since your last actions, so they "
+                    "did nothing - try a different route"
+                )
+                sight.note = f"{sight.note} {stall}".strip() if sight.note else stall
+            else:
+                unchanged = 0
+            previous = sight.signature()
+            if unchanged >= config.AGENT_STALL_ROUNDS:
+                return WebOutcome(
+                    "fail", "That page isn't going anywhere.",
+                    f"the page did not change across {unchanged} rounds",
+                    done, " ".join(gathered),
+                    committed=list(committed.values()),
+                )
 
-                mode = plan["mode"]
-                if mode == "done":
-                    return WebOutcome(
-                        "done",
-                        str(plan.get("speech", "") or "That's done.").strip(),
-                        f"on the page now: {str(plan.get('evidence', '') or 'not stated')[:300]}",
-                        done, " ".join(gathered),
-                        committed=list(committed.values()),
-                    )
-                if mode == "ask":
-                    question = str(plan.get("question", "") or "").strip()
-                    return WebOutcome(
-                        "ask", question or "I need you for this next bit.",
-                        f"stopped for the user: {question}", done, " ".join(gathered),
-                        committed=list(committed.values()),
-                    )
-                if mode == "fail":
-                    spoken = str(plan.get("speech", "") or "").strip()
-                    return WebOutcome(
-                        "fail", spoken or "I couldn't get that done in the browser.",
-                        f"gave up at round {index}: {spoken or 'no reason given'}",
-                        done, " ".join(gathered),
-                        committed=list(committed.values()),
-                    )
-                if mode == "desktop":
-                    why = str(plan.get("why", "") or "").strip()
-                    return WebOutcome(
-                        "desktop", "", f"needs the desktop: {why or 'not stated'}",
-                        done, " ".join(gathered),
-                        committed=list(committed.values()),
-                    )
-
-                actions = parse_actions(plan.get("actions"))[
-                    : max(1, config.AGENT_WEB_ACTIONS_PER_ROUND)
-                ]
-                if not actions:
-                    return WebOutcome(
-                        "error", "I couldn't work out the next move.",
-                        f"the planner asked to act at round {index} but named no "
-                        "usable action",
-                        done, " ".join(gathered),
-                        committed=list(committed.values()),
-                    )
-
-                # The whole batch is classified before any of it runs, on the
-                # same argument `browser_task` uses: the actions are known in
-                # full up front, so a purchase in the fourth one should be
-                # asked about before the first.
-                held, reason, which = _risky(actions, goal, allowed, labels)
-                if held:
-                    return WebOutcome(
-                        "confirm", f"Next bit {reason}: {which}. Confirm?",
-                        f"held at round {index}: {which} ({reason})",
-                        done, " ".join(gathered), needs_confirmation=True, reason=reason,
-                        committed=list(committed.values()),
-                    )
-
-                for action in actions:
-                    if stopping():
-                        return WebOutcome(
-                            "stopped", "Stopped.", "the kill switch was pressed",
-                            done, " ".join(gathered), committed=list(committed.values()),
-                        )
-                    described = describe_action(action, labels)
-                    words = label_for(action, labels)
-
-                    # The guard that stops one mouse becoming four of them.
-                    # A shop answers "add to basket" by changing a badge, so
-                    # the page really is different afterwards and the stall
-                    # detector - correctly - sees progress; nothing else in
-                    # this loop is in a position to notice that the button
-                    # under the pointer is the button that was just pressed.
-                    if (
-                        config.AGENT_WEB_REPEAT_GUARD
-                        and action.verb == "click"
-                        and is_commit(words)
-                    ):
-                        key = commit_key(sight.url or _safe_url(page), words)
-                        if key in committed:
-                            refusal = f"refused a repeat of {described}"
-                            log.info("Repeat guard: %s", refusal)
-                            done.append(refusal)
-                            say(f"Round {index}: {refusal}")
-                            # Said to the planner in the next look rather
-                            # than only recorded, because a refusal it does
-                            # not hear about is a refusal it will try again.
-                            carried = (
-                                f'You already did "{words[:60]}" on this site '
-                                "earlier in this errand, so that click was "
-                                "refused and NOT performed. Do not try it "
-                                "again - open the cart or the order page and "
-                                "check what is there."
-                            )
-                            continue
-
-                    say(f"Round {index}: {described}")
-                    try:
-                        note_line = run_action(page, action, gathered, labels, look_budget)
-                        done.append(note_line)
-                        # Recorded only once it has actually happened: a
-                        # click that timed out changed nothing, and a ledger
-                        # entry for it would block the retry that is the
-                        # right next move.
-                        if action.verb == "click" and is_commit(words):
-                            key = commit_key(sight.url or _safe_url(page), words)
-                            committed.setdefault(key, note_line)
-                            milestones.append(note_line)
-                        page = browser.current_page() or page
-                    except Exception as exc:
-                        # A selector that matches nothing is the ordinary
-                        # failure here and the planner can usually route
-                        # round it next round, so this is a note rather than
-                        # the end of the errand.
-                        log.info("Action %r failed: %s", described, exc)
-                        done.append(f"{described} (failed: {type(exc).__name__})")
-                        break
-
-                # A read that comes back word for word is a round spent
-                # learning nothing, and the planner cannot tell - it is
-                # reading the text for the first time every time.
-                if gathered:
-                    if gathered[-1] and gathered[-1] == last_read:
-                        carried = (
-                            (carried + " ") if carried else ""
-                        ) + (
-                            "That read came back identical to the last one. "
-                            "Reading it again will not help: decide from it, "
-                            "or go somewhere else."
-                        )
-                    last_read = gathered[-1]
-
-            return WebOutcome(
-                "ceiling", "That's as far as I got in the browser.",
-                f"hit the {rounds}-round browser ceiling", done, " ".join(gathered),
-                committed=list(committed.values()),
+            prompt = (
+                f"Errand: {goal}\n"
+                + (f"Your plan: {plan_line}\n" if plan_line else "")
+                + f"Round {index} of at most {rounds}.\n"
+                + "Done so far: "
+                + f"{'; '.join(done[-config.AGENT_WEB_HISTORY_LINES:]) if done else 'nothing yet'}\n"
+                # Separated from the history and named for what it is:
+                # buried in a list of twelve steps, the one line that
+                # must not happen twice reads like all the others.
+                + (
+                    "ALREADY DONE - these cannot be undone and must NEVER "
+                    f"be repeated: {'; '.join(milestones)}\n"
+                    if milestones
+                    else ""
+                )
+                + "\n"
+                + fence(sight.render(config.AGENT_WEB_MAX_ELEMENTS, config.AGENT_WEB_TEXT_CHARS))
+                + "\n\nWhat next?"
             )
+
+            try:
+                plan = parse_plan(ask_planner(prompt))
+            except PlannerError as exc:
+                status = "budget" if exc.rate_limited else "error"
+                return WebOutcome(
+                    status, str(exc), f"the planner failed: {exc}", done,
+                    " ".join(gathered),
+                    committed=list(committed.values()),
+                )
+
+            if not plan:
+                return WebOutcome(
+                    "error", "I couldn't work out the next move.",
+                    f"the planner returned no usable plan at round {index}",
+                    done, " ".join(gathered),
+                    committed=list(committed.values()),
+                )
+            if not plan_line:
+                plan_line = str(plan.get("plan", "") or "").strip()[:200]
+
+            mode = plan["mode"]
+            if mode == "done":
+                return WebOutcome(
+                    "done",
+                    str(plan.get("speech", "") or "That's done.").strip(),
+                    f"on the page now: {str(plan.get('evidence', '') or 'not stated')[:300]}",
+                    done, " ".join(gathered),
+                    committed=list(committed.values()),
+                )
+            if mode == "ask":
+                question = str(plan.get("question", "") or "").strip()
+                return WebOutcome(
+                    "ask", question or "I need you for this next bit.",
+                    f"stopped for the user: {question}", done, " ".join(gathered),
+                    committed=list(committed.values()),
+                )
+            if mode == "fail":
+                spoken = str(plan.get("speech", "") or "").strip()
+                return WebOutcome(
+                    "fail", spoken or "I couldn't get that done in the browser.",
+                    f"gave up at round {index}: {spoken or 'no reason given'}",
+                    done, " ".join(gathered),
+                    committed=list(committed.values()),
+                )
+            if mode == "desktop":
+                why = str(plan.get("why", "") or "").strip()
+                return WebOutcome(
+                    "desktop", "", f"needs the desktop: {why or 'not stated'}",
+                    done, " ".join(gathered),
+                    committed=list(committed.values()),
+                )
+
+            actions = parse_actions(plan.get("actions"))[
+                : max(1, config.AGENT_WEB_ACTIONS_PER_ROUND)
+            ]
+            if not actions:
+                return WebOutcome(
+                    "error", "I couldn't work out the next move.",
+                    f"the planner asked to act at round {index} but named no "
+                    "usable action",
+                    done, " ".join(gathered),
+                    committed=list(committed.values()),
+                )
+
+            # The whole batch is classified before any of it runs, on the
+            # same argument `browser_task` uses: the actions are known in
+            # full up front, so a purchase in the fourth one should be
+            # asked about before the first.
+            held, reason, which = _risky(actions, goal, allowed, labels)
+            if held:
+                return WebOutcome(
+                    "confirm", f"Next bit {reason}: {which}. Confirm?",
+                    f"held at round {index}: {which} ({reason})",
+                    done, " ".join(gathered), needs_confirmation=True, reason=reason,
+                    committed=list(committed.values()),
+                )
+
+            for action in actions:
+                if stopping():
+                    return WebOutcome(
+                        "stopped", "Stopped.", "the kill switch was pressed",
+                        done, " ".join(gathered), committed=list(committed.values()),
+                    )
+                described = describe_action(action, labels)
+                words = label_for(action, labels)
+
+                # The guard that stops one mouse becoming four of them.
+                # A shop answers "add to basket" by changing a badge, so
+                # the page really is different afterwards and the stall
+                # detector - correctly - sees progress; nothing else in
+                # this loop is in a position to notice that the button
+                # under the pointer is the button that was just pressed.
+                if (
+                    config.AGENT_WEB_REPEAT_GUARD
+                    and action.verb == "click"
+                    and is_commit(words)
+                ):
+                    key = commit_key(sight.url or _safe_url(page), words)
+                    if key in committed:
+                        refusal = f"refused a repeat of {described}"
+                        log.info("Repeat guard: %s", refusal)
+                        done.append(refusal)
+                        say(f"Round {index}: {refusal}")
+                        # Said to the planner in the next look rather
+                        # than only recorded, because a refusal it does
+                        # not hear about is a refusal it will try again.
+                        carried = (
+                            f'You already did "{words[:60]}" on this site '
+                            "earlier in this errand, so that click was "
+                            "refused and NOT performed. Do not try it "
+                            "again - open the cart or the order page and "
+                            "check what is there."
+                        )
+                        continue
+
+                say(f"Round {index}: {described}")
+                try:
+                    note_line = run_action(page, action, gathered, labels, look_budget)
+                    done.append(note_line)
+                    # Recorded only once it has actually happened: a
+                    # click that timed out changed nothing, and a ledger
+                    # entry for it would block the retry that is the
+                    # right next move.
+                    if action.verb == "click" and is_commit(words):
+                        key = commit_key(sight.url or _safe_url(page), words)
+                        committed.setdefault(key, note_line)
+                        milestones.append(note_line)
+                    page = browser.current_page() or page
+                except Exception as exc:
+                    # A selector that matches nothing is the ordinary
+                    # failure here and the planner can usually route
+                    # round it next round, so this is a note rather than
+                    # the end of the errand.
+                    log.info("Action %r failed: %s", described, exc)
+                    done.append(f"{described} (failed: {type(exc).__name__})")
+                    break
+
+            # A read that comes back word for word is a round spent
+            # learning nothing, and the planner cannot tell - it is
+            # reading the text for the first time every time.
+            if gathered:
+                if gathered[-1] and gathered[-1] == last_read:
+                    carried = (
+                        (carried + " ") if carried else ""
+                    ) + (
+                        "That read came back identical to the last one. "
+                        "Reading it again will not help: decide from it, "
+                        "or go somewhere else."
+                    )
+                last_read = gathered[-1]
+
+        return WebOutcome(
+            "ceiling", "That's as far as I got in the browser.",
+            f"hit the {rounds}-round browser ceiling", done, " ".join(gathered),
+            committed=list(committed.values()),
+        )
+
+    try:
+        if keeping():
+            # One thread owns the browser and may keep it after the run,
+            # so an errand that ends on a video, a basket or a sign-in
+            # page leaves it on screen instead of closing it underneath
+            # the person who asked.
+            return _KEEPER.run(body, keep=lambda outcome: outcome.status in _KEEP_ON)
+        with BrowserSession() as browser:
+            return body(browser)
     except BrowserError as exc:
         return WebOutcome("error", str(exc), str(exc), done, " ".join(gathered))
     except Exception as exc:  # pragma: no cover - Playwright surprises
@@ -1721,6 +1899,8 @@ __all__ = [
     "guess_route",
     "BrowserError",
     "BrowserSession",
+    "keeping",
+    "release_browser",
     "Observation",
     "PlannerError",
     "WebOutcome",

@@ -12,6 +12,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Keep the tests deterministic regardless of the developer's own .env.
@@ -303,11 +305,70 @@ def test_a_missing_selector_fails_with_the_step_named(monkeypatch):
     assert "Traceback" not in result.speech
 
 
-def test_no_steps_is_an_honest_failure(monkeypatch):
+def test_nothing_to_do_is_an_honest_failure(monkeypatch):
     _arm(monkeypatch)
-    result = browser_task(task="do something web-ish")
+    result = browser_task()
     assert not result.ok
     assert "goto" in result.detail  # the error teaches the grammar
+
+
+def test_a_goal_with_no_script_goes_to_the_planner(monkeypatch):
+    """A goal alone used to be refused, so the model had to invent CSS
+    selectors for a page it had never seen. Now the DOM planner reads the
+    real page and works the steps out."""
+    from tools import web_agent
+
+    seen = {}
+
+    def mission(goal, start="", history=None, allowed="", cancel=None, **_):
+        seen.update(goal=goal, start=start, history=history, allowed=allowed)
+        return web_agent.WebOutcome("done", "Playing now.", "reached it", ["opened youtube.com"])
+
+    monkeypatch.setattr(web_agent, "web_mission", mission)
+    result = browser_task(task="play lofi on youtube", url="youtube.com")
+    assert result.ok and result.speech == "Playing now."
+    assert seen["goal"] == "play lofi on youtube"
+    assert seen["start"] == "youtube.com"
+
+
+def test_a_risky_goal_asks_before_the_browser_starts(monkeypatch):
+    from tools import web_agent
+
+    monkeypatch.setattr(
+        web_agent, "web_mission",
+        lambda *a, **k: pytest.fail("the browser started before the yes"),
+    )
+    result = browser_task(task="buy the cheapest mouse and place the order")
+    assert result.needs_confirmation
+    assert result.speech.endswith("Confirm?")
+
+
+def test_a_yes_resumes_with_the_new_risk_allowed(monkeypatch):
+    """A pause mid-errand has to carry what was agreed to, or the resumed
+    run is held at the same step and asks the same question forever."""
+    from tools import web_agent
+
+    calls = []
+
+    def mission(goal, start="", history=None, allowed="", cancel=None, **_):
+        calls.append(allowed)
+        if len(calls) == 1:
+            return web_agent.WebOutcome(
+                "confirm", "Next bit places an order: Place order. Confirm?",
+                "held at round 3", ["opened shop"], needs_confirmation=True,
+                reason="places an order",
+            )
+        return web_agent.WebOutcome("done", "Ordered.", "done", ["clicked Place order"])
+
+    monkeypatch.setattr(web_agent, "web_mission", mission)
+    paused = browser_task(task="find a mouse on the shop")
+    assert paused.needs_confirmation
+    resumed = browser_task(**paused.data, confirmed=True)
+    assert resumed.ok
+    assert web_agent.allows(calls[-1], "places an order")
+    # Without the spoken yes, the carried approval counts for nothing.
+    browser_task(**paused.data)
+    assert not web_agent.allows(calls[-1], "places an order")
 
 
 def test_too_many_steps_is_refused_before_launching(monkeypatch):
@@ -454,3 +515,81 @@ def test_a_phrase_is_still_matched_by_its_visible_text():
     assert _as_selector("Add to cart") == "text=Add to cart"
     assert _as_selector("#search") == "#search"
     assert _as_selector(".price") == ".price"
+
+
+# ---------------------------------------------------------------------------
+# A script that gets stuck hands the page to the planner
+# ---------------------------------------------------------------------------
+# "Open Amazon and add a gaming mouse to my cart" was answered with a script
+# the model wrote blind: goto, fill, click "Search". On the real page "Search"
+# matched four elements, the first of them off screen, and the errand ended
+# at step three with the browser sitting on Amazon doing nothing.
+def test_a_stuck_script_with_a_goal_is_carried_on_by_the_planner(monkeypatch):
+    from tools import web_agent
+
+    log = []
+    page = FakePage(log, fail_on="Search")
+    page.url = "https://www.amazon.in/"
+    _arm(monkeypatch, page)
+    handed: dict = {}
+
+    def planner(goal, start="", history=None, allowed="", cancel=None, **kwargs):
+        handed.update(goal=goal, start=start, history=list(history or []))
+        return web_agent.WebOutcome(
+            "done", "It's in your cart.", "added the mouse", list(history or [])
+        )
+
+    monkeypatch.setattr(web_agent, "web_mission", planner)
+    result = browser_task(
+        task="find a gaming mouse with an infinite scroll wheel and add it to my cart",
+        url="amazon.in",
+        steps="fill #twotabsearchtextbox = gaming mouse\nclick Search",
+    )
+
+    assert result.ok
+    assert result.speech == "It's in your cart."
+    assert handed["goal"].startswith("find a gaming mouse")
+    # A throwaway browser has closed, so the planner is sent back to the page.
+    assert handed["start"] == "https://www.amazon.in/"
+    # It knows what the script already did, and which step failed.
+    assert any("filled #twotabsearchtextbox" in line for line in handed["history"])
+    assert any("click Search" in line for line in handed["history"])
+    assert "got stuck at 'click Search'" in result.detail
+
+
+def test_a_stuck_script_with_no_goal_still_fails_plainly(monkeypatch):
+    """With nothing to aim at, there is nothing for a planner to carry on."""
+    from tools import web_agent
+
+    log = []
+    _arm(monkeypatch, FakePage(log, fail_on="Search"))
+    monkeypatch.setattr(
+        web_agent, "web_mission",
+        lambda *a, **k: pytest.fail("the planner must not run without a goal"),
+    )
+    result = browser_task(url="amazon.in", steps="click Search")
+    assert not result.ok
+    assert "click Search" in result.detail
+
+
+def test_an_ambiguous_text_match_is_narrowed_to_what_is_visible():
+    class Counted:
+        def __init__(self, n):
+            self.n = n
+
+        def count(self):
+            return self.n
+
+    class Page:
+        def __init__(self, n):
+            self.n = n
+
+        def locator(self, selector):
+            return Counted(self.n)
+
+    assert browser_automation._visible(Page(4), "text=Search") == (
+        "text=Search >> visible=true"
+    )
+    # A unique match, and anything the model wrote as CSS, is left alone.
+    assert browser_automation._visible(Page(1), "text=Search") == "text=Search"
+    assert browser_automation._visible(Page(4), "#nav-search") == "#nav-search"

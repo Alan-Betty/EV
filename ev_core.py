@@ -61,7 +61,7 @@ from ev.session import (
 from ev.stt import Transcriber, TranscriptionError, Transcript
 from ev.tts import Speaker, SpeechStream, clean_for_speech
 from ev.ui import UI
-from tools import CANCELLABLE, CancelToken, ToolResult, dispatch
+from tools import CANCELLABLE, CancelToken, ToolResult, dispatch, from_model
 from tools.computer_use import close_vision_client
 from tools.web_agent import close_planner_client
 from tools.guard import (
@@ -987,10 +987,13 @@ class EV:
         watcher = self._start_cancel_watch(call, token)
         try:
             with self.ui.status("Executing..."):
+                # `arguments` is only ever passed by the replay of a spoken
+                # yes. Anything else is the model's own call, which may not
+                # confirm itself - see `tools.CONFIRMATION_ONLY_ARGS`.
                 return await asyncio.to_thread(
                     dispatch,
                     call.name,
-                    call.arguments if arguments is None else arguments,
+                    from_model(call.arguments) if arguments is None else arguments,
                     token,
                 )
         finally:

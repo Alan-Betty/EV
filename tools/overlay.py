@@ -52,7 +52,8 @@ import re
 import sys
 import threading
 import time
-from typing import Any, Callable
+from contextlib import contextmanager
+from typing import Any, Callable, Iterator
 
 import config
 
@@ -922,4 +923,68 @@ class Takeover:
             self._on_kill()
 
 
-__all__ = ["KillSwitch", "Overlay", "Takeover", "parse_hotkey"]
+# The one takeover on screen, if any. A mission hands sub-goals to
+# `screen_task` and `browser_task`, and both of those now announce
+# themselves too - so without this a mission would stack a second frame and
+# a second hotkey registration (which fails, the combo being taken) on top of
+# its own for every round.
+_ACTIVE: Takeover | None = None
+_ACTIVE_LOCK = threading.Lock()
+
+
+@contextmanager
+def taking_over(
+    goal: str, cancel: Any = None, on_kill: Callable[[], None] | None = None
+) -> Iterator[Takeover]:
+    """Announce that E.V. has the screen for the length of a `with` block.
+
+    Every tool that drives the pointer or a visible browser for more than one
+    action goes through here, so the frame and the kill switch mean the same
+    thing wherever they appear: E.V. is in control, and this is how to take
+    it back. Nested calls share the outer takeover and only update its status
+    line, because the outer run is the thing the user is watching.
+
+    The kill switch cancels `cancel` - the same token "stop" reaches - and by
+    default locks E.V. down, since someone reaching for it means everything.
+    """
+    global _ACTIVE
+    with _ACTIVE_LOCK:
+        outer = _ACTIVE
+    if outer is not None:
+        outer.note(goal)
+        yield outer
+        return
+
+    def kill() -> None:
+        if cancel is not None:
+            try:
+                cancel.cancel()
+            except Exception:  # pragma: no cover - a token with no cancel
+                pass
+        # Imported here so this module stays importable on its own, and
+        # testable without the guard's process-global state.
+        from tools.guard import audit, engage_lockdown
+
+        if config.AGENT_KILL_LOCKS_DOWN:
+            engage_lockdown("the kill switch was pressed while E.V. had the screen")
+        audit("takeover_killed", task=goal[:200])
+        if on_kill is not None:
+            on_kill()
+
+    hud = Takeover(goal, kill)
+    with _ACTIVE_LOCK:
+        _ACTIVE = hud
+    try:
+        with hud:
+            yield hud
+    finally:
+        with _ACTIVE_LOCK:
+            _ACTIVE = None
+
+
+def active() -> Takeover | None:
+    """The takeover currently on screen, for a caller that wants to narrate."""
+    return _ACTIVE
+
+
+__all__ = ["KillSwitch", "Overlay", "Takeover", "active", "parse_hotkey", "taking_over"]

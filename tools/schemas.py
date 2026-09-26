@@ -43,10 +43,9 @@ TOOL_SPECS: list[ToolSpec] = [
     {
         "name": "web_search",
         "description": (
-            "Open a browser on a search, a URL, or a site the user lives "
-            "in. For 'open my email' or 'check my calendar' set engine to "
-            "mail, calendar or drive and leave query empty. Never ask which "
-            "provider - open the default."
+            "Only opens a page - a search, a URL, or engine mail, calendar "
+            "or drive with no query. It cannot click, fill or read; that is "
+            "browser_task. Never ask which provider."
         ),
         "parameters": {
             "type": "object",
@@ -469,10 +468,9 @@ TOOL_SPECS: list[ToolSpec] = [
     {
         "name": "browser_task",
         "description": (
-            "Automate a website through the page rather than the pixels: "
-            "navigate, fill forms, click by visible text, read results back. "
-            "Prefer it over screen_task on the web; use web_search when the "
-            "user only wants a page opened."
+            "Do anything on a website through the page, not the pixels: "
+            "log in, search, click, fill, play, read results back. Give "
+            "task alone and it works the page out itself."
         ),
         "parameters": {
             "type": "object",
@@ -494,13 +492,11 @@ TOOL_SPECS: list[ToolSpec] = [
                 "steps": {
                     "type": "string",
                     "description": (
-                        "One action per line. Verbs: goto, click, fill, "
-                        "select, check, press, wait, scroll, read. A target "
-                        "with no CSS syntax matches visible text. 'read' "
-                        "returns every match; end with one to learn what is "
-                        "on the page. Example: 'goto amazon.co.uk' / "
-                        "'fill #search = mouse' / 'press Enter' / 'read "
-                        ".s-result-item'."
+                        "Optional; leave empty unless you know the page. "
+                        "One per line: goto, click, fill, select, check, "
+                        "press, wait, scroll, read. Plain text targets match "
+                        "visible text. Example: 'fill #search = mouse' / "
+                        "'press Enter' / 'read .s-result-item'."
                     ),
                 },
                 "headless": {
@@ -696,11 +692,20 @@ _TRIGGERS: dict[str, tuple[str, ...]] = {
         "settings", "volume", "mute", "toggle", "checkbox",
         "close", "minimis", "minimiz", "maximis", "maximiz",
     ),
+    # Anything that happens *on* a site. Missing here is the expensive
+    # direction: with only `web_search` on offer, "log into netflix" or
+    # "go to wikipedia and read me the intro" opened a page and reported
+    # success, and the browser automation was never even shown to the model.
     "browser_task": (
-        "browser", "chrome", "edge", "firefox", "website", "webpage",
-        "gmail", "email", "mail", "inbox", "login", "sign in", "signin",
-        "amazon", "youtube", "reddit", "cart", "checkout",
-        "summaris", "summariz", "url", "tab",
+        "browser", "chrome", "edge", "firefox", "website", "webpage", "site",
+        "web", "online", "page", "link", "result", "go to", "goto",
+        "navigate", "visit", "playwright",
+        "gmail", "email", "mail", "inbox", "login", "log in", "log into",
+        "sign in", "signin", "sign into", "account", "form",
+        "amazon", "flipkart", "ebay", "youtube", "netflix", "spotify web",
+        "reddit", "wikipedia", "github", "google", "linkedin", "twitter",
+        "instagram", "facebook", "whatsapp web", "cart", "checkout",
+        "summaris", "summariz", "url", "tab", "play", "watch", "stream",
     ),
     # An errand rather than an action: words that describe an outcome
     # somebody wants reached, with the steps left unsaid. Generous on
@@ -742,6 +747,14 @@ _TRIGGER_PATTERNS: dict[str, re.Pattern[str]] = {
 }
 
 
+# A domain or a URL names a website whatever words surround it -
+# "example.com", "amazon.in", "news.ycombinator.com". Word lists cannot hold
+# every site, so the shape of one is matched instead.
+_DOMAIN = re.compile(
+    r"https?://|www\.|\b[a-z0-9-]+\.(?:com|in|org|net|io|co|dev|app|ai|gov|edu|uk|me|tv)\b"
+)
+
+
 def select_tools(*texts: str) -> list[str]:
     """The tools worth offering for this utterance, in declaration order.
 
@@ -753,6 +766,8 @@ def select_tools(*texts: str) -> list[str]:
     for name, pattern in _TRIGGER_PATTERNS.items():
         if pattern.search(haystack):
             chosen.add(name)
+    if _DOMAIN.search(haystack):
+        chosen.add("browser_task")
     for family in _FAMILIES:
         if chosen & family:
             chosen |= family

@@ -104,7 +104,11 @@ _ALLOWED_ARGS["remember"] = {"action", "key", "value"}
 # data of the tool's own `ToolResult.confirm`, which the core loop replays -
 # so there is nothing for the model to get wrong, and nothing to pay for in
 # the schema on every turn.
-_ALLOWED_ARGS["agent_task"] |= {"notes", "max_rounds", "start"}
+_ALLOWED_ARGS["agent_task"] |= {"notes", "max_rounds", "start", "approved"}
+# The same pair for `browser_task` when it runs a goal rather than a script:
+# a paused run carries its progress, and the risk the user just said yes to,
+# back in through its own confirmation.
+_ALLOWED_ARGS["browser_task"] |= {"notes", "approved"}
 # `confirmed` is injected by the core loop after a spoken yes, so it is
 # never something the model can set for itself.
 #
@@ -132,6 +136,23 @@ for _gated in (
     "agent_task",
 ):
     _ALLOWED_ARGS[_gated].add("confirmed")
+
+# Arguments that only a tool's own `ToolResult.confirm` may carry back in,
+# replayed by the core loop after a spoken yes. Being in `_ALLOWED_ARGS` is
+# what lets that replay through, and on its own it would also let the model
+# through: a call carrying `"confirmed": true` skipped the gate it names, and a
+# page that told the model to add it would have done the same. So the core
+# loop strips these from every call the model makes, and only a replay of a
+# confirmation can supply them.
+CONFIRMATION_ONLY_ARGS: frozenset[str] = frozenset({"confirmed", "notes", "approved"})
+
+
+def from_model(arguments: Any) -> Any:
+    """The model's own arguments, minus what only a spoken yes may supply."""
+    if not isinstance(arguments, dict):
+        return arguments
+    return {k: v for k, v in arguments.items() if k not in CONFIRMATION_ONLY_ARGS}
+
 
 # Tools that can be stopped part-way through, at a point where stopping is
 # safe. Everything else runs to completion, and `ev_core` says so rather than
@@ -257,6 +278,8 @@ def dispatch(
 
 __all__ = [
     "CANCELLABLE",
+    "CONFIRMATION_ONLY_ARGS",
+    "from_model",
     "CancelToken",
     "SIDE_EFFECT_TOOLS",
     "UNTRUSTED_OUTPUT",
