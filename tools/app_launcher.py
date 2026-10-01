@@ -18,6 +18,13 @@ Windows itself lists, cached to disk and refreshed daily. Shortcuts are
 launched as shortcuts - Windows resolves the target, the working directory and
 the arguments, which is exactly the part that is tedious to reimplement.
 
+**Linux has the same index under another name.** Every installed program -
+apt, snap or flatpak - ships a `.desktop` entry in the XDG application
+folders, and those are what the GNOME app grid lists. They are indexed the
+same way and launched through `gio launch`, which, like a `.lnk`, resolves
+the entry's own command, arguments and working directory. That is what makes
+"find me Firefox" or "open Files" work for a program that is not on PATH.
+
 Resolution order is narrowest-to-widest, so an explicit alias always wins over
 a fuzzy shortcut match.
 """
@@ -35,7 +42,12 @@ from pathlib import Path
 
 import config
 from ev.memory import read_json, write_json
+import subprocess
+import sys
+
 from tools.base import IS_WINDOWS, ToolResult, popen_detached, resolve_executable
+
+IS_LINUX = sys.platform.startswith("linux")
 
 log = logging.getLogger("ev.tools.app")
 
@@ -111,8 +123,124 @@ def _scan_start_menu() -> dict[str, str]:
     return found
 
 
+def _desktop_dirs() -> list[Path]:
+    """The XDG application folders, user first, the way the desktop reads them."""
+    if not IS_LINUX:
+        return []
+    home = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+    data_dirs = os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share"
+    roots = [home] + [Path(part) for part in data_dirs.split(":") if part]
+    # Snap and flatpak export here, and a session started from somewhere
+    # unusual may not have them on XDG_DATA_DIRS.
+    roots += [Path("/var/lib/snapd/desktop"), Path("/var/lib/flatpak/exports/share"),
+              home / "flatpak" / "exports" / "share"]
+    seen: list[Path] = []
+    for root in roots:
+        folder = root / "applications"
+        if folder.is_dir() and folder not in seen:
+            seen.append(folder)
+    return seen
+
+
+def _read_desktop_entry(path: Path) -> dict[str, str]:
+    """The `[Desktop Entry]` group only - actions like "New Window" are not apps."""
+    fields: dict[str, str] = {}
+    in_entry = False
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return fields
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("["):
+            if in_entry:
+                break
+            in_entry = line == "[Desktop Entry]"
+            continue
+        if in_entry and "=" in line and not line.startswith("#"):
+            key, _, value = line.partition("=")
+            fields.setdefault(key.strip(), value.strip())
+    return fields
+
+
+def _scan_desktop_entries() -> dict[str, str]:
+    """Map every visible application's name onto its `.desktop` file.
+
+    The generic name ("Web Browser", "Text Editor") is indexed too, after
+    every real name, so "open a web browser" lands on one without ever
+    shadowing a program that is actually called that.
+    """
+    found: dict[str, str] = {}
+    generic: dict[str, str] = {}
+    for root in _desktop_dirs():
+        try:
+            entries = sorted(root.rglob("*.desktop"))
+        except OSError as exc:
+            log.debug("Could not read %s: %s", root, exc)
+            continue
+        for entry in entries:
+            fields = _read_desktop_entry(entry)
+            if fields.get("Type", "Application") != "Application":
+                continue
+            if fields.get("NoDisplay", "").lower() == "true" or fields.get("Hidden", "").lower() == "true":
+                continue
+            name = _normalise_name(fields.get("Name", ""))
+            if name and not any(word in name for word in _SKIP_SHORTCUT_WORDS):
+                found.setdefault(name, str(entry))
+            other = _normalise_name(fields.get("GenericName", ""))
+            if other:
+                generic.setdefault(other, str(entry))
+    for name, entry in generic.items():
+        found.setdefault(name, entry)
+    return found
+
+
+def _index_supported() -> bool:
+    return (IS_WINDOWS or IS_LINUX) and config.APP_INDEX_ENABLED
+
+
+def _scan() -> dict[str, str]:
+    return _scan_start_menu() if IS_WINDOWS else _scan_desktop_entries()
+
+
+def _launch_desktop_entry(path: str) -> bool:
+    """Start a `.desktop` entry the way the app grid would."""
+    if resolve_executable("gio"):
+        argv = ["gio", "launch", path]
+    elif resolve_executable("gtk-launch"):
+        argv = ["gtk-launch", Path(path).stem]
+    else:
+        return False
+    try:
+        process = popen_detached(argv)
+    except OSError as exc:
+        log.debug("Could not launch %s: %s", path, exc)
+        return False
+    # `gio launch` hands the program to the session and exits within a
+    # moment, so its exit code is worth a short wait - it is the only way to
+    # hear about a broken entry. One that is still running after that has
+    # launched something; it is not waited out.
+    try:
+        code = process.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        return True
+    if code != 0:
+        log.debug("%s exited %s for %s", argv[0], code, path)
+    return code == 0
+
+
+def _open_entry(entry: str) -> bool:
+    """Launch an indexed entry: a `.desktop` file on Linux, a shortcut on Windows."""
+    if entry.endswith(".desktop"):
+        return _launch_desktop_entry(entry)
+    return _shell_open(entry)
+
+
 class _AppIndex:
-    """The Start Menu index, cached on disk and refreshed daily."""
+    """The installed-programs index, cached on disk and refreshed daily.
+
+    Start Menu shortcuts on Windows, `.desktop` entries on Linux.
+    """
 
     def __init__(self) -> None:
         self._apps: dict[str, str] | None = None
@@ -128,7 +256,7 @@ class _AppIndex:
         return self._apps
 
     def _load(self) -> dict[str, str]:
-        if not IS_WINDOWS or not config.APP_INDEX_ENABLED:
+        if not _index_supported():
             return {}
         cached = read_json(self.path, {})
         entries = cached.get("apps")
@@ -139,9 +267,9 @@ class _AppIndex:
         return self.rescan()
 
     def rescan(self) -> dict[str, str]:
-        if not IS_WINDOWS or not config.APP_INDEX_ENABLED:
+        if not _index_supported():
             return {}
-        apps = _scan_start_menu()
+        apps = _scan()
         self._apps = apps
         self._last_scan = time.monotonic()
         if apps:
@@ -149,7 +277,7 @@ class _AppIndex:
                 self.path,
                 {"version": 1, "scanned_at": time.time(), "apps": apps},
             )
-        log.info("Indexed %d Start Menu shortcuts", len(apps))
+        log.info("Indexed %d installed programs", len(apps))
         return apps
 
     def find(self, name: str) -> tuple[str, str] | None:
@@ -455,9 +583,9 @@ def open_app(
                     )
                 except OSError as exc:
                     log.debug("Launch with arguments failed for %s: %s", target, exc)
-        if _shell_open(shortcut):
+        if _open_entry(shortcut):
             return ToolResult.success(
-                _launched(name.title()), f"Launched Start Menu shortcut {shortcut}"
+                _launched(name.title()), f"Launched installed program entry {shortcut}"
             )
 
     # 3. The name exactly as said, in case it is on PATH but unaliased.
@@ -477,7 +605,7 @@ def open_app(
     # ten-second hang and an error dialog for exactly the same outcome.
     return ToolResult.failure(
         f"Can't find {pretty} on this machine.",
-        f"No executable or Start Menu shortcut resolved for '{app}'. "
-        f"{len(_index.apps())} shortcuts indexed. Do not retry with a "
+        f"No executable or installed program entry resolved for '{app}'. "
+        f"{len(_index.apps())} programs indexed. Do not retry with a "
         "different spelling; ask the user what the program is called.",
     )

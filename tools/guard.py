@@ -89,6 +89,8 @@ UNTRUSTED_OUTPUT: frozenset[str] = frozenset(
         "agent_task",
         "browser_task",
         "file_manager",
+        # A track title is whatever the uploader called it.
+        "media_control",
         "take_screenshot",
         "screen_task",
         "web_search",

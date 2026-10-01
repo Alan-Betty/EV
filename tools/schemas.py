@@ -18,9 +18,9 @@ TOOL_SPECS: list[ToolSpec] = [
     {
         "name": "open_app",
         "description": (
-            "Launch a desktop program by name: Chrome, VS Code, Notepad, "
-            "Spotify, Task Manager. Starting a program only - use web_search "
-            "for the web, and file_manager 'open' to show a folder."
+            "Launch or find a program by name - 'find me Firefox', 'open "
+            "Spotify'. Programs only: web_search for the web, file_manager "
+            "'open' for a folder."
         ),
         "parameters": {
             "type": "object",
@@ -59,7 +59,7 @@ TOOL_SPECS: list[ToolSpec] = [
                 },
                 "engine": {
                     "type": "string",
-                    "description": "Where to go. Defaults to google.",
+                    "description": "Default google.",
                     "enum": [
                         "google",
                         "bing",
@@ -123,9 +123,8 @@ TOOL_SPECS: list[ToolSpec] = [
     {
         "name": "terminal_command",
         "description": (
-            "Run a shell command. Last resort: open_app for programs, "
-            "web_search for the browser, file_manager for files. Good for "
-            "git status or a package version."
+            "Run a shell command - git status, a package version. Last "
+            "resort: never for programs, web pages or files."
         ),
         "parameters": {
             "type": "object",
@@ -365,7 +364,6 @@ TOOL_SPECS: list[ToolSpec] = [
             "properties": {
                 "action": {
                     "type": "string",
-                    "description": "What the mouse should do.",
                     "enum": [
                         "move",
                         "click",
@@ -531,6 +529,31 @@ TOOL_SPECS: list[ToolSpec] = [
         },
     },
     {
+        "name": "media_control",
+        "description": (
+            "Music already playing, and system volume: pause, skip, what's "
+            "on, louder, mute. New music is browser_task."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "play", "pause", "next", "previous", "now_playing",
+                        "volume_up", "volume_down", "set_volume", "mute",
+                        "unmute",
+                    ],
+                },
+                "level": {
+                    "type": "integer",
+                    "description": "0-100, or the step for up/down.",
+                },
+            },
+            "required": ["action"],
+        },
+    },
+    {
         "name": "chat",
         "description": (
             "Speak a reply with no machine action. Use for questions, banter, "
@@ -689,13 +712,21 @@ _TRIGGERS: dict[str, tuple[str, ...]] = {
     ),
     "screen_task": (
         "click", "type", "screen", "window", "button", "menu", "dialog",
-        "settings", "volume", "mute", "toggle", "checkbox",
+        "settings", "toggle", "checkbox",
         "close", "minimis", "minimiz", "maximis", "maximiz",
     ),
     # Anything that happens *on* a site. Missing here is the expensive
     # direction: with only `web_search` on offer, "log into netflix" or
     # "go to wikipedia and read me the intro" opened a page and reported
     # success, and the browser automation was never even shown to the model.
+    # Volume and mute used to pull in the whole screen family, which cost
+    # four tool schemas to reach a knob the OS turns in one call.
+    "media_control": (
+        "music", "song", "songs", "track", "volume", "louder", "quieter",
+        "softer", "mute", "unmute", "pause", "resume", "skip", "next",
+        "previous", "playing", "play", "spotify", "turn it up", "turn it down",
+        "sound", "audio",
+    ),
     "browser_task": (
         "browser", "chrome", "edge", "firefox", "website", "webpage", "site",
         "web", "online", "page", "link", "result", "go to", "goto",

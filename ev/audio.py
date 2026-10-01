@@ -11,6 +11,7 @@ pygame - the difference is tens of megabytes of resident memory.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import logging
 import math
@@ -104,6 +105,108 @@ class Utterance:
         return pcm_to_wav(payload, self.sample_rate or config.SAMPLE_RATE)
 
 
+def _no_backend_message(failures: list[str]) -> str:
+    """Why no microphone opened, in words that say what to install.
+
+    The common Linux case gets named outright, because its error is the most
+    misleading one in the project: `sounddevice` *is* installed, and what is
+    missing is the system library it loads at import.
+    """
+    detail = "; ".join(failures[:3]) or "no backend reported a reason"
+    hint = "Install sounddevice: pip install sounddevice"
+    if any("PortAudio library not found" in item for item in failures):
+        hint = (
+            "sounddevice is installed but the system PortAudio library is not. "
+            "On Ubuntu/Debian: sudo apt install libportaudio2"
+        )
+    elif not IS_WINDOWS:
+        hint += ", or install pipewire-bin / pulseaudio-utils / alsa-utils"
+    return f"No microphone backend. {hint}. ({detail})"
+
+
+class _CommandStream:
+    """Raw mono int16 PCM read from a recorder subprocess's stdout.
+
+    Tried in order of how directly each one reaches the sound server:
+    PipeWire's own recorder, then the PulseAudio one (which PipeWire also
+    answers), then plain ALSA. Each is asked for exactly the format the VAD
+    reads, so nothing is converted here.
+    """
+
+    @staticmethod
+    def _commands(rate: int, device: str) -> list[tuple[str, list[str]]]:
+        pipewire = ["pw-record", "--rate", str(rate), "--channels", "1", "--format", "s16"]
+        pulse = ["parec", f"--rate={rate}", "--channels=1", "--format=s16le", "--latency-msec=30"]
+        alsa = ["arecord", "-q", "-t", "raw", "-f", "S16_LE", "-r", str(rate), "-c", "1"]
+        # A device index is a PortAudio idea and means nothing to these, so
+        # only a name is passed on.
+        if device and not device.isdigit():
+            pipewire += ["--target", device]
+            pulse.append(f"--device={device}")
+            alsa += ["-D", device]
+        return [("pw-record", pipewire + ["-"]), ("parec", pulse), ("arecord", alsa)]
+
+    @classmethod
+    def first_available(cls, rate: int, frame_bytes: int, device: str = "") -> "_CommandStream":
+        import shutil
+
+        tried: list[str] = []
+        for name, argv in cls._commands(rate, device):
+            if shutil.which(argv[0]) is None:
+                tried.append(f"{name} not installed")
+                continue
+            try:
+                return cls(name, argv, frame_bytes)
+            except (OSError, AudioError) as exc:
+                tried.append(f"{name}: {exc}")
+        raise AudioError("no recorder command worked (" + "; ".join(tried) + ")")
+
+    def __init__(self, name: str, argv: list[str], frame_bytes: int) -> None:
+        import subprocess
+
+        self.name = name
+        self._frame_bytes = frame_bytes
+        self._process = subprocess.Popen(
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            bufsize=0,
+        )
+        # A recorder that cannot reach the server exits at once. Caught here,
+        # so the next one in the list gets its turn, rather than in the reader
+        # thread twenty failed reads later.
+        time.sleep(0.15)
+        if self._process.poll() is not None:
+            raise AudioError(f"exited with code {self._process.returncode}")
+
+    def read(self) -> bytes:
+        """One whole frame, or AudioError once the recorder has gone."""
+        stdout = self._process.stdout
+        if stdout is None:
+            raise AudioError("recorder has no output")
+        chunks: list[bytes] = []
+        wanted = self._frame_bytes
+        while wanted > 0:
+            chunk = stdout.read(wanted)
+            if not chunk:
+                raise AudioError(f"{self.name} stopped")
+            chunks.append(chunk)
+            wanted -= len(chunk)
+        return b"".join(chunks)
+
+    def close(self) -> None:
+        if self._process.poll() is None:
+            self._process.terminate()
+            try:
+                self._process.wait(timeout=1.0)
+            except Exception:
+                self._process.kill()
+        if self._process.stdout is not None:
+            with contextlib.suppress(Exception):
+                self._process.stdout.close()
+
+
 class Microphone:
     """Microphone with a background reader thread and a frame queue.
 
@@ -146,24 +249,28 @@ class Microphone:
     def open(self) -> None:
         if self._stream is not None:
             return
-        opened = False
-        try:
-            self._open_sounddevice()
-            self._backend = "sounddevice"
-            opened = True
-        except Exception as exc:
-            log.debug("sounddevice unavailable: %s", exc)
-        if not opened:
+        # Every backend's reason is kept. "No microphone backend" on its own
+        # sent the user to reinstall a package that was installed perfectly
+        # well - the pip wheel was there, the *system* PortAudio it loads was
+        # not, and that sentence was sitting in a debug log nobody had on.
+        failures: list[str] = []
+        for backend, opener in (
+            ("sounddevice", self._open_sounddevice),
+            ("pyaudio", self._open_pyaudio),
+            ("command", self._open_command),
+        ):
             try:
-                self._open_pyaudio()
-                self._backend = "pyaudio"
-                opened = True
+                opener()
             except Exception as exc:
-                log.debug("pyaudio unavailable: %s", exc)
-        if not opened:
-            raise AudioError(
-                "No microphone backend. Install sounddevice: pip install sounddevice"
-            )
+                log.debug("%s unavailable: %s", backend, exc)
+                failures.append(f"{backend}: {exc}")
+                continue
+            self._backend = backend
+            if failures:
+                log.info("Microphone on %s (%s)", self._capture_name(), "; ".join(failures))
+            break
+        else:
+            raise AudioError(_no_backend_message(failures))
 
         self._reading = True
         self._reader = threading.Thread(
@@ -368,15 +475,44 @@ class Microphone:
             frames_per_buffer=self.frame_samples,
         )
 
+    def _open_command(self) -> None:
+        """Capture through the sound server's own recorder, as a subprocess.
+
+        The backend that needs nothing installed. `sounddevice` is a pip
+        wheel, but on Linux it loads the *system* PortAudio, which a stock
+        Ubuntu does not ship - so a mic that works in every other app looked
+        broken to E.V. PipeWire, PulseAudio and ALSA each come with a
+        recorder that writes raw PCM to stdout, and reading a pipe costs
+        nothing resident.
+        """
+        if IS_WINDOWS:
+            raise AudioError("no recorder command on Windows")
+        stream = _CommandStream.first_available(
+            self.sample_rate, self.frame_bytes, config.INPUT_DEVICE.strip()
+        )
+        self._stream = stream
+
+    def _capture_name(self) -> str:
+        if isinstance(self._stream, _CommandStream):
+            return self._stream.name
+        return self._backend
+
     def close(self) -> None:
         self._reading = False
+        # A recorder subprocess is killed first: the reader thread is blocked
+        # inside a pipe read, and only EOF lets it reach the `_reading` check.
+        if isinstance(self._stream, _CommandStream):
+            self._stream.close()
         if self._reader is not None:
             self._reader.join(timeout=1.0)
             self._reader = None
         with self._lock:
             if self._stream is not None:
                 try:
-                    self._stream.stop() if self._backend == "sounddevice" else self._stream.stop_stream()
+                    if self._backend == "sounddevice":
+                        self._stream.stop()
+                    elif self._backend == "pyaudio":
+                        self._stream.stop_stream()
                     self._stream.close()
                 except Exception as exc:
                     log.debug("Error closing stream: %s", exc)
@@ -405,6 +541,8 @@ class Microphone:
             if overflowed:
                 log.debug("Input overflow; dropped samples")
             return bytes(data)
+        if self._backend == "command":
+            return self._stream.read()
         return self._stream.read(self.frame_samples, exception_on_overflow=False)
 
     def next_frame(self, timeout: float = 1.0) -> tuple[bytes, float] | None:
@@ -772,11 +910,14 @@ def build_player():
         ("mpv", ["mpv", "--no-video", "--really-quiet", "{}"]),
         ("afplay", ["afplay", "{}"]),
         ("mpg123", ["mpg123", "-q", "{}"]),
+        # Stock Ubuntu ships GStreamer and its MP3 decoder but none of the
+        # players above, so without this E.V. on a fresh install was mute.
+        ("gst-play-1.0", ["gst-play-1.0", "--no-interactive", "-q", "{}"]),
     ):
         if resolve_executable(binary):
             return _SubprocessPlayer(argv)
 
     raise AudioError(
-        "No audio playback backend. Install ffmpeg (for ffplay) or mpv, "
-        "or set EV_TTS_ENABLED=false."
+        "No audio playback backend. Install ffmpeg (for ffplay), mpv or "
+        "gstreamer1.0-tools, or set EV_TTS_ENABLED=false."
     )

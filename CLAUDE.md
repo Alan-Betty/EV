@@ -20,6 +20,11 @@ python -m pytest tests/test_smoke.py -k safety   # one test or group
 
 python -m ev.tts_voices                          # list voices
 python -m ev.tts_voices --demo en-US-AriaNeural  # audition one
+
+python -m ev.face --demo                         # floating face, cycles moods (needs PySide6)
+python -m ev.face --sheet moods.png              # every mood to one image, headless
+                                                 # (ev_core starts the face itself - EV_FACE_ENABLED)
+echo thinking | python -m ev.face --stdin        # how the core will drive it
 ```
 
 `--check` is the fastest way to diagnose a broken environment: it verifies the API key, confirms the Groq model exists on this account, names an input device, prints the resolved `FILE_ROOTS`, and confirms the state directory is writable (a read-only one means a silently forgetful assistant).
@@ -207,6 +212,12 @@ description, an `enum` restated in prose, two tone examples in the prompt.
 The floor is now ~3955, lower again than before the tool existed. (It is
 ~3929 since the browser routing fix below, which paid for itself, and
 ~3933 since the prompt learnt that it really can take the screen.)
+
+`media_control` cost ~125 tokens and was paid the same way: two prompt lines
+that only restated a tool's own description (`terminal_command` is the last
+resort; chit-chat goes to `chat`) came out, as did an `enum` described in
+prose and `terminal_command`'s list of the tools to use instead. The floor
+is ~3976 - 24 tokens of headroom, so the next tool pays before it lands.
 
 ### Confirmation and safety
 
@@ -782,6 +793,110 @@ locks E.V. down, because a person reaching for a kill switch means everything,
 not this click. A hotkey with no modifier is refused outright: `RegisterHotKey`
 would take a bare letter and swallow it system-wide for the length of the run.
 
+### The face: a second process, so the core never pays for Qt
+
+[ev/face/](ev/face/) is a floating robot face - a dark rounded screen with two
+glowing eyes - that shows what E.V. is doing. It is the one place the
+dependency policy bends, and it bends the way Playwright does: PySide6 is
+optional, and the face runs as **its own process** (`python -m ev.face
+--stdin`), driven by JSON lines. The core never imports Qt, so its resident
+footprint does not move; the face costs ~85 MB of its own and dies on stdin
+EOF, because a face that outlives its assistant is a lie about whether anyone
+is listening. Tkinter was the zero-dependency option and was rejected on
+evidence, not taste: it has no per-pixel alpha, so glow is impossible and
+colour-keyed edges are jagged, and on Linux it has no shaped transparency at
+all.
+
+Three layers, kept apart so each is testable alone:
+
+- `expressions.json` - every mood as eye parameters (`open`, `width`,
+  `height`, `roundness`, `tilt`, `lid_top`, `lid_angle`, `lid_bottom`,
+  `pupil`, `x`, `y`) plus face parameters (gaze, roll, colour, glow, bob,
+  processing ring, pulse), and an `events` map from core states to moods.
+  Angles and x offsets are **outer-relative**, so one number reads the same
+  on both eyes. Loading refuses unknown keys and out-of-range values, naming
+  the path - a typo in a mood should fail a test, not draw something odd.
+- `expression.py` - the state machine, pure Python. Every scalar eases
+  towards its target (frame-rate independent exponential approach, so an
+  interrupted transition never jumps); blinks, saccades, bob and pulse run on
+  top; long sessions droop the lids slightly. A mood with `hold_s` is
+  *transient* and is not cut short by a new base unless that base sets
+  `interrupt` - "success" then "idle" 50ms later must still read as a smile.
+- `render.py` - QPainter, no state. Lids are *subtracted* from a rounded
+  rectangle (a slanted half-plane above, an ellipse below for the smile), so
+  every mood is the same four operations and a half-way blend is still a
+  sensible shape.
+
+**Ubuntu is a first-class target here, and Wayland is the obstacle.** A
+Wayland compositor lets no client place its own window or keep it on top, so
+the face runs through XWayland (`QT_QPA_PLATFORM=xcb`) and bypasses the X11
+window manager: no dock entry, no focus, every workspace. Cursor tracking
+only sees the pointer over X11 windows; saccades keep the eyes alive anyway.
+And when E.V. is started from VS Code's integrated terminal - a snap - the
+environment carries `GTK_PATH` and friends into the snap, Qt's GTK theme
+loads the snap's libraries, and the process dies with `undefined symbol:
+__libc_pthread_init` before a window exists. `scrub_snap_env()` removes them
+before Qt loads.
+
+**Frames cost CPU, measured.** Wide stroked pens for the glow cost 8.5ms a
+frame at 240px - a third of a core at 60fps. The screen layer is now cached
+per (size, quantised colour, quantised glow) and the glow is a radial bloom
+plus one scaled fill: ~3ms. The window renders at `EV_FACE_FPS` only while
+`Expression.settling` (blink, glance, mood change) and at `EV_FACE_IDLE_FPS`
+otherwise, and polls the pointer at 15Hz since each poll is an X round trip.
+Live on XWayland: ~17% of a core thinking, ~13% idle. On XWayland every frame
+is a full-window copy, so frame count is the lever, not paint cost.
+
+`python -m ev.face --sheet out.png` renders every mood to one image headless,
+which is how to review a change to `expressions.json` without a display.
+
+**The core starts it; nobody runs it by hand.** `EV.start` spawns the face
+through [ev/face/link.py](ev/face/link.py) (`EV_FACE_ENABLED`, on by
+default) and `EV.stop` closes it. `FaceLink` is the whole of the core's side
+and it has three rules, all of them about the face never costing the
+assistant anything: lines go through a bounded queue to a writer thread, so
+a frozen face fills a pipe nobody on the loop is waiting on; every failure -
+no PySide6, no display, a crashed face - is one log line and then a no-op;
+and a repeated base state is dropped, because the engaged loop polls every
+two seconds and resending "listening" each time would restart the
+transition. `EV.face` has a class-level default for the same reason
+`_clock` does: tests build `EV` with `__new__`.
+
+What the terminal draws, the face shows, by separate calls rather than
+through `ev.ui` - the UI is a dead end and stays one. Every addressed line
+goes to it as `{"heard": ...}` and every reply as `{"say": ...}`, drawn in a
+caption bubble that is a window of its own with `WindowTransparentForInput`:
+the face can be dragged, the caption must never be in the way of a click.
+The mood follows the loop (`wake`, `listening`, `thinking`, `tool`/`screen`,
+`speaking`, `success`/`error`, `confirm`, `standby`, `lockdown`). An
+unaddressed sentence sends **nothing** - the face coming into view is a
+claim that E.V. heard something meant for it, the same claim the `you >`
+echo makes, and it is gated by the same wake check (see "Silence has to look
+like silence").
+
+**Presence.** In `EV_FACE_PRESENCE=summoned` (the default) the face is out
+of sight until spoken to, slides in for the conversation and leaves when
+`CONVERSATION_WINDOW_S` lapses. Only the core knows whether the wake phrase
+was heard, so it sends `{"show": ...}` from `_sync_face` each time it goes
+back to the microphone; a held confirmation counts as a conversation. Text
+mode blocks in `input()` and would never notice the lapse, so
+`_face_lapse` watches for it there. A hidden face is `hide()`den with its
+render timer stopped - transparent would still eat clicks and still cost
+frames.
+
+**Busy wins over everything.** [ev/face/busy.py](ev/face/busy.py) is polled
+on the face's own thread and can overrule any summons. Windows answers the
+question directly (`SHQueryUserNotificationState`: full screen, D3D,
+presentation). GNOME on Wayland does not - no client may see another, and
+`org.gnome.Shell.Introspect` refuses outsiders - so three signals stand in:
+Do Not Disturb, an idle inhibitor whose reason looks like video (browsers
+register "Video Wake Lock"; a native Wayland player shows up as app
+`mutter`), and `_NET_WM_STATE_FULLSCREEN` on the active XWayland window. The
+wake lock cannot tell a full-screen video from one in a corner; that is
+accepted, because the alternative is a GNOME Shell extension. Music takes a
+*suspend* lock (flag 4) and is deliberately ignored: a song is not a reason
+to hide.
+
 ### Compound requests, and the token budget that shapes them
 
 "Open my mail and give me a summary of the important things" is two jobs. The
@@ -1122,6 +1237,47 @@ than any of the milliseconds above.
 
 Windows is the primary target. The core loop, brain, STT and TTS are portable; the `winmm` player, the App Paths registry lookup in [tools/base.py](tools/base.py), the Start Menu index in [tools/app_launcher.py](tools/app_launcher.py), `USER_DIRS`, and `dev_workflow`'s integrated-terminal path are Windows-specific and each has a documented fallback.
 
+**Ubuntu is a real target now, and three things only work there because of
+fallbacks.** Each was "it works in every other app" from the user's side:
+
+- **The microphone.** `sounddevice`'s Linux wheel loads the *system*
+  PortAudio, which stock Ubuntu does not ship, so it fails at import with
+  "PortAudio library not found" while `pip` insists it is installed. The
+  error used to be "No microphone backend. Install sounddevice", which sent
+  the user to reinstall the one thing that was fine. `ev.audio` now falls
+  through to `_CommandStream` - `pw-record`, then `parec`, then `arecord` -
+  reading raw PCM off a pipe, and the final error keeps every backend's
+  reason and names `libportaudio2`. A recorder is checked 150ms after
+  launch, because one that cannot reach the server exits at once and should
+  hand over to the next rather than fail twenty reads later.
+- **The voice.** No ffplay, mpv or mpg123 on a stock install either;
+  `gst-play-1.0` is, and GStreamer's mpg123 decoder with it.
+- **Finding programs.** The Start Menu index has a Linux twin: every
+  `.desktop` entry in the XDG application folders (plus snapd's and
+  flatpak's export folders, which a session can be missing), `[Desktop
+  Entry]` group only - "New Window" is an action, not an app - with
+  `NoDisplay` and `Hidden` skipped and `GenericName` indexed *after* every
+  real name, so "open a web browser" works without shadowing anything.
+  Entries launch through `gio launch` via `popen_detached`;
+  `test_nothing_shells_out_to_start_any_more` forbids `subprocess.run` in
+  the launcher, so the exit code is a bounded `wait`, not a blocking run.
+
+`media_control` ([tools/media.py](tools/media.py)) is the same idea: MPRIS
+over `gdbus` and `wpctl`/`pactl`/`amixer` on Linux, the media and volume keys
+through `keybd_event` on Windows, no package anywhere. It is deliberately
+**not** in `SIDE_EFFECT_TOOLS`: "louder, louder, louder" is three identical
+calls back to back, which is exactly what the limiter reads as a loop and
+answers with lockdown. It *is* in `UNTRUSTED_OUTPUT`, because a track title
+is whatever the uploader called it. One Linux trap: a snapped player
+(Ubuntu's Firefox, Brave) only answers MPRIS from unconfined callers, so E.V.
+run from VS Code's snapped terminal gets `AccessDenied` - reported as
+sandboxing, never as "nothing is playing".
+
 Nothing shells out to `cmd /c start` any more. For a name Windows cannot resolve, `start` pops a **modal error dialog and blocks** until it is dismissed — so an unknown app cost a ten-second freeze and an on-screen window before failing anyway.
 
 `_shell_open` calls `ShellExecuteExW` through `ctypes` rather than `os.startfile`, for one reason: the `SEE_MASK_FLAG_NO_UI` flag. Without it the *shell* draws that dialog itself and the caller cannot stop it — `os.startfile` offers no way to ask for a silent failure. This matters most for Start Menu shortcuts, since a `.lnk` outlives the program it points at and every machine has a few aimed at things uninstalled months ago. Unknown apps now fail in ~0.15s with nothing on screen; `tests/test_standby_and_stt.py` asserts the `start` fallback has not crept back. Keep that pattern: guard with `IS_WINDOWS` and degrade rather than fail.
+
+
+# SKILLS TO USE
+- any required skill suitable for situation
+- caveman skill (always)

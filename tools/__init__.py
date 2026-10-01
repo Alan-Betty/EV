@@ -25,6 +25,7 @@ from tools.computer_use import (
 from tools.dev_tools import dev_workflow
 from tools import guard
 from tools.file_manager import file_manager
+from tools.media import media_control
 from tools.guard import (
     SIDE_EFFECT_TOOLS,
     UNTRUSTED_OUTPUT,
@@ -78,6 +79,7 @@ REGISTRY: dict[str, Callable[..., ToolResult]] = {
     "remember_fact": remember_fact,
     "recall_fact": recall_fact,
     "manage_todo": manage_todo,
+    "media_control": media_control,
     # Not in `TOOL_SPECS`, so it costs no tokens per turn, but still callable.
     # It predates the three named tools above and a model that half-recalls
     # the schema reaches for it; `dispatch` would otherwise answer a perfectly

@@ -6,7 +6,10 @@
 # --- required ---------------------------------------------------------------
 httpx>=0.27,<1.0          # Groq/Gemini/Whisper calls; async, one pooled client
 edge-tts>=6.1.9           # Microsoft Edge neural voices, server-side synthesis
-sounddevice>=0.4.6        # PortAudio mic capture; ships wheels for Python 3.13
+sounddevice>=0.4.6        # PortAudio mic capture. On Linux the wheel loads the
+                          # *system* PortAudio (apt install libportaudio2);
+                          # without it E.V. records through pw-record/parec/
+                          # arecord instead, so the mic works either way.
 numpy>=1.24               # sounddevice dependency; also used for buffer handling
 rich>=13.0                # sci-fi terminal UI: panels, spinners, colour
 
@@ -33,6 +36,10 @@ playwright>=1.63.0        # browser_task: DOM-level web automation. The
 #                          # opt-in, imported lazily, and the browser is torn
 #                          # down when the task ends. After installing:
 #                          #   python -m playwright install chromium
+# PySide6-Essentials>=6.8  # the floating face. ev_core starts it in its own
+#                          # process, so the core never imports Qt and its
+#                          # footprint does not move; the face itself is ~85 MB.
+#                          # Not installed = no face, nothing else changes.
 # python-dotenv>=1.0       # config.py has its own .env parser; this is nicer
 # SpeechRecognition>=3.10  # only for EV_STT_PROVIDER=google (keyless fallback)
 # PyAudio>=0.2.14          # alternative mic backend if sounddevice misbehaves
@@ -40,12 +47,14 @@ playwright>=1.63.0        # browser_task: DOM-level web automation. The
 # --- development ------------------------------------------------------------
 # pytest>=8.0              # test suite: python -m pytest tests/ -q
 
-# Notes
+# Notes  
 # -----
 # * `rich` is a nicety, not a requirement. Without it the UI degrades to plain
 #   text automatically, and so does `EV_UI_PLAIN=true` or a redirected stdout.
 # * Audio playback needs no package at all on Windows: E.V. drives the OS
-#   MP3 decoder through winmm/ctypes. On Linux or macOS install ffmpeg
-#   (for ffplay) or mpv.
+#   MP3 decoder through winmm/ctypes. Stock Ubuntu plays through
+#   gst-play-1.0 (GStreamer, preinstalled); ffplay, mpv or mpg123 also work.
+# * Media and volume control need no package: MPRIS over gdbus and wpctl/
+#   pactl on Linux, the media keys on Windows.
 # * whisper.cpp (EV_STT_PROVIDER=whispercpp) is an external binary, not a
 #   pip package. Only add it if you want fully offline speech recognition.

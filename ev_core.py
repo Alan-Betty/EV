@@ -48,6 +48,7 @@ from ev import wake
 from ev.audio import AudioError, Microphone
 from ev.backlog import get_backlog
 from ev.brain import Brain, BrainError, ToolCall
+from ev.face.link import FaceLink
 from ev.memory import StartupReport, get_memory
 from ev.session import (
     Intent,
@@ -175,10 +176,17 @@ class EV:
     # two network clients - and it means anything read on a code path they
     # exercise has to have a value without `__init__` having run.
     _clock: "TurnClock | None" = None
+    # Same reason. A link that was never started is a silent no-op, so every
+    # face call below is safe on an `EV` that skipped `__init__`.
+    face: FaceLink = FaceLink()
 
     def __init__(self, text_mode: bool = False) -> None:
         self.text_mode = text_mode or config.TEXT_MODE
         self.ui = UI()
+        # The face is a process of its own, started in `start()`. What the
+        # terminal draws, the face shows: every state, every line heard and
+        # every reply goes to both, by separate calls - see `ev.face.link`.
+        self.face = FaceLink()
         # One HTTP client for both the brain and STT: connection reuse cuts a
         # full TLS handshake off every single utterance.
         self._http = httpx.AsyncClient(
@@ -313,6 +321,10 @@ class EV:
             await self.say(todos)
 
     async def start(self) -> None:
+        # First, so Qt's start-up overlaps everything below rather than
+        # landing after it. Never awaited: the face cannot hold E.V. up.
+        if config.FACE_ENABLED:
+            self.face.start(verbose=log.isEnabledFor(logging.DEBUG))
         # Warm the TTS stack while the microphone calibrates, so neither cost
         # lands on the user's first command.
         warmup = asyncio.create_task(self.speaker.warmup())
@@ -371,6 +383,7 @@ class EV:
         # never exist at all; closing it is a no-op when it does not.
         close_vision_client()
         close_planner_client()
+        await asyncio.to_thread(self.face.close)
 
     def request_stop(self) -> None:
         self._running = False
@@ -395,6 +408,7 @@ class EV:
             self.ui.begin_status("Listening...")
         else:
             self.ui.end_status()
+        self._sync_face(listening)
 
         utterance = await asyncio.to_thread(
             self.mic.listen, wait_s, lambda: not self._running
@@ -423,6 +437,8 @@ class EV:
                 if listening
                 else contextlib.nullcontext()
             )
+            if listening:
+                self.face.event("transcribing")
             with watching:
                 transcript = await self.transcriber.transcribe(utterance.wav)
             self._clock.lap("stt")
@@ -436,13 +452,48 @@ class EV:
             self.ui.warn(f"Couldn't transcribe that: {exc}")
             return ""
 
+    def _sync_face(self, listening: bool) -> None:
+        """Face in view for a conversation, out of it once the window lapses.
+
+        Called every time E.V. goes back to the microphone, which while
+        engaged is every couple of seconds - so the face leaves within a poll
+        of `CONVERSATION_WINDOW_S` running out, and `FaceLink` drops the
+        repeats in between. A held confirmation counts as a conversation:
+        the face is what is waiting for the yes.
+        """
+        waiting = listening or self.session.pending is not None
+        self.face.show(waiting)
+        if self.session.pending is not None:
+            self.face.event("confirm")
+        elif self.session.in_standby:
+            self.face.event("standby")
+        else:
+            self.face.event("listening" if listening else "idle")
+
+    def _face_heard(self, text: str) -> None:
+        """An addressed line: bring the face in and caption it."""
+        self.face.show(True)
+        self.face.heard(str(text))
+
     async def _next_typed(self) -> str:
+        self._sync_face(self.session.engaged or self.session.pending is not None)
+        # `input()` blocks for as long as the user takes, so nothing else
+        # would notice the conversation lapsing and the face would stay up
+        # for good. The voice loop gets this for free from its short polls.
+        lapse = asyncio.create_task(self._face_lapse())
         prompt = self.ui.prompt(self.session.engaged, self.session.in_standby)
         try:
             return (await asyncio.to_thread(input, prompt)).strip()
         except (EOFError, KeyboardInterrupt):
             self.request_stop()
             return ""
+        finally:
+            lapse.cancel()
+
+    async def _face_lapse(self) -> None:
+        while self.session.engaged or self.session.pending is not None:
+            await asyncio.sleep(1.0)
+        self._sync_face(False)
 
     # -- output -----------------------------------------------------------
     @contextlib.asynccontextmanager
@@ -478,6 +529,9 @@ class EV:
                 self.ui.warn("I had nothing to say to that.")
             return
         self.ui.speech(spoken)
+        self.face.show(True)
+        self.face.event("speaking")
+        self.face.said(spoken)
 
         # Lapped before playback rather than after: what matters is how long
         # the user waited for the first sound, not how long the sentence
@@ -546,6 +600,7 @@ class EV:
                 if config.BARGE_IN_KEEP_AUDIO:
                     self.mic.hold_audio()
                 self.speaker.stop()
+                self.face.event("barge_in")
                 self.ui.note("Go ahead.")  # drawn, never spoken
                 return
             await asyncio.sleep(0.05)
@@ -631,6 +686,11 @@ class EV:
         if command is None:
             return
 
+        # Only now, after the wake check, for the same reason as the echo
+        # below: the face coming into view says "I heard that was for me".
+        if not engaged:
+            self.face.event("wake")
+        self._face_heard(transcript)
         if not self.text_mode:
             # `engaged` is read before `_extract_command`, which engages the
             # session on a wake phrase - otherwise the marker would claim the
@@ -664,6 +724,7 @@ class EV:
             # held utterance arrives as a plain `str`.
             why = transcript.why() if isinstance(transcript, Transcript) else "unclear"
             self.ui.warn(f"Didn't catch that clearly ({why}).")
+            self.face.event("misheard")
             await self.say("Didn't catch that. Say it again?")
             return
 
@@ -696,6 +757,7 @@ class EV:
             if not command:
                 return
             self.ui.user(command, engaged=True)
+            self._face_heard(command)
             follow_up = match_intent(command, self.session.mode)
             if follow_up is not None:
                 await self._handle_intent(follow_up)
@@ -741,12 +803,14 @@ class EV:
 
         if intent is Intent.STANDBY:
             self.session.enter_standby()
+            self.face.event("standby")
             await self.say(response_for(intent))
             self.ui.note("Standing by. Say 'wake up' or 'E.V., wake up' to resume.")
             return
 
         if intent is Intent.RESUME:
             self.session.resume()
+            self.face.event("wake")
             await self.say(response_for(intent))
             return
 
@@ -764,6 +828,7 @@ class EV:
             self.session.pending = None
             self._pending_followup = ""
             engage_lockdown("the user said so")
+            self.face.event("lockdown")
             await self.say(response_for(intent))
             self.ui.note(
                 "Lockdown: tools that change anything are refused. "
@@ -830,8 +895,10 @@ class EV:
             nonlocal stream
             if stream is None:
                 stream = self.speaker.stream()
+                self.face.event("speaking")
             stream.feed(sentence)
 
+        self.face.event("thinking")
         try:
             with self.ui.status("Thinking..."):
                 call = await self.brain.decide(
@@ -850,6 +917,8 @@ class EV:
             self._clock.lap("brain")
         log.info("tool=%s args=%s", call.name, call.arguments)
         self.ui.action(call.name, _describe(call))
+        if call.name != "chat":
+            self.face.event("screen" if call.name in SCREEN_TOOLS else "tool")
 
         if stream is not None:
             if call.name == "chat":
@@ -877,6 +946,7 @@ class EV:
         # Both halves can be empty if the model produced nothing usable, and
         # an empty panel reads as a crash.
         self.ui.speech(reply or stream.spoken or "(nothing came back)")
+        self.face.said(reply or stream.spoken)
 
         clock = self._clock
         self._clock = None
@@ -1058,6 +1128,7 @@ class EV:
                 continue
 
             self.ui.user(str(heard), engaged=True)
+            self._face_heard(str(heard))
             intent = match_intent(heard, self.session.mode)
 
             if intent is Intent.LOCKDOWN:
@@ -1073,6 +1144,7 @@ class EV:
                 self._pending_followup = ""
                 token.cancel()
                 self.speaker.stop()
+                self.face.event("lockdown")
                 self.ui.warn("Lockdown: everything stops until you say unlock.")
                 await self.say(response_for(Intent.LOCKDOWN))
                 return
@@ -1117,14 +1189,17 @@ class EV:
             # in it" still answers the second half after a spoken yes.
             self._pending_followup = followup
             await self.say(result.speech)
+            self.face.event("confirm")
             if not self.text_mode:
                 # Confirmation has a short fuse; silence means no.
                 reply = await self._next_utterance(wait_s=8.0)
                 if reply:
                     self.ui.user(reply, engaged=True)
+                    self._face_heard(reply)
                 await self._resolve_pending(reply)
             return
 
+        self.face.event("success" if result.ok else "error")
         await self.say(result.speech)
         # Speech and observation go to different channels. Putting the machine
         # detail in the assistant role is what taught the model to say
@@ -1210,6 +1285,7 @@ class EV:
                 second = await self._next_utterance(wait_s=8.0)
                 if second:
                     self.ui.user(second, engaged=True)
+                    self._face_heard(second)
                 await self._resolve_pending(second)
             return
 
@@ -1252,6 +1328,7 @@ class EV:
             result: ToolResult = await self._run_tool(held, args)
         finally:
             await self._finish_ack(ack)
+        self.face.event("success" if result.ok else "error")
         await self.say(result.speech)
         self.brain.remember(
             pending["command"],
@@ -1411,14 +1488,14 @@ def check_config() -> int:
     if config.APP_INDEX_ENABLED:
         indexed = len(get_app_index().apps())
         if indexed:
-            notes.append(f"OK   apps: {indexed} Start Menu shortcuts indexed")
+            notes.append(f"OK   apps: {indexed} installed programs indexed")
         else:
             notes.append(
-                "WARN apps: no Start Menu shortcuts indexed; only APP_ALIASES "
+                "WARN apps: no installed programs indexed; only APP_ALIASES "
                 "and PATH will resolve"
             )
     else:
-        notes.append("WARN apps: Start Menu index disabled (EV_APP_INDEX_ENABLED=false)")
+        notes.append("WARN apps: program index disabled (EV_APP_INDEX_ENABLED=false)")
 
     for module, label, required in (
         ("edge_tts", "edge-tts (voice output)", config.TTS_ENABLED),
@@ -1430,13 +1507,30 @@ def check_config() -> int:
         ("mss", "mss (fast screen capture)", False),
         ("PIL", "Pillow (screenshot downscaling)", False),
         ("playwright", "playwright (browser_task)", False),
+        ("PySide6", "PySide6 (the face)", False),
     ):
         if importlib.util.find_spec(module) is not None:
             notes.append(f"OK   {label}")
+        elif module == "sounddevice" and sys.platform != "win32" and any(
+            shutil.which(name) for name in ("pw-record", "parec", "arecord")
+        ):
+            notes.append(f"WARN {label} not installed; using the sound server's recorder")
         elif required:
             problems.append(f"MISS {label} - pip install -r requirements.txt")
         else:
             notes.append(f"WARN {label} not installed (optional)")
+
+    if config.FACE_ENABLED:
+        notes.append(
+            f"OK   face: {config.FACE_PRESENCE}, hides for "
+            + (", ".join(name for name, on in (
+                ("fullscreen", config.FACE_HIDE_FULLSCREEN),
+                ("video", config.FACE_HIDE_VIDEO),
+                ("do-not-disturb", config.FACE_HIDE_DND),
+            ) if on) or "nothing")
+        )
+    else:
+        notes.append("WARN face: off (EV_FACE_ENABLED=false)")
 
     # Naming a working microphone is far more useful than asserting one exists.
     try:
@@ -1452,7 +1546,19 @@ def check_config() -> int:
         else:
             problems.append("MISS microphone: no input devices found")
     except Exception as exc:
-        notes.append(f"WARN microphone: could not enumerate devices ({exc})")
+        # The import fails with OSError, not ImportError, when the pip wheel
+        # is there and the system PortAudio is not - the case that reads as
+        # "sounddevice is installed, why is the mic missing". On Linux the
+        # recorder fallback in `ev.audio` covers it, so it is a note, not a
+        # failure, as long as one of those recorders exists.
+        recorders = [name for name in ("pw-record", "parec", "arecord") if shutil.which(name)]
+        if recorders and sys.platform != "win32":
+            notes.append(
+                f"OK   microphone: via {recorders[0]} (sounddevice unusable: {exc}; "
+                "sudo apt install libportaudio2 to use it instead)"
+            )
+        else:
+            notes.append(f"WARN microphone: could not enumerate devices ({exc})")
 
     for binary, label in (
         (config.VSCODE_CLI, "VS Code CLI"),

@@ -45,6 +45,9 @@ def _reset_guard(monkeypatch):
     # and register a real system-wide hotkey.
     monkeypatch.setattr(config, "AGENT_OVERLAY_ENABLED", False, raising=False)
     monkeypatch.setattr(config, "AGENT_HOTKEY_ENABLED", False, raising=False)
+    # The face is a real Qt process on a real display. A test that reaches
+    # `EV.start` must not leave one floating on the desktop of whoever ran it.
+    monkeypatch.setattr(config, "FACE_ENABLED", False, raising=False)
     guard.reset()
     yield
     guard.reset()
