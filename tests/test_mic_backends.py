@@ -137,3 +137,84 @@ def test_stock_ubuntu_has_a_way_to_play_mp3(monkeypatch):
     )
     player = audio.build_player()
     assert player._template[0] == "gst-play-1.0"
+
+
+# ---------------------------------------------------------------------------
+# which input: the microphone, never the screen
+# ---------------------------------------------------------------------------
+# The system default input on the user's machine was the speaker monitor, and
+# E.V. recorded whatever the default was - so it heard every video on screen,
+# and its own replies at full digital level, which it barged in on and
+# answered. An empty EV_INPUT_DEVICE now means "the user's microphone".
+MONITOR = "alsa_output.pci-0000_00_1f.3.analog-stereo.monitor"
+BUILT_IN = "alsa_input.pci-0000_00_1f.3.analog-stereo"
+HEADSET = "bluez_input.C7_16_53_5B_FF_8F.0"
+
+
+def _sources(monkeypatch, sources, default):
+    monkeypatch.setattr(audio, "IS_WINDOWS", False)
+    monkeypatch.setattr(audio, "capture_sources", lambda: list(sources))
+    monkeypatch.setattr(audio, "default_capture_source", lambda: default)
+
+
+def test_a_monitor_default_is_never_recorded(monkeypatch):
+    _sources(monkeypatch, [MONITOR, BUILT_IN], default=MONITOR)
+    assert audio.resolve_capture_source("") == BUILT_IN
+
+
+def test_a_microphone_default_is_kept(monkeypatch):
+    _sources(monkeypatch, [MONITOR, BUILT_IN, HEADSET], default=HEADSET)
+    assert audio.resolve_capture_source("") == HEADSET
+
+
+def test_a_built_in_mic_is_preferred_over_bluetooth(monkeypatch):
+    _sources(monkeypatch, [MONITOR, HEADSET, BUILT_IN], default=MONITOR)
+    assert audio.resolve_capture_source("") == BUILT_IN
+
+
+def test_only_monitors_is_an_error_not_a_silent_fallback(monkeypatch):
+    _sources(monkeypatch, [MONITOR], default=MONITOR)
+    with pytest.raises(AudioError, match="speaker monitors"):
+        audio.resolve_capture_source("")
+
+
+def test_a_monitor_named_on_purpose_is_honoured(monkeypatch):
+    """Recording the system output is allowed - when the user asks for it."""
+    _sources(monkeypatch, [MONITOR, BUILT_IN], default=BUILT_IN)
+    assert audio.resolve_capture_source(MONITOR) == MONITOR
+
+
+def test_no_sound_server_leaves_the_backends_alone(monkeypatch):
+    _sources(monkeypatch, [], default="")
+    assert audio.resolve_capture_source("") == ""
+
+
+def test_the_pinned_source_reaches_the_recorder(monkeypatch):
+    _sources(monkeypatch, [MONITOR, BUILT_IN], default=MONITOR)
+    monkeypatch.setattr(audio.config, "INPUT_DEVICE", "")
+    seen = {}
+
+    def commands(rate, device):
+        seen["device"] = device
+        return [("fake", _fake_recorder())]
+
+    monkeypatch.setattr(_CommandStream, "_commands", staticmethod(commands))
+
+    def no_portaudio(self):
+        raise AudioError("not here")
+
+    monkeypatch.setattr(Microphone, "_open_sounddevice", no_portaudio)
+    monkeypatch.setattr(Microphone, "_open_pyaudio", no_portaudio)
+    mic = Microphone()
+    mic.open()
+    try:
+        assert seen["device"] == BUILT_IN
+        assert mic.source == BUILT_IN
+        assert mic._backend == "command"
+    finally:
+        mic.close()
+
+
+def test_the_monitor_is_recognised_by_name():
+    assert audio.is_monitor_source(MONITOR)
+    assert not audio.is_monitor_source(BUILT_IN)

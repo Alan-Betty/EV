@@ -1119,6 +1119,44 @@ each easy to leave out:
   one flush. Flushed instead, the user has to start the sentence again - which
   is the thing barge-in exists to prevent.
 
+### E.V. hearing itself, and learning the user's voice
+
+On loudspeakers E.V. barged in on its own reply, kept the audio (as
+barge-in is meant to), transcribed its own words with the conversation
+window still open, and answered them - a loop that never finished a
+sentence. The level test was `noise_floor * BARGE_IN_LEVEL_MULTIPLIER`,
+which is "louder than the *room*", and speakers beat the room every time.
+And `BARGE_IN_GRACE_S` was timed from `speaking`, which turns on when a reply
+is *queued*, so it ran out during synthesis and E.V.'s first syllable landed
+unguarded. Three independent fixes, all in `tests/test_voice.py`:
+
+- **Echo-relative barge-in.** The reference is E.V.'s own level at the
+  microphone during *this* reply, on a lag (`BARGE_IN_ECHO_LAG_S`) so the
+  user starting to talk is compared against E.V. before they started.
+  Until there is a lagged measurement, the grace period and the echo level
+  learned from earlier replies stand in. Grace is timed from
+  `Speaker.audible_since`, set by the playback thread when sound starts.
+- **A learned voiceprint** ([ev/voice.py](ev/voice.py)). Two diagonal
+  Gaussians over 12 cepstral coefficients: the user, learned from every
+  addressed utterance in `_tick` (after the wake and self-echo checks - a
+  voiceprint trained on the room is a model of the room), and E.V.'s own
+  voice *through the speakers*, learned from every reply that played out
+  uninterrupted and from every self-echo transcript. c0 is dropped, so it
+  is gain-invariant. Exact averaging at first, then an EMA over
+  `VOICE_ADAPT_FRAMES`, so it adapts forever. `score() is None` until both
+  sides have `VOICE_MIN_FRAMES`, and **None is permission, never a veto**.
+  Trained, it refuses E.V.-sounding audio at any level and lets a
+  confidently-user voice through at the smaller `BARGE_IN_ECHO_MARGIN_KNOWN`.
+  It is not a speaker-verification model and is not used to tell the user
+  from other people. numpy is imported lazily; `Microphone` keeps
+  `VOICE_HISTORY_S` of raw frames (never flushed) for it to read.
+- **The words.** `EV._heard_itself` drops any transcript of 3+ words where
+  `SELF_ECHO_MATCH` of them appear in order in `Speaker.said_since(...)`.
+  This is the guard that makes the loop impossible rather than unlikely,
+  and it runs in `_watch_for_cancel` too - an acknowledgement spoken while
+  a tool's microphone was open used to be held and replayed as the next
+  command.
+
 ### Session modes and local intents
 
 [ev/session.py](ev/session.py) defines `IDLE` (wake phrase required) / `ENGAGED` (name optional, decays after `CONVERSATION_WINDOW_S`) / `STANDBY` (ignores everything but "wake up"). Control phrases — "take five", "wake up", "stop", "goodbye" — are matched locally before the model is consulted, so they land instantly, including mid-sentence. Matching is **exact** against the normalised utterance (plus a leading "okay" or trailing "please"); fuzzy matching here would mistake "stop the server" for a cancel and drop a real request.
@@ -1250,6 +1288,17 @@ fallbacks.** Each was "it works in every other app" from the user's side:
   reason and names `libportaudio2`. A recorder is checked 150ms after
   launch, because one that cannot reach the server exits at once and should
   hand over to the next rather than fail twenty reads later.
+- **Which input.** An empty `EV_INPUT_DEVICE` used to mean "the system
+  default", and the default source can be the *speaker monitor*
+  (`<sink>.monitor`) - it was, on the user's machine. E.V. then recorded the
+  screen: every video, and its own replies at full digital level, which it
+  barged in on and answered in a loop no echo heuristic could fix.
+  `resolve_capture_source` asks `pactl` and pins a real microphone by name
+  (built-in before Bluetooth), the recorders take it via `--target` /
+  `--device`, and the command backend goes first when a source is pinned,
+  because PortAudio on Linux goes through ALSA's `default` and lands on the
+  same monitor. Only monitors present is an error, never a fallback. A
+  monitor is recorded only when `EV_INPUT_DEVICE` names one.
 - **The voice.** No ffplay, mpv or mpg123 on a stock install either;
   `gst-play-1.0` is, and GStreamer's mpg123 decoder with it.
 - **Finding programs.** The Start Menu index has a Linux twin: every

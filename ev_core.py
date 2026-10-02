@@ -45,7 +45,7 @@ import httpx
 
 import config
 from ev import wake
-from ev.audio import AudioError, Microphone
+from ev.audio import AudioError, Microphone, Utterance
 from ev.backlog import get_backlog
 from ev.brain import Brain, BrainError, ToolCall
 from ev.face.link import FaceLink
@@ -62,6 +62,7 @@ from ev.session import (
 from ev.stt import Transcriber, TranscriptionError, Transcript
 from ev.tts import Speaker, SpeechStream, clean_for_speech
 from ev.ui import UI
+from ev.voice import VoiceProfile, get_voice_profile, is_self_echo
 from tools import CANCELLABLE, CancelToken, ToolResult, dispatch, from_model
 from tools.computer_use import close_vision_client
 from tools.web_agent import close_planner_client
@@ -167,6 +168,34 @@ def _summarise_call(call: ToolCall) -> str:
     return f"{call.name}: {described}" if described else call.name
 
 
+
+def _percentile(values: list[float], fraction: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    return ordered[min(len(ordered) - 1, int(fraction * (len(ordered) - 1)))]
+
+
+def _echo_reference(
+    samples: list[tuple[float, float]], now: float, heard_from: float, learned: float
+) -> float:
+    """How loud E.V. itself has been at the microphone during this reply.
+
+    Measured on a lag: only samples older than `BARGE_IN_ECHO_LAG_S` count,
+    so the user starting to talk is compared against E.V. *before* they
+    started, rather than against themselves. Until there is half a second of
+    lagged reply to measure, the grace period stands in - it was E.V. and
+    nothing else - together with the level learned from earlier replies.
+    """
+    settled = [level for at, level in samples if at <= now - config.BARGE_IN_ECHO_LAG_S]
+    if len(settled) >= 10:
+        return _percentile(settled, 0.8)
+    grace = [
+        level for at, level in samples if at <= heard_from + config.BARGE_IN_GRACE_S
+    ]
+    return max(learned, _percentile(grace, 0.8))
+
+
 class EV:
     """Owns the session: audio devices, network clients, and history."""
 
@@ -179,6 +208,10 @@ class EV:
     # Same reason. A link that was never started is a silent no-op, so every
     # face call below is safe on an `EV` that skipped `__init__`.
     face: FaceLink = FaceLink()
+    # Same reason again. None means "not learning", and every voice call
+    # below checks for it.
+    voice: "VoiceProfile | None" = None
+    _last_utterance: "Utterance | None" = None
 
     def __init__(self, text_mode: bool = False) -> None:
         self.text_mode = text_mode or config.TEXT_MODE
@@ -215,6 +248,14 @@ class EV:
         self._pending_followup: str = ""
         # Stopwatch for the turn in progress, or None outside one.
         self._clock: TurnClock | None = None
+        # The user's voice and E.V.'s own echo, learned as E.V. is used -
+        # see `ev.voice`. Text mode hears nothing, so it learns nothing.
+        self.voice = (
+            get_voice_profile() if config.VOICE_LEARN and not self.text_mode else None
+        )
+        # The audio behind the transcript being handled, so an addressed
+        # utterance can be learned from once it is known to be addressed.
+        self._last_utterance: Utterance | None = None
 
     # -- lifecycle --------------------------------------------------------
     def _boot(self) -> StartupReport:
@@ -378,6 +419,8 @@ class EV:
         # Marks the shutdown clean, which is what keeps the next start from
         # reporting a crash that did not happen.
         self.memory.end_session(clean=True)
+        if self.voice is not None:
+            self.voice.save()
         await self._http.aclose()
         # The vision client is opened lazily by the first screenshot and may
         # never exist at all; closing it is a no-op when it does not.
@@ -415,6 +458,7 @@ class EV:
         )
         if utterance is None:
             return ""
+        self._last_utterance = utterance
         # Whatever happens next prints, and the spinner has to be gone first.
         self.ui.end_status()
 
@@ -498,10 +542,16 @@ class EV:
     # -- output -----------------------------------------------------------
     @contextlib.asynccontextmanager
     async def _barge_in(self):
-        """Watch for the user talking over E.V. for the duration of a block."""
+        """Watch for the user talking over E.V. for the duration of a block.
+
+        Afterwards, a reply that played to the end uninterrupted was E.V. and
+        nothing else, which makes it a free sample of what E.V. sounds like
+        through these speakers - see `_learn_echo`.
+        """
         monitor = None
+        state: dict = {}
         if self.mic is not None and config.TTS_BARGE_IN:
-            monitor = asyncio.create_task(self._watch_for_barge_in())
+            monitor = asyncio.create_task(self._watch_for_barge_in(state))
         try:
             yield
         finally:
@@ -509,6 +559,7 @@ class EV:
                 monitor.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await monitor
+            self._learn_echo(state)
 
     async def say(self, text: str) -> None:
         """Print and speak a reply, interruptible by the user talking over it.
@@ -561,19 +612,31 @@ class EV:
         if config.TURN_TIMING:
             self.ui.note(f"timing: {report}")
 
-    async def _watch_for_barge_in(self) -> None:
+    async def _watch_for_barge_in(self, state: dict | None = None) -> None:
         """Cut playback the moment the user starts talking over E.V.
 
-        Two independent conditions, because either one alone has a failure
-        mode that makes E.V. unusable in the opposite direction:
+        Three conditions, because each one alone has a failure mode that
+        makes E.V. unusable:
 
         * **Sustained.** A door closing is loud and over in one frame.
           `BARGE_IN_FRAMES` is what stops a cough taking the floor.
-        * **Louder than E.V.** On loudspeakers E.V. hears its own voice, which
-          is a long, steady run of speech-looking frames - exactly what the
-          frame count is looking for. Left at that, E.V. interrupts itself on
-          every single reply. The level test is what separates the user from
-          the loopback.
+        * **Louder than E.V. was a moment ago.** On loudspeakers E.V. hears
+          its own voice, and it is far louder than the room - so the old
+          test, "louder than the noise floor", passed on E.V.'s own reply.
+          E.V. cut itself off, kept the audio, transcribed its own words and
+          answered them, in a loop that never finished a sentence. The
+          reference is now E.V.'s own echo, measured on this reply with a
+          lag (`_echo_reference`): the user starting to talk lifts the level
+          above where E.V. has been sitting, and E.V. carrying on does not.
+        * **Not E.V.'s voice.** Once the voiceprint is trained, audio that
+          sounds like E.V. through the speakers is refused however loud it
+          is, and audio that is confidently the user is accepted at a
+          smaller margin - see `ev.voice`. Untrained, it has no vote.
+
+        The grace period is timed from the first *sound*, not from the reply
+        being queued. Timed from the queue it expired during synthesis, and
+        E.V.'s first syllable - the loudest thing the microphone hears all
+        reply - landed with no protection at all.
 
         On a trigger the queued audio is *kept* rather than flushed. Those
         frames are the opening of the user's sentence, and throwing them away
@@ -581,29 +644,146 @@ class EV:
         """
         if self.mic is None:
             return
-        # E.V.'s own attack is the loudest thing this microphone will hear all
-        # sentence. Cutting itself off on its own first syllable is the one
-        # barge-in failure with no recovery, so the grace period comes first.
-        await asyncio.sleep(config.BARGE_IN_GRACE_S)
-        threshold = self.mic.noise_floor * config.BARGE_IN_LEVEL_MULTIPLIER
+        state = {} if state is None else state
+        samples: list[tuple[float, float]] = []
+        state["samples"] = samples
+        floor_gate = self.mic.noise_floor * config.BARGE_IN_LEVEL_MULTIPLIER
+        learned_echo = self.voice.echo_level if self.voice is not None else 0.0
+        watching_since = time.monotonic()
+        heard_from: float | None = None
+
         while self.speaker.speaking:
-            if (
-                self.mic.speech_energy() >= config.BARGE_IN_FRAMES
-                and self.mic.speech_level() >= threshold
-            ):
-                log.info(
-                    "Barge-in: %d frames at %.4f (floor %.4f)",
-                    self.mic.speech_energy(),
-                    self.mic.speech_level(),
+            now = time.monotonic()
+            if heard_from is None:
+                # A speaker that cannot say when it became audible is treated
+                # as audible from the start, which is the old behaviour.
+                audible = getattr(self.speaker, "audible_since", watching_since)
+                if audible is None:
+                    # Still synthesising: nothing is coming out of the
+                    # speakers yet, so there is nothing to interrupt.
+                    await asyncio.sleep(0.05)
+                    continue
+                heard_from = audible
+                state["heard_from"] = heard_from
+
+            level = self.mic.speech_level()
+            samples.append((now, level))
+            if now - heard_from < config.BARGE_IN_GRACE_S:
+                await asyncio.sleep(0.05)
+                continue
+
+            echo = _echo_reference(samples, now, heard_from, learned_echo)
+            sustained = self.mic.speech_energy() >= config.BARGE_IN_FRAMES
+            loud = level >= max(floor_gate, echo * config.BARGE_IN_ECHO_MARGIN)
+            over = level >= max(floor_gate, echo * config.BARGE_IN_ECHO_MARGIN_KNOWN)
+            if sustained and over:
+                score = self._voice_score()
+                known = score is not None and score >= config.VOICE_CONFIDENT_SCORE
+                allowed = score is None or score > config.VOICE_BARGE_IN_MIN_SCORE
+                if (loud and allowed) or known:
+                    log.info(
+                        "Barge-in: %d frames at %.4f (floor %.4f, echo %.4f, voice %s)",
+                        self.mic.speech_energy(),
+                        level,
+                        self.mic.noise_floor,
+                        echo,
+                        "untrained" if score is None else f"{score:+.2f}",
+                    )
+                    state["barged"] = True
+                    if config.BARGE_IN_KEEP_AUDIO:
+                        self.mic.hold_audio()
+                    self.speaker.stop()
+                    self.face.event("barge_in")
+                    self.ui.note("Go ahead.")  # drawn, never spoken
+                    return
+                if loud:
+                    log.debug("Not a barge-in: sounds like my own voice (%+.2f)", score)
+            await asyncio.sleep(0.05)
+
+    def _voice_score(self) -> float | None:
+        """User-or-echo verdict on the last few frames, or None for no opinion."""
+        if self.voice is None or self.mic is None or not self.voice.trained:
+            return None
+        recent = getattr(self.mic, "recent_audio", None)
+        if recent is None:
+            return None
+        try:
+            return self.voice.score(
+                recent(max(config.BARGE_IN_FRAMES, 8)),
+                self.mic.sample_rate,
+                self.mic.noise_floor,
+            )
+        except Exception as exc:  # the ear must never cost the user a reply
+            log.debug("Voice score failed: %s", exc)
+            return None
+
+    def _learn_echo(self, state: dict) -> None:
+        """Learn E.V.'s own voice from a reply that nobody interrupted."""
+        if self.voice is None or self.mic is None or state.get("barged"):
+            return
+        heard_from = state.get("heard_from")
+        samples = state.get("samples") or []
+        # Half a second of audible reply at the 50ms sampling rate. Less than
+        # that is a click and a breath, not a voice.
+        if heard_from is None or len(samples) < 10:
+            return
+        try:
+            self.voice.note_echo_level(_percentile([level for _, level in samples], 0.8))
+            between = getattr(self.mic, "audio_between", None)
+            if between is not None:
+                self.voice.learn_echo(
+                    between(heard_from, samples[-1][0]),
+                    self.mic.sample_rate,
                     self.mic.noise_floor,
                 )
-                if config.BARGE_IN_KEEP_AUDIO:
-                    self.mic.hold_audio()
-                self.speaker.stop()
-                self.face.event("barge_in")
-                self.ui.note("Go ahead.")  # drawn, never spoken
-                return
-            await asyncio.sleep(0.05)
+        except Exception as exc:
+            log.debug("Could not learn from my own reply: %s", exc)
+
+    def _heard_itself(self, transcript: str) -> bool:
+        """Drop a transcript that is E.V.'s own recent speech, heard back.
+
+        The last line of defence, and the one that makes the loop impossible
+        rather than unlikely: whatever let the audio in - a barge-in on an
+        echo, an acknowledgement spoken while a tool's microphone was open -
+        a transcript of E.V.'s own sentence is never answered. It is learned
+        from instead, as a sample of what E.V. sounds like.
+        """
+        if self.text_mode:
+            return False
+        said_since = getattr(self.speaker, "said_since", None)
+        if said_since is None:
+            return False
+        said = said_since(config.SELF_ECHO_WINDOW_S)
+        if not said or not is_self_echo(str(transcript), said):
+            return False
+        log.info("Heard my own voice, ignoring it: %r", str(transcript))
+        self.ui.note("That was my own voice - ignoring it.")  # drawn only
+        utterance = self._last_utterance
+        if self.voice is not None and utterance is not None and self.mic is not None:
+            try:
+                self.voice.learn_echo(
+                    utterance.pcm, utterance.sample_rate, self.mic.noise_floor
+                )
+            except Exception as exc:
+                log.debug("Could not learn from the echo: %s", exc)
+        return True
+
+    def _learn_user(self, transcript: str) -> None:
+        """Fold an utterance that was addressed to E.V. into the user's voice."""
+        utterance = self._last_utterance
+        self._last_utterance = None  # learned once, never twice
+        if (
+            self.voice is None
+            or self.mic is None
+            or utterance is None
+            or self.session.in_standby
+            or getattr(transcript, "rejected", False)
+        ):
+            return
+        try:
+            self.voice.learn_user(utterance.pcm, utterance.sample_rate, self.mic.noise_floor)
+        except Exception as exc:
+            log.debug("Could not learn from that utterance: %s", exc)
 
     # -- the loop ---------------------------------------------------------
     async def run(self) -> None:
@@ -673,6 +853,11 @@ class EV:
             self.request_stop()
             return
 
+        # Before the wake check: E.V. just spoke, so the conversation window
+        # is open and its own words would need no name to be obeyed.
+        if self._heard_itself(transcript):
+            return
+
         # The wake check comes *before* the echo, and that order is the whole
         # point. Drawn first, every sentence spoken near the microphone
         # appeared on screen under a "you >" prompt whether or not it was
@@ -691,6 +876,9 @@ class EV:
         if not engaged:
             self.face.event("wake")
         self._face_heard(transcript)
+        # Only now, once it is known to be addressed and not E.V.'s own
+        # voice: a voiceprint trained on the room is a model of the room.
+        self._learn_user(transcript)
         if not self.text_mode:
             # `engaged` is read before `_extract_command`, which engages the
             # session on a wake phrase - otherwise the marker would claim the
@@ -1123,8 +1311,13 @@ class EV:
             if stop_watching.is_set():
                 return
 
+            self._last_utterance = utterance
             heard = await self.transcriber.transcribe(utterance.wav)
             if not heard or getattr(heard, "rejected", False):
+                continue
+            # "On it, stand by" is spoken while this microphone is open.
+            # Heard back and held, it became the next command.
+            if self._heard_itself(heard):
                 continue
 
             self.ui.user(str(heard), engaged=True)
@@ -1532,6 +1725,11 @@ def check_config() -> int:
     else:
         notes.append("WARN face: off (EV_FACE_ENABLED=false)")
 
+    if config.VOICE_LEARN:
+        notes.append(f"OK   voice: {get_voice_profile().describe()}")
+    else:
+        notes.append("WARN voice: not learning (EV_VOICE_LEARN=false)")
+
     # Naming a working microphone is far more useful than asserting one exists.
     try:
         import sounddevice as sd
@@ -1559,6 +1757,29 @@ def check_config() -> int:
             )
         else:
             notes.append(f"WARN microphone: could not enumerate devices ({exc})")
+
+    # Which input is the question that matters, not whether one exists. A
+    # system default left on the speaker monitor had E.V. hearing the screen
+    # - and itself - instead of the user; see `resolve_capture_source`.
+    if sys.platform != "win32":
+        from ev.audio import default_capture_source, is_monitor_source, resolve_capture_source
+
+        try:
+            source = resolve_capture_source(config.INPUT_DEVICE.strip())
+        except AudioError as exc:
+            problems.append(f"MISS microphone: {exc}")
+        else:
+            if source:
+                deliberate = " (EV_INPUT_DEVICE)" if config.INPUT_DEVICE.strip() else ""
+                notes.append(f"OK   microphone: records from {source}{deliberate}")
+                if is_monitor_source(source):
+                    notes.append("WARN microphone: that is a speaker monitor - E.V. hears the screen, not you")
+            default = default_capture_source()
+            if default and is_monitor_source(default) and not config.INPUT_DEVICE.strip():
+                notes.append(
+                    f"WARN microphone: system default input is the speaker monitor ({default}); "
+                    "E.V. ignores it, but other apps may not"
+                )
 
     for binary, label in (
         (config.VSCODE_CLI, "VS Code CLI"),

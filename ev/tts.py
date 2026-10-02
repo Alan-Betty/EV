@@ -25,6 +25,8 @@ import os
 import re
 import shutil
 import tempfile
+import time
+from collections import deque
 from typing import Callable
 
 import config
@@ -261,6 +263,17 @@ class Speaker:
         # None, and the one thing anybody ever does with this is assign a
         # function to it.
         self.on_playback_start: Callable[[], None] | None = None
+        # When the clip now in the player started, by `time.monotonic()`, or
+        # None while nothing is audible. `speaking` is True from the moment a
+        # reply is *queued*, which includes the ~0.8s of synthesis before the
+        # first sound - so a barge-in grace period timed from `speaking`
+        # expired before E.V. had said a word, and E.V.'s first syllable,
+        # the loudest thing the microphone hears all reply, landed unguarded.
+        self.audible_since: float | None = None
+        # What was played recently: [text, started, ended-or-None]. Read by
+        # `said_since`, so a transcript of E.V.'s own voice can be recognised
+        # as one - see `ev.voice.is_self_echo`.
+        self._said: deque[list] = deque(maxlen=16)
 
         if not self.enabled:
             return
@@ -309,7 +322,18 @@ class Speaker:
                 self._speaking = False
         return spoken
 
-    async def _play(self, path: str) -> None:
+    def said_since(self, window_s: float) -> str:
+        """Everything E.V. has said aloud in the last `window_s` seconds.
+
+        Includes whatever is playing now. Used to recognise E.V.'s own voice
+        when the microphone hands it back as a transcript.
+        """
+        cutoff = time.monotonic() - window_s
+        return " ".join(
+            text for text, _, ended in self._said if ended is None or ended >= cutoff
+        )
+
+    async def _play(self, path: str, text: str = "") -> None:
         """Play one file, unless the reply it belonged to has been abandoned.
 
         This exists because of a race with exactly one symptom, and it is the
@@ -330,10 +354,18 @@ class Speaker:
         def stale() -> bool:
             return self._cancel or generation != self._generation
 
+        entry = [text, time.monotonic(), None]
+
         def run() -> None:
             if stale():
                 return
-            self._player.play(path, True, config.TTS_TIMEOUT_S + 30, stale)
+            self.audible_since = time.monotonic()
+            self._said.append(entry)
+            try:
+                self._player.play(path, True, config.TTS_TIMEOUT_S + 30, stale)
+            finally:
+                self.audible_since = None
+                entry[2] = time.monotonic()
 
         await asyncio.to_thread(run)
 
@@ -371,7 +403,7 @@ class Speaker:
                 break
 
             try:
-                await self._play(path)
+                await self._play(path, chunks[index])
             except Exception as exc:
                 self._report_failure(exc)
                 break
@@ -657,6 +689,7 @@ class SpeechStream:
             speaker._note_playback_start()
             synth: asyncio.Future | None = None
             path: str | None = None
+            synth_text = playing_text = ""
             try:
                 while not speaker._cancel:
                     if synth is None:
@@ -664,6 +697,7 @@ class SpeechStream:
                         if text is None:
                             break
                         synth = asyncio.ensure_future(speaker._synthesise(text))
+                        synth_text = text
 
                     try:
                         path = await synth
@@ -676,6 +710,7 @@ class SpeechStream:
                             break
                         continue
                     synth = None
+                    playing_text = synth_text
 
                     # If the next sentence has already landed, start
                     # synthesising it now so it overlaps with this playback.
@@ -685,12 +720,13 @@ class SpeechStream:
                             self._closed = True
                         else:
                             synth = asyncio.ensure_future(speaker._synthesise(nxt))
+                            synth_text = nxt
 
                     if speaker._cancel:
                         break
 
                     try:
-                        await speaker._play(path)
+                        await speaker._play(path, playing_text)
                     except Exception as exc:
                         speaker._report_failure(exc)
                         break

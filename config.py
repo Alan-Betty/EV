@@ -373,6 +373,46 @@ BARGE_IN_GRACE_S = _env_float("EV_BARGE_IN_GRACE_S", 0.6)
 # of `listen`, and they have to start the sentence again - which is precisely
 # the thing barge-in exists to avoid.
 BARGE_IN_KEEP_AUDIO = _env_bool("EV_BARGE_IN_KEEP_AUDIO", True)
+# How much louder than E.V.'s own echo the microphone has to get before it
+# counts as the user talking over it. The echo is measured per reply, on a
+# lag (BARGE_IN_ECHO_LAG_S), so the reference is "how loud E.V. was a moment
+# ago" - which the user starting to talk raises, and E.V. carrying on does
+# not. `BARGE_IN_LEVEL_MULTIPLIER` above is measured against the *room*, and
+# loudspeakers beat the room every time, which is how E.V. came to interrupt
+# itself and answer its own words.
+BARGE_IN_ECHO_MARGIN = _env_float("EV_BARGE_IN_ECHO_MARGIN", 1.3)
+BARGE_IN_ECHO_LAG_S = _env_float("EV_BARGE_IN_ECHO_LAG_S", 0.8)
+# Once the voiceprint is sure it is the user (score above
+# VOICE_CONFIDENT_SCORE), this smaller margin is enough. The better E.V.
+# knows the voice, the less the user has to shout over it.
+BARGE_IN_ECHO_MARGIN_KNOWN = _env_float("EV_BARGE_IN_ECHO_MARGIN_KNOWN", 1.05)
+
+# Learn the user's voice, and E.V.'s own voice as the microphone hears it
+# through the speakers (see ev/voice.py). Used to tell an interruption from an
+# echo. Off = barge-in falls back to loudness alone.
+VOICE_LEARN = _env_bool("EV_VOICE_LEARN", True)
+# Voiced frames (30ms each) of *both* voices before the voiceprint is
+# allowed an opinion. ~300 is about nine seconds of speech each.
+VOICE_MIN_FRAMES = _env_int("EV_VOICE_MIN_FRAMES", 300)
+# How slowly the voiceprint adapts once trained: roughly how many frames of
+# new speech it takes for an old voice to fade out. 6000 is three minutes.
+VOICE_ADAPT_FRAMES = _env_int("EV_VOICE_ADAPT_FRAMES", 6000)
+# Mean log-likelihood ratio (user over echo) at or below which a barge-in is
+# refused as E.V.'s own voice, and the one above which the user is trusted
+# with the smaller margin.
+VOICE_BARGE_IN_MIN_SCORE = _env_float("EV_VOICE_BARGE_IN_MIN_SCORE", 0.0)
+VOICE_CONFIDENT_SCORE = _env_float("EV_VOICE_CONFIDENT_SCORE", 2.0)
+VOICE_SAVE_INTERVAL_S = _env_float("EV_VOICE_SAVE_INTERVAL_S", 60.0)
+# Seconds of microphone audio kept in memory for the voiceprint to read. At
+# 16 kHz that is ~32 KB a second.
+VOICE_HISTORY_S = _env_float("EV_VOICE_HISTORY_S", 12.0)
+
+# A transcript that repeats what E.V. said within this many seconds is E.V.
+# hearing itself, and is dropped. Judged only at SELF_ECHO_MIN_WORDS or more,
+# when at least SELF_ECHO_MATCH of the words appear in order in E.V.'s speech.
+SELF_ECHO_WINDOW_S = _env_float("EV_SELF_ECHO_WINDOW_S", 4.0)
+SELF_ECHO_MIN_WORDS = _env_int("EV_SELF_ECHO_MIN_WORDS", 3)
+SELF_ECHO_MATCH = _env_float("EV_SELF_ECHO_MATCH", 0.6)
 
 # Short replies repeat constantly, and synthesis is a ~0.8s network round
 # trip. Caching them on disk makes a repeat reply play more or less instantly.
@@ -1018,6 +1058,8 @@ TURN_TIMING = _env_bool("EV_TURN_TIMING", False)
 STATE_DIR = Path(_env("EV_STATE_DIR") or (BASE_DIR / ".cache" / "state"))
 MEMORY_FILE = Path(_env("EV_MEMORY_FILE") or (STATE_DIR / "memory.json"))
 BACKLOG_FILE = Path(_env("EV_BACKLOG_FILE") or (STATE_DIR / "backlog.json"))
+# The learned voiceprint - see VOICE_LEARN.
+VOICE_FILE = Path(_env("EV_VOICE_FILE") or (STATE_DIR / "voice.json"))
 # Cookies and logins for `browser_task`, so a web errand starts signed in to
 # the things the user is signed in to. See BROWSER_PERSIST_PROFILE above.
 BROWSER_PROFILE_DIR = Path(

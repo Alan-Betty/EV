@@ -11,6 +11,7 @@ pygame - the difference is tens of megabytes of resident memory.
 
 from __future__ import annotations
 
+import collections
 import contextlib
 import io
 import logging
@@ -124,6 +125,98 @@ def _no_backend_message(failures: list[str]) -> str:
     return f"No microphone backend. {hint}. ({detail})"
 
 
+def _pactl(*args: str) -> str:
+    """Run `pactl`, returning stdout, or "" if it is missing or fails."""
+    import shutil
+    import subprocess
+
+    if shutil.which("pactl") is None:
+        return ""
+    try:
+        done = subprocess.run(
+            ["pactl", *args], capture_output=True, text=True, timeout=3
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return done.stdout if done.returncode == 0 else ""
+
+
+def is_monitor_source(name: str) -> bool:
+    """Is this capture source a *speaker monitor* - the system's own output?
+
+    PulseAudio and PipeWire both name a sink's loopback `<sink>.monitor`.
+    Recording one records whatever is playing: videos, music, and E.V.'s own
+    voice at full digital level.
+    """
+    return name.strip().endswith(".monitor")
+
+
+def capture_sources() -> list[str]:
+    """Every capture source the sound server offers, monitors included."""
+    names = []
+    for line in _pactl("list", "short", "sources").splitlines():
+        fields = line.split("\t")
+        if len(fields) >= 2 and fields[1].strip():
+            names.append(fields[1].strip())
+    return names
+
+
+def default_capture_source() -> str:
+    source = _pactl("get-default-source").strip()
+    if source:
+        return source
+    # Older pactl has no get-default-source; `info` has carried it forever.
+    for line in _pactl("info").splitlines():
+        if line.startswith("Default Source:"):
+            return line.split(":", 1)[1].strip()
+    return ""
+
+
+def resolve_capture_source(device: str = "") -> str:
+    """The microphone to record from. Never a speaker monitor unless asked.
+
+    E.V. used to record from whatever the system default input was, and on
+    this kind of machine that can be the *speaker monitor* - set by an app,
+    a screen recorder, or a settings click long forgotten. E.V. then heard
+    the screen instead of the user: every video, and its own replies at full
+    digital level, which it barged in on and answered in a loop. Every other
+    app worked, because every other app was asked to use a microphone.
+
+    So an empty `EV_INPUT_DEVICE` now means "the user's microphone", resolved
+    here and pinned explicitly, never "whatever the default is". A monitor is
+    only ever recorded when `EV_INPUT_DEVICE` names one - which is the user
+    asking for it. Returns "" where there is no sound server to ask (Windows,
+    or no `pactl`), which leaves the backends on their own defaults.
+    """
+    if device or IS_WINDOWS:
+        return device
+    sources = capture_sources()
+    if not sources:
+        return ""
+    microphones = [name for name in sources if not is_monitor_source(name)]
+    default = default_capture_source()
+    if default in microphones:
+        return default
+    if not microphones:
+        raise AudioError(
+            "The only audio inputs are speaker monitors, so E.V. would hear "
+            "the screen rather than you. Connect or enable a microphone, or "
+            "set EV_INPUT_DEVICE to choose an input deliberately."
+        )
+    # Built-in and USB inputs before Bluetooth: a headset in its
+    # high-quality playback profile often has no working input at all.
+    microphones.sort(key=lambda name: (not name.startswith("alsa_input"), name))
+    chosen = microphones[0]
+    if default:
+        log.warning(
+            "System default input is %s (%s); recording from %s instead",
+            default,
+            "a speaker monitor" if is_monitor_source(default) else "unavailable",
+            chosen,
+        )
+    return chosen
+
+
 class _CommandStream:
     """Raw mono int16 PCM read from a recorder subprocess's stdout.
 
@@ -228,6 +321,9 @@ class Microphone:
         self._backend = ""
         self._stream = None
         self._pyaudio = None
+        # The capture source actually in use, when the sound server named one
+        # - see `resolve_capture_source`. Empty on Windows.
+        self.source = ""
         self._lock = threading.Lock()
         # Roughly ten seconds of frames; far more than any consumer needs.
         self._queue: "queue.Queue[tuple[bytes, float]]" = queue.Queue(
@@ -244,6 +340,14 @@ class Microphone:
         # Set by `hold_audio()`. The next `listen()` keeps what is already
         # queued instead of flushing it - see that method.
         self._hold = False
+        # The last few seconds of raw audio with when each frame arrived,
+        # whatever else is happening. The queue above is consumed and
+        # flushed; this is not, so the voiceprint can read what was heard
+        # during a reply after the fact - see `recent_audio`.
+        self._history: "collections.deque[tuple[float, bytes]]" = collections.deque(
+            maxlen=max(16, int(config.VOICE_HISTORY_S * 1000 / config.FRAME_MS))
+        )
+        self._history_lock = threading.Lock()
 
     # -- lifecycle --------------------------------------------------------
     def open(self) -> None:
@@ -254,11 +358,18 @@ class Microphone:
         # well - the pip wheel was there, the *system* PortAudio it loads was
         # not, and that sentence was sitting in a debug log nobody had on.
         failures: list[str] = []
-        for backend, opener in (
+        self.source = resolve_capture_source(config.INPUT_DEVICE.strip())
+        backends = [
             ("sounddevice", self._open_sounddevice),
             ("pyaudio", self._open_pyaudio),
             ("command", self._open_command),
-        ):
+        ]
+        if self.source and not config.INPUT_DEVICE.strip():
+            # PortAudio and PyAudio on Linux go through ALSA's "default",
+            # which the sound server routes to the default source - the very
+            # monitor being avoided. The recorders take the source by name.
+            backends.insert(0, backends.pop())
+        for backend, opener in backends:
             try:
                 opener()
             except Exception as exc:
@@ -268,6 +379,8 @@ class Microphone:
             self._backend = backend
             if failures:
                 log.info("Microphone on %s (%s)", self._capture_name(), "; ".join(failures))
+            else:
+                log.info("Microphone on %s", self._capture_name())
             break
         else:
             raise AudioError(_no_backend_message(failures))
@@ -302,6 +415,8 @@ class Microphone:
             # Decays rather than resetting, so a peak survives the gaps
             # between syllables but not the gap between sentences.
             self._recent_peak = max(level, self._recent_peak * 0.92)
+            with self._history_lock:
+                self._history.append((time.monotonic(), frame))
 
             if self._muted:
                 # Still measured above, never queued here: the levels are what
@@ -349,6 +464,18 @@ class Microphone:
         the user from the loopback is that the user is louder.
         """
         return self._recent_peak
+
+    def recent_audio(self, frames: int) -> bytes:
+        """The last `frames` frames heard, as one PCM block. Never flushed."""
+        with self._history_lock:
+            tail = list(self._history)[-frames:] if frames > 0 else []
+        return b"".join(frame for _, frame in tail)
+
+    def audio_between(self, start: float, end: float) -> bytes:
+        """Everything heard between two `time.monotonic()` readings."""
+        with self._history_lock:
+            held = list(self._history)
+        return b"".join(frame for at, frame in held if start <= at <= end)
 
     def hold_audio(self) -> None:
         """Keep what is already queued for the next `listen()`.
@@ -488,14 +615,17 @@ class Microphone:
         if IS_WINDOWS:
             raise AudioError("no recorder command on Windows")
         stream = _CommandStream.first_available(
-            self.sample_rate, self.frame_bytes, config.INPUT_DEVICE.strip()
+            self.sample_rate, self.frame_bytes, self.source or config.INPUT_DEVICE.strip()
         )
         self._stream = stream
 
     def _capture_name(self) -> str:
-        if isinstance(self._stream, _CommandStream):
-            return self._stream.name
-        return self._backend
+        name = (
+            self._stream.name
+            if isinstance(self._stream, _CommandStream)
+            else self._backend
+        )
+        return f"{name} from {self.source}" if self.source else name
 
     def close(self) -> None:
         self._reading = False
