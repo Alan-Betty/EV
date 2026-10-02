@@ -48,6 +48,9 @@ def _reset_guard(monkeypatch):
     # The face is a real Qt process on a real display. A test that reaches
     # `EV.start` must not leave one floating on the desktop of whoever ran it.
     monkeypatch.setattr(config, "FACE_ENABLED", False, raising=False)
+    # Learned hearing lives in STATE_DIR like the audit log, and the suite
+    # must neither read the user's real one nor teach it test sentences.
+    monkeypatch.setattr(config, "STT_LEARN", False, raising=False)
     guard.reset()
     yield
     guard.reset()

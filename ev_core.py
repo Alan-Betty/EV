@@ -62,6 +62,7 @@ from ev.session import (
 from ev.stt import Transcriber, TranscriptionError, Transcript
 from ev.tts import Speaker, SpeechStream, clean_for_speech
 from ev.ui import UI
+from ev.hearing import get_hearing
 from ev.voice import VoiceProfile, get_voice_profile, is_self_echo
 from tools import CANCELLABLE, CancelToken, ToolResult, dispatch, from_model
 from tools.computer_use import close_vision_client
@@ -276,11 +277,30 @@ class EV:
 
         # One standing block, assembled once. It is in the system prompt on
         # every turn, so each piece has to earn its tokens.
-        pieces = [report.context, self.memory.context(), self.backlog.context()]
+        pieces = [
+            report.context, self.memory.context(), self.backlog.context(),
+            self._face_context(),
+        ]
         self.brain.session_context = " ".join(piece for piece in pieces if piece)
 
         self.transcriber.set_hints(self._stt_hints())
         return report
+
+    def _face_context(self) -> str:
+        """One line when the face is *not* on screen, and nothing when it is.
+
+        The prompt tells the model it has a face, and it believes that - so
+        on a machine without PySide6 or a display it would cheerfully run a
+        demo nobody can see. Said only in the exceptional case, because the
+        usual one costs tokens on every turn to state what the prompt already
+        does.
+        """
+        if self.face.alive:
+            return ""
+        return (
+            "Your face is not on screen this session, so moods and demos "
+            "cannot be seen; say so if asked to show one."
+        )
 
     def _stt_hints(self) -> list[str]:
         """Proper nouns this machine is likely to hear, for the STT prompt.
@@ -421,6 +441,7 @@ class EV:
         self.memory.end_session(clean=True)
         if self.voice is not None:
             self.voice.save()
+        self.transcriber.save()
         await self._http.aclose()
         # The vision client is opened lazily by the first screenshot and may
         # never exist at all; closing it is a no-op when it does not.
@@ -514,6 +535,28 @@ class EV:
         else:
             self.face.event("listening" if listening else "idle")
 
+    def _emote(self, mood: str, spoken: str) -> None:
+        """Put the mood the model chose for a reply on the face.
+
+        Sent *after* "speaking", and as a transient rather than a base: the
+        loop's states go on arriving underneath it - speaking, then
+        listening - and are queued behind the expression instead of wiping
+        it, so it lasts about as long as the sentence takes to say and then
+        hands back. "demo" is the one value that is not a mood; it plays them
+        all, captioned, and runs on past the reply.
+        """
+        mood = str(mood or "").strip().lower()
+        if not mood or mood == "neutral":
+            return
+        self.face.show(True)
+        if mood == "demo":
+            self.face.demo()
+            return
+        # ~3 spoken words a second, plus a beat for the face to be seen
+        # once the voice has stopped.
+        words = len(str(spoken or "").split())
+        self.face.emote(mood, min(10.0, max(2.5, 1.5 + words / 3.0)))
+
     def _face_heard(self, text: str) -> None:
         """An addressed line: bring the face in and caption it."""
         self.face.show(True)
@@ -561,12 +604,15 @@ class EV:
                     await monitor
             self._learn_echo(state)
 
-    async def say(self, text: str) -> None:
+    async def say(self, text: str, mood: str = "") -> None:
         """Print and speak a reply, interruptible by the user talking over it.
 
         `spoken` is computed once and used for both the panel and the speaker.
         The UI is handed the finished string and adds its decoration on its own
         side, so no label the terminal draws can ever reach synthesis.
+
+        `mood` is the expression the model chose for this reply - see
+        `_emote`. Empty leaves the face to the loop's own states.
         """
         spoken = clean_for_speech(text)
         if not spoken:
@@ -583,6 +629,7 @@ class EV:
         self.face.show(True)
         self.face.event("speaking")
         self.face.said(spoken)
+        self._emote(mood, spoken)
 
         # Lapped before playback rather than after: what matters is how long
         # the user waited for the first sound, not how long the sentence
@@ -899,8 +946,11 @@ class EV:
         # Names and jargon carry across a conversation, and Whisper reads the
         # decoding prompt as text immediately preceding the audio. Fed here
         # rather than at transcription time, so only words that were actually
-        # meant for E.V. shape what it expects to hear next.
-        if transcript and not getattr(transcript, "rejected", False):
+        # meant for E.V. shape what it expects to hear next - and so only the
+        # user's own speech teaches `ev.hearing` anything. A rejected one is
+        # fed too: it is never used as context, but it marks the clear repeat
+        # that usually follows as a correction worth learning from.
+        if transcript:
             self.transcriber.note_transcript(transcript)
 
         # Checked only once E.V. knows it was being spoken to. A rejected
@@ -926,16 +976,31 @@ class EV:
             # `match_intent` above is exact, so "hey, wake up" and "EV, you
             # awake?" both fall through it. A second, looser pass catches
             # them: standby has no real commands, so nothing can be swallowed.
-            if is_resume_phrase(command or transcript):
+            #
+            # The name on its own is enough, and so is anything that sounds
+            # close to it - see `wake.summons`. Being called by name is the
+            # most natural way there is to get somebody's attention back, and
+            # insisting on "wake up" on top of it is a password, not a
+            # conversation.
+            called = wake.summons(str(transcript))
+            if called.matched or is_resume_phrase(command or transcript):
+                rest = called.command
+                if rest and not is_resume_phrase(rest):
+                    # "E.V., open Chrome" from standby: come back and do it.
+                    # The reply to the command is the acknowledgement; a
+                    # "Back." in front of it would only be in the way.
+                    self.session.resume()
+                    self.face.event("wake")
+                    await self.handle(
+                        rest, uncertain=getattr(transcript, "uncertain", False)
+                    )
+                    return
                 await self._handle_intent(Intent.RESUME)
                 return
             # Drawn, never spoken - answering aloud would defeat standby. But
             # echoing the user's words and then saying nothing at all is what
             # makes this look broken rather than asleep.
-            self.ui.note(
-                f"Still in standby. Say 'wake up', or "
-                f"'{config.WAKE_PHRASES[0]}, wake up', to bring me back."
-            )
+            self.ui.note("Still in standby. Say my name, or 'wake up', to bring me back.")
             return  # asleep; that was not for us
 
         if not command:
@@ -993,7 +1058,7 @@ class EV:
             self.session.enter_standby()
             self.face.event("standby")
             await self.say(response_for(intent))
-            self.ui.note("Standing by. Say 'wake up' or 'E.V., wake up' to resume.")
+            self.ui.note("Standing by. Say my name or 'wake up' to resume.")
             return
 
         if intent is Intent.RESUME:
@@ -1135,6 +1200,9 @@ class EV:
         # an empty panel reads as a crash.
         self.ui.speech(reply or stream.spoken or "(nothing came back)")
         self.face.said(reply or stream.spoken)
+        # The mood arrives with the finished call, a sentence or so after the
+        # voice started - early enough to be on the face while it talks.
+        self._emote(str(call.arguments.get("mood", "")), reply or stream.spoken)
 
         clock = self._clock
         self._clock = None
@@ -1392,8 +1460,13 @@ class EV:
                 await self._resolve_pending(reply)
             return
 
-        self.face.event("success" if result.ok else "error")
-        await self.say(result.speech)
+        # A chat reply that chose its own expression wears that instead of
+        # the stock success smile - "look angry" answered with a grin would
+        # be the face contradicting the words.
+        mood = str(call.arguments.get("mood", "")) if call.name == "chat" else ""
+        if not mood:
+            self.face.event("success" if result.ok else "error")
+        await self.say(result.speech, mood=mood)
         # Speech and observation go to different channels. Putting the machine
         # detail in the assistant role is what taught the model to say
         # "Spoke:" out loud - see `ev.brain`.
@@ -1727,6 +1800,8 @@ def check_config() -> int:
 
     if config.VOICE_LEARN:
         notes.append(f"OK   voice: {get_voice_profile().describe()}")
+        if config.STT_LEARN:
+            notes.append(f"OK   hearing: {get_hearing().describe()}")
     else:
         notes.append("WARN voice: not learning (EV_VOICE_LEARN=false)")
 

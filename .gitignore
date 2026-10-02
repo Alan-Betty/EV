@@ -23,3 +23,7 @@ models/*.bin
 Thumbs.db
 desktop.ini
 .env.pre-speedup
+
+# SECRET
+devlog.md
+test.md

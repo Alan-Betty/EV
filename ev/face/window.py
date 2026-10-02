@@ -183,6 +183,7 @@ class FaceWindow(QWidget):
         self._timer.timeout.connect(self._step)
 
         self.caption = CaptionWindow(size, caption_s, x11_bypass) if captions else None
+        expression.on_reel = self._on_reel
 
         # The probes are subprocesses, so they run on a thread of their own
         # and only their answer crosses into Qt - a slow `gdbus` must cost a
@@ -226,8 +227,25 @@ class FaceWindow(QWidget):
                 self._busy_seen = ""
             time.sleep(interval)
 
+    def refresh_presence(self) -> None:
+        """Re-decide visibility - after a demo starts, or once it ends."""
+        self._apply_presence()
+
+    def _on_reel(self, name: str, position: int, total: int) -> None:
+        """One step of the demo: name the mood under the face showing it."""
+        self.caption_said(f"{name}  ({position}/{total})")
+        if position >= total:
+            # The summons may have lapsed while the reel was on; once the
+            # last mood has played out, the presence rule decides again.
+            QTimer.singleShot(int(self.expression.demo_left_s * 1000) + 150,
+                              self._apply_presence)
+
     def _apply_presence(self, animate: bool = True) -> None:
-        want = self._summoned and not self._busy
+        # A demo was asked for, so it is shown through to the end even if the
+        # conversation lapses half way - a reel that vanishes at step nine is
+        # a demo of the face disappearing. Busy still wins: full-screen video
+        # is not the moment, whoever asked.
+        want = (self._summoned or self.expression.demo_running) and not self._busy
         if want == self._shown and (want == self.isVisible()):
             return
         self._shown = want
@@ -545,6 +563,10 @@ def route_line(window: "FaceWindow | None", line: str) -> None:
         window.caption_heard(str(message["heard"]))
     if message.get("say"):
         window.caption_said(str(message["say"]))
+    if message.get("demo"):
+        # `apply_command` has already loaded the reel; the window only has to
+        # be up for it, since a hidden face does not tick and would not play.
+        window.refresh_presence()
 
 
 class StdinBridge:

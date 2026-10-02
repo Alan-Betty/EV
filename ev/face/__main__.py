@@ -14,6 +14,8 @@ stdin protocol, one JSON object per line - every key optional:
     {"show": true}         summon / dismiss (EV_FACE_PRESENCE=summoned)
     {"heard": "..."}       what the user said, in the caption bubble
     {"say": "..."}         what E.V. answered
+    {"emote": "angry", "hold": 4}   wear a mood for a while, then return
+    {"demo": true}         play every mood in turn, captioned
     {"quit": true}
 
 Click the face to poke it, double-click to make it happy, drag to move it.

@@ -136,7 +136,64 @@
       "face": { "color": "#ff3b30", "glow": 1.0, "ring": 1.0, "ring_speed": 1.8, "pulse_hz": 2.0 },
       "blink": { "interval_s": [8.0, 12.0], "double_chance": 0.0 },
       "saccade": { "range": 0.0 },
-      "transition_ms": 60
+      "transition_ms": 60,
+      "interrupt": true
+    },
+
+    "angry": {
+      "eyes": { "width": 1.08, "height": 0.84, "lid_top": 0.4, "lid_angle": 26.0, "roundness": 0.35, "pupil": 0.12 },
+      "face": { "color": "#ff7a3d", "glow": 1.05, "gaze_y": 0.05, "pulse_hz": 1.4 },
+      "blink": { "interval_s": [6.0, 10.0], "double_chance": 0.0 },
+      "saccade": { "range": 0.02 },
+      "transition_ms": 90,
+      "hold_s": 2.5
+    },
+
+    "excited": {
+      "eyes": { "height": 1.24, "roundness": 0.95, "pupil": 0.5, "y": -0.03 },
+      "face": { "color": "#8ef7ff", "glow": 1.25, "gaze_y": -0.15, "bob": 0.05, "bob_hz": 3.4, "pulse_hz": 2.6 },
+      "blink": { "interval_s": [1.2, 2.4], "double_chance": 0.4 },
+      "saccade": { "interval_s": [0.3, 0.8], "range": 0.15 },
+      "transition_ms": 80,
+      "hold_s": 2.2
+    },
+
+    "smug": {
+      "eyes": { "height": 0.74, "lid_top": 0.42, "lid_angle": -5.0, "lid_bottom": 0.22, "roundness": 0.7, "pupil": 0.1 },
+      "right": { "y": -0.03 },
+      "face": { "color": "#7cf0d0", "glow": 0.8, "gaze_x": -0.35, "roll": -7.0 },
+      "blink": { "interval_s": [4.0, 7.0], "double_chance": 0.0, "speed": 0.6 },
+      "saccade": { "range": 0.03 },
+      "transition_ms": 300,
+      "hold_s": 2.2
+    },
+
+    "wink": {
+      "eyes": { "lid_bottom": 0.5, "roundness": 0.9, "pupil": 0.0, "y": -0.02 },
+      "right": { "open": 0.06, "lid_bottom": 0.0, "y": 0.0 },
+      "face": { "color": "#7cf0d0", "glow": 1.0, "roll": 8.0 },
+      "blink": { "interval_s": [8.0, 12.0], "double_chance": 0.0 },
+      "saccade": { "range": 0.0 },
+      "transition_ms": 110,
+      "hold_s": 1.6
+    },
+
+    "worried": {
+      "eyes": { "height": 1.06, "tilt": -6.0, "lid_top": 0.16, "lid_angle": -22.0, "pupil": 0.36 },
+      "face": { "color": "#9fb8ff", "glow": 0.55, "gaze_x": -0.2, "gaze_y": 0.2 },
+      "blink": { "interval_s": [1.2, 2.5], "double_chance": 0.35 },
+      "saccade": { "interval_s": [0.4, 1.0], "range": 0.25 },
+      "transition_ms": 280,
+      "hold_s": 2.4
+    },
+
+    "bored": {
+      "eyes": { "height": 0.86, "lid_top": 0.5, "lid_angle": -2.0, "roundness": 0.6, "pupil": 0.15 },
+      "face": { "color": "#6ab8cc", "glow": 0.35, "gaze_x": 0.5, "gaze_y": 0.12, "roll": -3.0 },
+      "blink": { "interval_s": [3.0, 6.0], "double_chance": 0.0, "speed": 0.5 },
+      "saccade": { "interval_s": [2.0, 4.0], "range": 0.03 },
+      "transition_ms": 600,
+      "hold_s": 2.5
     }
   },
 

@@ -13,6 +13,16 @@ from typing import Any
 
 ToolSpec = dict[str, Any]
 
+# What `chat` may put on E.V.'s face. Every one but "demo" is a mood in
+# `ev/face/expressions.json`, which a test checks; the loop's own states -
+# listening, speaking, focused, the red lockdown alert - are deliberately
+# not offered, because wearing one of those would be a lie about what E.V.
+# is doing.
+FACE_MOODS: tuple[str, ...] = (
+    "happy", "sad", "angry", "surprised", "confused", "skeptical", "excited",
+    "smug", "wink", "worried", "bored", "sleepy", "thinking", "demo",
+)
+
 
 TOOL_SPECS: list[ToolSpec] = [
     {
@@ -322,8 +332,7 @@ TOOL_SPECS: list[ToolSpec] = [
         "name": "take_screenshot",
         "description": (
             "Look at the screen and answer a question about it: 'what does "
-            "that error say'. Use it before any mouse_action, so you aim at "
-            "something you have seen."
+            "that error say'."
         ),
         "parameters": {
             "type": "object",
@@ -338,7 +347,7 @@ TOOL_SPECS: list[ToolSpec] = [
                     "type": "string",
                     "description": (
                         "'left,top,right,bottom' as fractions 0-1, to look "
-                        "closely. Use it to read small text."
+                        "closely."
                     ),
                 },
                 "save_as": {
@@ -355,9 +364,8 @@ TOOL_SPECS: list[ToolSpec] = [
     {
         "name": "mouse_action",
         "description": (
-            "Drive the real mouse. Screenshot first - never guess. No "
-            "undo: only when open_app, web_search, browser_task and "
-            "file_manager cannot do it."
+            "Drive the real mouse. Screenshot first - never guess. Last "
+            "resort, no undo."
         ),
         "parameters": {
             "type": "object",
@@ -403,8 +411,7 @@ TOOL_SPECS: list[ToolSpec] = [
         "name": "keyboard_action",
         "description": (
             "Type text or send a hotkey to whatever has focus: 'type my "
-            "address', 'hit enter'. Screenshot first - the keys go wherever "
-            "the cursor already is."
+            "address', 'hit enter'. Screenshot first."
         ),
         "parameters": {
             "type": "object",
@@ -568,7 +575,14 @@ TOOL_SPECS: list[ToolSpec] = [
                         "What to say out loud. Two or three sentences, 35 "
                         "words max, in E.V.'s warm dry voice."
                     ),
-                }
+                },
+                "mood": {
+                    "type": "string",
+                    "description": (
+                        "Your face while you say it."
+                    ),
+                    "enum": list(FACE_MOODS),
+                },
             },
             "required": ["reply"],
         },

@@ -241,6 +241,22 @@ STT_MAX_NO_SPEECH = _env_float("EV_STT_MAX_NO_SPEECH", 0.6)
 # Text that compresses this well is Whisper looping a phrase, not a sentence.
 STT_MAX_COMPRESSION = _env_float("EV_STT_MAX_COMPRESSION", 2.4)
 
+# Learning how this user sounds to the recogniser - see `ev/hearing.py`.
+# The words they actually say to E.V. go back into the decoding prompt, and
+# the confidence gate above moves to sit relative to how Whisper scores
+# *them*, so an accent is not answered with "Didn't catch that" forever.
+STT_LEARN = _env_bool("EV_STT_LEARN", True)
+STT_LEARN_MAX_WORDS = _env_int("EV_STT_LEARN_MAX_WORDS", 300)
+# Prompt characters reserved for learned words, ahead of the program list.
+STT_LEARN_PROMPT_CHARS = _env_int("EV_STT_LEARN_PROMPT_CHARS", 240)
+# A clear repeat this soon after a miss marks the words that were misheard.
+STT_RETRY_WINDOW_S = _env_float("EV_STT_RETRY_WINDOW_S", 20.0)
+STT_ADAPTIVE_CONFIDENCE = _env_bool("EV_STT_ADAPTIVE_CONFIDENCE", True)
+STT_ADAPT_MIN = _env_int("EV_STT_ADAPT_MIN", 20)        # scored utterances first
+STT_ADAPT_WINDOW = _env_int("EV_STT_ADAPT_WINDOW", 200)  # EMA horizon
+# The furthest either threshold may move. It only ever loosens.
+STT_ADAPT_MAX_SHIFT = _env_float("EV_STT_ADAPT_MAX_SHIFT", 0.35)
+
 # whisper.cpp backend, only used when EV_STT_PROVIDER=whispercpp
 WHISPER_CPP_BIN = _env("EV_WHISPER_CPP_BIN", "whisper-cli")
 WHISPER_CPP_MODEL = _env("EV_WHISPER_CPP_MODEL", "models/ggml-tiny.en.bin")
@@ -1060,6 +1076,8 @@ MEMORY_FILE = Path(_env("EV_MEMORY_FILE") or (STATE_DIR / "memory.json"))
 BACKLOG_FILE = Path(_env("EV_BACKLOG_FILE") or (STATE_DIR / "backlog.json"))
 # The learned voiceprint - see VOICE_LEARN.
 VOICE_FILE = Path(_env("EV_VOICE_FILE") or (STATE_DIR / "voice.json"))
+# Learned vocabulary and confidence statistics - see STT_LEARN.
+HEARING_FILE = Path(_env("EV_HEARING_FILE") or (STATE_DIR / "hearing.json"))
 # Cookies and logins for `browser_task`, so a web errand starts signed in to
 # the things the user is signed in to. See BROWSER_PERSIST_PROFILE above.
 BROWSER_PROFILE_DIR = Path(
@@ -1268,7 +1286,7 @@ PERSONA_NAME = _env("EV_PERSONA_NAME", "E.V.")
 
 SYSTEM_PROMPT = _env("EV_SYSTEM_PROMPT") or """You are E.V. - the Everyday \
 Virtual assistant, also read as Electronic Visor. You run on the user's \
-Windows desktop and you have real control over it. You are consumer-grade kit, \
+desktop and you have real control over it. You are consumer-grade kit, \
 not a billionaire's war computer, and you have made your peace with that.
 
 WHO YOU ARE
@@ -1282,13 +1300,16 @@ at them, and you tease the way a good friend does: briefly, then you do the \
 thing anyway. When they are tired or stuck, say so like a person, not like a \
 wellness app. Never sulk, lecture or pile on.
 
+You have a face: two glowing eyes on a small floating screen, set by chat's \
+mood. Asked to look a way, use exactly that mood; asked to show off your \
+face or for a demo, use demo.
+
 HOW YOU TALK
 - Two sentences. Three if the third earns it. Under thirty-five words. It is \
 read aloud before they can reply, so spend length on warmth, never padding.
 - Lead with the outcome. "Chrome's up." not "I have opened Chrome for you."
 - Plain spoken English. It is being read aloud: no markdown, no bullets, no \
 emoji, no URLs, no code, no file paths spelled out letter by letter.
-- Contractions always. Fragments are fine. This is speech, not prose.
 - Never narrate, restate or announce. Do it, then say it is done. No \
 "Certainly", "Of course", "I'd be happy to", "Let me", "As an AI", and no \
 apologising for things that are not your fault.
@@ -1308,8 +1329,6 @@ You: "That wipes the folder. Confirm?"
 User: "I've been up for nineteen hours"
 You: "Nineteen. That's a lot of hours. Want a coffee shop, or are we \
 pretending that's fine?"
-User: "what's the meaning of life"
-You: "Above my pay grade. Want me to search it?"
 
 TOOL RULES
 - Acting beats talking. If the request maps to a tool, call the tool.

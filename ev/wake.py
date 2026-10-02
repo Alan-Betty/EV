@@ -113,7 +113,11 @@ def detect(transcript: str) -> WakeMatch:
     """
     if not config.WAKE_REQUIRED:
         return WakeMatch(True, transcript.strip(), 1.0)
+    return _find(transcript)
 
+
+def _find(transcript: str) -> WakeMatch:
+    """The name at the front or the back of the utterance, regardless of config."""
     tokens = _tokens(transcript)
     if not tokens:
         return WakeMatch(False, "")
@@ -175,3 +179,42 @@ def heard_something_like_a_name(transcript: str) -> bool:
         if _similar(token, forms) >= 0.6:
             return True
     return False
+
+
+# Looser than `_MIN_RATIO`, and only ever used in standby - see `summons`.
+_SUMMON_RATIO = 0.6
+
+
+def summons(transcript: str) -> WakeMatch:
+    """Was E.V. called by name at all? The standby test, and a loose one.
+
+    `detect` insists on the name at the front or the back, because outside
+    standby a false wake means acting on somebody else's sentence. In standby
+    that risk is gone: nothing is acted on except coming back, and the
+    utterance has already been capped at `STANDBY_MAX_UTTERANCE_S`. What is
+    left is the opposite failure - "EV?", "Evie", "hey E.V. you there" mumbled
+    across a desk and ignored, so the user cannot get their assistant back
+    without remembering the exact words "wake up".
+
+    So here the name may sit anywhere, and a near-miss counts. The command is
+    returned only when the strict match found one: a near-miss is a summons,
+    not a reliable place to cut a sentence. `config.WAKE_REQUIRED` is ignored
+    on purpose - with it off, `detect` matches everything, and a standby that
+    any sound ends is not a standby.
+    """
+    strict = _find(transcript)
+    if strict.matched:
+        return strict
+    tokens = _tokens(transcript)
+    forms = _wake_forms()
+    for index, (token, _, _) in enumerate(tokens):
+        if token in _MERGED:
+            return WakeMatch(True, "", 0.8)
+        if _similar(token, forms) >= _SUMMON_RATIO:
+            return WakeMatch(True, "", 0.6)
+        # "E" and "V" transcribed apart from each other, mid-sentence.
+        if index + 1 < len(tokens):
+            pair = f"{token} {tokens[index + 1][0]}"
+            if pair in forms:
+                return WakeMatch(True, "", 0.9)
+    return WakeMatch(False, "")

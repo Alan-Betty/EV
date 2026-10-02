@@ -122,6 +122,18 @@ class FaceLink:
         self._shown = on
         self._send({"show": bool(on)})
 
+    def emote(self, mood: str, hold_s: float = 0.0) -> None:
+        """Wear a mood E.V. chose - not a loop state - for `hold_s` seconds.
+
+        Never deduplicated: "look angry" twice is two scowls.
+        """
+        if mood and mood.strip():
+            self._send({"emote": mood.strip().lower(), "hold": round(max(0.0, hold_s), 2)})
+
+    def demo(self) -> None:
+        """Play every mood in turn, each captioned with its name."""
+        self._send({"demo": True})
+
     def heard(self, text: str) -> None:
         if text and text.strip():
             self._send({"heard": text.strip()})

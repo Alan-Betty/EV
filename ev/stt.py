@@ -19,6 +19,7 @@ import tempfile
 import httpx
 
 import config
+from ev.hearing import HearingProfile, get_hearing
 
 log = logging.getLogger("ev.stt")
 
@@ -73,6 +74,9 @@ class Transcript(str):
     avg_logprob: float
     no_speech: float
     compression: float
+    # Per-user thresholds from `ev.hearing`; None means the configured ones.
+    reject_below: float | None
+    doubt_below: float | None
 
     def __new__(
         cls,
@@ -80,11 +84,15 @@ class Transcript(str):
         avg_logprob: float = 0.0,
         no_speech: float = 0.0,
         compression: float = 0.0,
+        reject_below: float | None = None,
+        doubt_below: float | None = None,
     ) -> "Transcript":
         obj = super().__new__(cls, text)
         obj.avg_logprob = avg_logprob
         obj.no_speech = no_speech
         obj.compression = compression
+        obj.reject_below = reject_below
+        obj.doubt_below = doubt_below
         return obj
 
     @property
@@ -97,8 +105,9 @@ class Transcript(str):
         """Too unreliable to act on. Ask again rather than guess."""
         if not config.STT_CONFIDENCE_GATE or not self.scored:
             return False
+        floor = config.STT_MIN_LOGPROB if self.reject_below is None else self.reject_below
         return (
-            self.avg_logprob < config.STT_MIN_LOGPROB
+            self.avg_logprob < floor
             or self.no_speech > config.STT_MAX_NO_SPEECH
             # Whisper's classic failure is looping a phrase until the buffer
             # ends. The text compresses absurdly well when that happens.
@@ -110,7 +119,10 @@ class Transcript(str):
         """Worth acting on, but worth telling the model it was unclear."""
         if not config.STT_CONFIDENCE_GATE or not self.scored or self.rejected:
             return False
-        return self.avg_logprob < config.STT_UNCERTAIN_LOGPROB
+        doubt = (
+            config.STT_UNCERTAIN_LOGPROB if self.doubt_below is None else self.doubt_below
+        )
+        return self.avg_logprob < doubt
 
     def why(self) -> str:
         """One line for the terminal, explaining a rejection."""
@@ -164,6 +176,9 @@ class Transcriber:
         # the backlog; `ev.stt` stays below `tools` and does not reach up.
         self._hints: list[str] = []
         self._recent = ""
+        # What this user's own speech has taught the recogniser - see
+        # `ev.hearing`. None when learning is off.
+        self.hearing: HearingProfile | None = get_hearing() if config.STT_LEARN else None
 
         if self.provider == "groq" and not config.GROQ_API_KEY:
             raise TranscriptionError(
@@ -201,8 +216,31 @@ class Transcriber:
         Whisper treats the prompt as text immediately preceding the audio, so
         the previous sentence genuinely helps it decode the next one - names
         and jargon carry across a conversation.
+
+        Called only for speech that was addressed to E.V., rejected or not,
+        which is what makes it the right place to learn from: a rejected
+        transcript teaches nothing, but it marks the next clear one as a
+        correction. It never becomes the recent context either way - a
+        mangled sentence in the prompt asks for more of the same.
         """
+        if isinstance(text, Transcript) and self.hearing is not None:
+            try:
+                self.hearing.learn(
+                    str(text),
+                    rejected=text.rejected,
+                    uncertain=text.uncertain,
+                    avg_logprob=text.avg_logprob if text.scored else None,
+                )
+            except Exception as exc:  # learning must never cost a turn
+                log.debug("Could not learn from %r: %s", str(text), exc)
+        if getattr(text, "rejected", False):
+            return
         self._recent = " ".join(str(text or "").split())[:200]
+
+    def save(self) -> None:
+        """Persist what was learned. Blocking; the core calls it off the loop."""
+        if self.hearing is not None:
+            self.hearing.save()
 
     def _prompt(self) -> str:
         """The decoding prompt, trimmed to what Whisper will actually read.
@@ -217,17 +255,40 @@ class Transcriber:
         if not config.STT_DYNAMIC_PROMPT:
             return base
 
-        budget = config.STT_PROMPT_MAX_CHARS - len(base) - len(self._recent) - 4
-        extras: list[str] = []
-        for hint in self._hints:
-            if budget - len(hint) - 2 < 0:
-                break
-            extras.append(hint)
-            budget -= len(hint) + 2
+        budget = config.STT_PROMPT_MAX_CHARS - len(base) - len(self._recent) - 6
+        seen = {word.strip(" .,").lower() for word in base.split(",")}
+
+        def take(words: list[str], allowance: int) -> list[str]:
+            nonlocal budget
+            chosen: list[str] = []
+            for word in words:
+                key = word.lower()
+                cost = len(word) + 2
+                if key in seen:
+                    continue
+                if cost > allowance or cost > budget:
+                    break
+                seen.add(key)
+                chosen.append(word)
+                allowance -= cost
+                budget -= cost
+            return chosen
+
+        # The user's own words are budgeted first, because they are the ones
+        # nothing else knows about, and written after the program list,
+        # because Whisper weights the end of the prompt most.
+        learned = (
+            take(self.hearing.vocabulary(), config.STT_LEARN_PROMPT_CHARS)
+            if self.hearing is not None
+            else []
+        )
+        extras = take(self._hints, budget)
 
         parts = [base]
         if extras:
             parts.append(", ".join(extras) + ".")
+        if learned:
+            parts.append(", ".join(learned) + ".")
         if self._recent:
             parts.append(self._recent)
         return " ".join(parts)
@@ -246,6 +307,9 @@ class Transcriber:
             result = Transcript(text)
         else:
             result = await self._groq(wav_bytes)
+
+        if self.hearing is not None and result.scored:
+            result.reject_below, result.doubt_below = self.hearing.thresholds()
 
         if _is_noise(result):
             log.debug("Discarded likely-noise transcript: %r", str(result))

@@ -219,6 +219,17 @@ resort; chit-chat goes to `chat`) came out, as did an `enum` described in
 prose and `terminal_command`'s list of the tools to use instead. The floor
 is ~3976 - 24 tokens of headroom, so the next tool pays before it lands.
 
+`chat`'s `mood` (see "E.V. knows it has a face") cost ~65 tokens of schema
+and ~30 of prompt, paid by the same method: `mouse_action`,
+`take_screenshot` and `keyboard_action` lost sentences the TOOL RULES
+already say, one tone example and the "Contractions always" bullet came
+out, and "Windows desktop" became "desktop" - which is also simply true on
+Ubuntu. The floor is ~3985, 15 tokens of headroom. The prompt line is
+deliberately explicit ("asked to look a way, use exactly that mood"):
+measured live, the vaguer "give every chat a mood that fits" had
+gpt-oss-20b answer "look angry" with `surprised` and "show me a demo" with
+`happy`.
+
 ### Confirmation and safety
 
 Every confirmation asks **"Confirm?"**, and asks it identically everywhere.
@@ -884,6 +895,39 @@ mode blocks in `input()` and would never notice the lapse, so
 render timer stopped - transparent would still eat clicks and still cost
 frames.
 
+**E.V. knows it has a face.** The prompt says so in one line, and `chat`
+carries an optional `mood` from `tools.schemas.FACE_MOODS` - every reply
+can wear an expression, and "look angry" or "give me a wink" is just a
+`chat` with that mood. `FACE_MOODS` is the moods worth *choosing*: the
+loop's own states (listening, speaking, focused, the red lockdown alert)
+are left out, because wearing one would be a lie about what E.V. is doing,
+and a test checks every value but `demo` exists in `expressions.json`.
+
+The mood travels as `{"emote": name, "hold": s}`, not `{"mood": ...}`, and
+the difference is the whole design. An emote is a *transient* whatever the
+mood's own `hold_s` says, so the base states the loop keeps sending -
+`speaking`, then `listening` - queue behind it instead of wiping it, and it
+hands back on its own after roughly the time the sentence takes to say
+(`EV._emote`). That is also why it is sent *after* `speaking`, and why a
+`chat` with a mood skips the stock `success` smile: a scowl preceded by a
+grin is the face contradicting the words.
+
+`mood: "demo"` sends `{"demo": true}` and the face plays every mood but
+`REEL_SKIP` in turn, captioning each with its name and position. The reel
+lives in `Expression` - pure Python, ticked like everything else - so it is
+testable without Qt. Three things end it early: the user talking (`heard`),
+another emote, and any mood with `interrupt` (lockdown, which now sets it,
+as this file always said it did). A demo keeps the face up through to its
+last mood even if the conversation lapses half way: a hidden face does not
+tick, and a reel that vanished at step nine would be a demo of the face
+disappearing. Busy still wins.
+
+When the face is not running - no PySide6, no display - `_face_context`
+puts one line in `session_context` saying so, because the prompt has told
+the model it has a face and it will otherwise run a demo nobody can see.
+Silent in the normal case, since saying what the prompt already says costs
+tokens on every turn.
+
 **Busy wins over everything.** [ev/face/busy.py](ev/face/busy.py) is polled
 on the face's own thread and can overrule any summons. Windows answers the
 question directly (`SHQueryUserNotificationState`: full screen, D3D,
@@ -1165,6 +1209,8 @@ Wake detection in [ev/wake.py](ev/wake.py) *is* fuzzy, because STT mangles "E.V.
 
 `is_resume_phrase()` is the one deliberate exception to the exact-match rule, and it runs **only in standby**. The risk that makes fuzzy matching wrong everywhere else — swallowing a real request — does not exist there, because standby has exactly two exits and accepts no commands. What it fixes is the opposite failure: "hey, wake up" falling through `match_intent` to a bare `return`, leaving the user with their words echoed, no reply, and no way back in. A non-matching utterance in standby now draws a hint (`ui.note`, never spoken — answering aloud would defeat standby), and anything longer than `STANDBY_MAX_UTTERANCE_S` is dropped before it costs a transcription call.
 
+**The name alone wakes it.** `wake.summons()` is the standby test, and it is looser again than `detect`: the name may sit anywhere in the utterance and a near-miss counts (`_SUMMON_RATIO`, 0.6 - the same bar `heard_something_like_a_name` uses to print a hint). Insisting on "wake up" on top of being called by name made standby a password. `_NEVER_A_NAME` still applies, so "every" and "even" do not wake it, and `config.WAKE_REQUIRED` is deliberately ignored - with it off `detect` matches everything, and a standby any sound ends is not a standby. When the strict match found a command after the name ("E.V., open Chrome"), E.V. resumes and runs it, with no "Back." in front: the reply to the command is the acknowledgement.
+
 ### Silence has to look like silence
 
 An utterance with no wake phrase, once the conversation window has lapsed, is
@@ -1207,6 +1253,13 @@ Whisper reports how sure it was, and E.V. used to throw that away by asking for 
 `Transcriber.transcribe` returns a `Transcript`, a `str` subclass carrying `avg_logprob`, `no_speech` and `compression`. The subclassing is what keeps the change small: every existing call site (`.lower()`, truthiness, `match_intent`, f-strings) works untouched. Note that `str` methods return plain `str`, so the metadata does not survive `.strip()` — read it before slicing, as `_tick` does. Three bands: `rejected` → "Didn't catch that", checked *after* `_extract_command` so an unaddressed utterance stays silent; `uncertain` → run it, but tell the model the words may be wrong; otherwise straight through. Backends that report no confidence (`google`, `whispercpp`) are `scored == False` and the gate leaves them alone.
 
 The decoding prompt is built per-utterance by `Transcriber._prompt()` from hints the core loop supplies — installed programs, user folders, open backlog items — plus the previous transcript last, since Whisper reads the prompt as text immediately preceding the audio and weights the end most. `ev.stt` never reaches up into `tools`; `ev_core._stt_hints()` owns that wiring. The total is capped because Whisper silently drops the front of a prompt over ~224 tokens.
+
+**Hearing adapts to the user** ([ev/hearing.py](ev/hearing.py), `STATE_DIR/hearing.json`). Nothing can be retrained - Whisper is an HTTP call - so "adapting to the voice" means learning the two inputs E.V. controls, from addressed speech only (`note_transcript`, which `_route` calls once it knows the words were for E.V.; typed text is a plain `str` and teaches nothing):
+
+- **Vocabulary.** Recurring non-filler words go into the prompt, budgeted *first* (`STT_LEARN_PROMPT_CHARS`) so 90 installed programs cannot crowd them out, and written *after* the program list because Whisper weights the end. A clear repeat inside `STT_RETRY_WINDOW_S` of a rejected or doubtful transcript is the best evidence there is - the words that changed are the misheard ones - so they count triple. Doubtful transcripts never teach words: learning "obese" from a mangled "OBS" biases the recogniser towards its own mistake. A rejected transcript is fed in for that reason, and is never made the recent context.
+- **The gate.** `STT_MIN_LOGPROB`/`STT_UNCERTAIN_LOGPROB` were measured on a clear speaker. Someone Whisper is consistently less sure of sits on the line and hears "Didn't catch that" half the time, so after `STT_ADAPT_MIN` scored utterances each threshold sits 3σ / 1.5σ under the user's own mean. It **only loosens**, and by at most `STT_ADAPT_MAX_SHIFT`: a stricter gate buys a clear speaker nothing, and an unbounded drift ends up acting on noise. `Transcript.reject_below`/`doubt_below` carry the per-user values, set in `transcribe`; `None` means the configured ones, so a bare `Transcript` in a test behaves exactly as before.
+
+`conftest.py` turns `STT_LEARN` off - the suite must neither read the user's profile nor teach it test sentences - and `tests/test_hearing.py` turns it back on against `tmp_path`. `--check` reports what has been learned.
 
 ### Configuration
 

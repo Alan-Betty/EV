@@ -31,6 +31,7 @@ import json
 import logging
 import math
 import random
+from collections.abc import Callable
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any
@@ -79,6 +80,12 @@ SACCADE_TAU_S = 0.035       # eyes dart; they do not drift
 CURSOR_WEIGHT = 0.7         # how far the cursor pulls the gaze
 FATIGUE_START_S = 45 * 60
 FATIGUE_FULL_S = 3 * 60 * 60
+# The demo reel: how long each mood is held, and the ones left out of it.
+# "neutral" and "idle" look alike, and a reel that spends two steps on a
+# face doing nothing reads as a reel that stalled.
+REEL_STEP_S = 1.3
+REEL_SKIP = frozenset({"neutral", "idle"})
+EMOTE_MAX_S = 30.0
 
 
 @dataclass(slots=True)
@@ -348,6 +355,15 @@ class Expression:
         self._ring_phase = 0.0
         self._changed_at = -10.0
 
+        # The demo reel: moods still to show, and when the next one is due.
+        self._reel: list[str] = []
+        self._reel_total = 0
+        self._reel_next = 0.0
+        self._reel_step = REEL_STEP_S
+        # Told (name, position, total) at each step, so the window can caption
+        # it. Never required: a reel with nobody listening still plays.
+        self.on_reel: Callable[[str, int, int], None] | None = None
+
     # -- input ----------------------------------------------------------
 
     @property
@@ -368,8 +384,61 @@ class Expression:
             self.base = mood
             if mood.interrupt:
                 self.transient = None
+                # Lockdown does not wait for a demo to finish either.
+                self.stop_demo()
         if self.active is not before:
             self._changed_at = self.now
+
+    def emote(self, name: str, hold_s: float | None = None) -> bool:
+        """Wear `name` for `hold_s` seconds, then go back to the base mood.
+
+        What E.V. *chose* to look like, as opposed to what state the loop is
+        in. It is a transient whatever the mood's own `hold_s` says, which is
+        what lets "look sleepy" be shown on demand without leaving the face
+        asleep: the loop's next base state - listening, speaking - is queued
+        behind it rather than cutting it off, exactly as a smile on success
+        is. False for a mood that does not exist, which is ignored rather
+        than drawn as neutral: a typo must not wipe the face.
+        """
+        mood = self.library.moods.get(name.strip().lower())
+        if mood is None:
+            return False
+        if hold_s is None or hold_s <= 0:
+            hold_s = mood.hold_s or 2.5
+        before = self.active
+        self.transient = mood
+        self._transient_until = self.now + min(float(hold_s), EMOTE_MAX_S)
+        if self.active is not before:
+            self._changed_at = self.now
+        return True
+
+    def demo(self, names: list[str] | None = None, step_s: float = REEL_STEP_S) -> int:
+        """Play every mood in turn. Returns how many will be shown."""
+        pool = names or [n for n in self.library.moods if n not in REEL_SKIP]
+        self._reel = [n for n in (x.strip().lower() for x in pool) if n in self.library.moods]
+        self._reel_total = len(self._reel)
+        self._reel_step = max(0.3, float(step_s))
+        self._reel_next = self.now
+        return self._reel_total
+
+    def stop_demo(self) -> None:
+        """End a reel where it is. The mood on screen plays out its hold."""
+        self._reel = []
+        self._reel_total = 0
+
+    @property
+    def demo_running(self) -> bool:
+        return bool(self._reel) or (
+            self._reel_total > 0 and self.transient is not None
+            and self.now < self._transient_until
+        )
+
+    @property
+    def demo_left_s(self) -> float:
+        """Roughly how long the reel has still to run."""
+        if not self.demo_running:
+            return 0.0
+        return len(self._reel) * self._reel_step + max(0.0, self._transient_until - self.now)
 
     def event(self, name: str) -> bool:
         """Map a core event ('thinking', 'success', ...) to a mood. False if unknown."""
@@ -410,9 +479,13 @@ class Expression:
         self.now += dt
         self.session_s += dt
 
+        if self._reel and self.now >= self._reel_next:
+            self._advance_reel()
         if self.transient and self.now >= self._transient_until:
             self.transient = None
             self._changed_at = self.now
+            if not self._reel:
+                self._reel_total = 0
         mood = self.active
 
         tau = max(mood.transition_s / 3.0, 1e-3)
@@ -443,6 +516,17 @@ class Expression:
             pulse = 0.5 + 0.5 * math.sin(2 * math.pi * face.pulse_hz * self.now)
         return Frame(mood=mood.name, left=left, right=right, face=face,
                      t=self.now, ring_phase=self._ring_phase, pulse=pulse)
+
+    def _advance_reel(self) -> None:
+        name = self._reel.pop(0)
+        position = self._reel_total - len(self._reel)
+        self.emote(name, self._reel_step)
+        self._reel_next = self.now + self._reel_step
+        if self.on_reel is not None:
+            try:
+                self.on_reel(name, position, self._reel_total)
+            except Exception as exc:  # a caption must never stop the face
+                log.debug("reel listener failed: %s", exc)
 
     # -- procedural life --------------------------------------------------
 
@@ -487,7 +571,8 @@ def apply_command(expression: Expression, line: str) -> bool:
     """Apply one line of the face's stdin protocol. False means close the face.
 
     One JSON object per line: `{"event": "thinking"}`, `{"mood": "happy"}`,
-    `{"look": [x, y]}` or `{"quit": true}`. A bare word is tried as an event
+    `{"emote": "angry", "hold": 4}`, `{"demo": true}`, `{"look": [x, y]}` or
+    `{"quit": true}`. A bare word is tried as an event
     and then as a mood, which is what makes the pipe usable by hand.
     """
     text = line.strip()
@@ -502,10 +587,28 @@ def apply_command(expression: Expression, line: str) -> bool:
         return True
     if message.get("quit"):
         return False
+    # The user talking is the end of any show: a reel running on under a
+    # new conversation would answer the next question with a wink.
+    if message.get("heard"):
+        expression.stop_demo()
     if "event" in message:
         expression.event(str(message["event"]))
     if "mood" in message:
         expression.set_mood(str(message["mood"]))
+    if message.get("demo"):
+        names = message["demo"] if isinstance(message["demo"], list) else None
+        try:
+            step = float(message.get("step", REEL_STEP_S))
+        except (TypeError, ValueError):
+            step = REEL_STEP_S
+        expression.demo([str(n) for n in names] if names else None, step)
+    if message.get("emote"):
+        expression.stop_demo()
+        try:
+            hold = float(message.get("hold", 0) or 0)
+        except (TypeError, ValueError):
+            hold = 0.0
+        expression.emote(str(message["emote"]), hold)
     word = str(message.get("word", "")).strip().lower()
     # A bare word that is neither an event nor a mood is ignored, not
     # mapped to neutral: a stray line on the pipe must not wipe the face.
