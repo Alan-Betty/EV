@@ -35,13 +35,12 @@ import logging
 import re
 import shutil
 import subprocess
-import sys
 
 from tools.base import IS_WINDOWS, ToolResult
 
 log = logging.getLogger("ev.tools.media")
 
-IS_MAC = sys.platform == "darwin"
+from tools.desktop.system import IS_MAC  # noqa: E402
 TIMEOUT_S = 3.0
 DEFAULT_STEP = 10
 

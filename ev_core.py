@@ -1972,7 +1972,7 @@ def check_config() -> int:
     if config.COMPUTER_USE_ENABLED:
         from tools.computer_use import screen_size
 
-        width, height = screen_size()
+        width, height = screen_size(passive=True)
         if width and height:
             notes.append(f"OK   screen: {width}x{height}")
         else:
@@ -1995,6 +1995,14 @@ def check_config() -> int:
             )
     else:
         notes.append("WARN computer use: disabled (EV_COMPUTER_USE_ENABLED=false)")
+
+    # Which hands, eyes, window list and accessibility API this desktop gets.
+    # All of them degrade quietly at run time, so this is where they are said.
+    if config.COMPUTER_USE_ENABLED or getattr(config, "APP_CONTROL_ENABLED", True):
+        from tools.desktop import check as desktop_check
+
+        for status, text in desktop_check.lines():
+            (problems if status == "MISS" else notes).append(f"{status:<4} {text}")
 
     if config.VISION_ENABLED:
         provider = config.VISION_PROVIDER
@@ -2170,12 +2178,23 @@ def main() -> int:
     parser.add_argument("--say", metavar="COMMAND", help="run one command and exit")
     parser.add_argument("--check", action="store_true", help="check setup and exit")
     parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
+    parser.add_argument(
+        "--install-gnome-extension",
+        action="store_true",
+        help="install E.V.'s window helper for GNOME (exact window positions and focus on Wayland)",
+    )
     args = parser.parse_args()
 
     _configure_logging(args.verbose)
 
     if args.check:
         return check_config()
+    if args.install_gnome_extension:
+        from tools.desktop import gnome
+
+        ok, message = gnome.install()
+        print(message)
+        return 0 if ok else 1
 
     try:
         return asyncio.run(_amain(args))

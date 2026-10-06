@@ -49,6 +49,7 @@ import time
 from typing import Any
 
 import config
+from tools.desktop import system as desktop_system
 from tools.base import CancelToken, ToolResult, was_cancelled
 from tools.browser_automation import browser_task
 from tools.computer_use import (
@@ -75,7 +76,7 @@ from tools import web_agent
 log = logging.getLogger("ev.tools.mission")
 
 
-_MISSION_SYSTEM = """You are E.V., running one whole errand on a Windows \
+_MISSION_SYSTEM = """You are E.V., running one whole errand on a computer \
 desktop by yourself. You are shown the screen with a coordinate grid over it \
 and the list of open windows. You do not click anything yourself: you choose \
 the next sub-goal and a driver carries it out, then you look again.
@@ -533,7 +534,9 @@ def agent_task(
             )
 
             try:
-                reply = _parse_step(ask_vision(frame, prompt, _MISSION_SYSTEM))
+                reply = _parse_step(
+                    ask_vision(frame, prompt, _MISSION_SYSTEM + "\n" + desktop_system.prompt_line())
+                )
             except VisionError as exc:
                 return ToolResult.failure(
                     str(exc), f"agent_task '{goal}' lost vision at round {index}: {exc}"

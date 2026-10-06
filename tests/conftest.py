@@ -51,6 +51,23 @@ def _reset_guard(monkeypatch):
     # Learned hearing lives in STATE_DIR like the audit log, and the suite
     # must neither read the user's real one nor teach it test sentences.
     monkeypatch.setattr(config, "STT_LEARN", False, raising=False)
+    # On a GNOME Wayland machine "auto" opens a real Mutter remote-desktop
+    # session - GNOME's screen-sharing indicator, real injected input - and
+    # on others a real uinput device. Tests that want a backend ask for one.
+    monkeypatch.setattr(config, "INPUT_BACKEND", "pyautogui", raising=False)
+    monkeypatch.setattr(config, "CAPTURE_BACKEND", "mss", raising=False)
+    # The accessibility tier would read the real AT-SPI bus - and on a live
+    # desktop, plan over the user's real windows. Tests of it turn it on
+    # against fakes.
+    monkeypatch.setattr(config, "A11Y_ENABLED", False, raising=False)
+    from tools import window
+    from tools.desktop import hands
+
+    hands.reset()
+    # The window inventory reads the real X server and accessibility bus.
+    # A test that wants windows supplies them.
+    monkeypatch.setattr(window, "_listing_backends", lambda: [])
     guard.reset()
     yield
     guard.reset()
+    hands.reset()

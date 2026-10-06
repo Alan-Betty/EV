@@ -693,6 +693,49 @@ SCREEN_TASK_WAIT_S = _env_float("EV_SCREEN_TASK_WAIT_S", 12.0)
 # the layout at all, and at one keystroke per 10ms a paragraph takes long
 # enough for an autocomplete popup to eat half of it.
 COMPUTER_PASTE_THRESHOLD = _env_int("EV_COMPUTER_PASTE_THRESHOLD", 60)
+# Which hands and eyes drive the desktop. "auto" picks by session: Windows,
+# macOS and X11 use pyautogui and mss as they always have. GNOME on Wayland
+# uses Mutter's own remote-desktop session - an X11 grab there is entirely
+# black and XTest misses every native Wayland window - and other Wayland
+# desktops use a virtual uinput device (needs the 'input' group).
+# Force one with: pyautogui | mutter | uinput, and mss | mutter for capture.
+INPUT_BACKEND = _env("EV_INPUT_BACKEND", "auto").strip().lower()
+CAPTURE_BACKEND = _env("EV_CAPTURE_BACKEND", "auto").strip().lower()
+# How long a Mutter session is kept open after its last use. GNOME shows a
+# "screen is being shared" indicator for as long as it is, so it is closed
+# soon after a task ends rather than left up for the whole session.
+CAPTURE_SESSION_IDLE_S = _env_float("EV_CAPTURE_SESSION_IDLE_S", 30.0)
+
+
+# ---------------------------------------------------------------------------
+# Any application: windows and accessibility (app_control, app_agent)
+# ---------------------------------------------------------------------------
+APP_CONTROL_ENABLED = _env_bool("EV_APP_CONTROL_ENABLED", True)
+# How long a polite close is given to take effect before E.V. looks for the
+# "save changes?" dialog that is usually the reason it did not.
+APP_CLOSE_WAIT_S = _env_float("EV_APP_CLOSE_WAIT_S", 3.0)
+# Reading an application's own description of its controls - AT-SPI on
+# Linux, UI Automation on Windows, System Events on macOS - instead of
+# guessing at pixels. Off means every in-app job goes through vision.
+A11Y_ENABLED = _env_bool("EV_A11Y_ENABLED", True)
+# Chromium, Electron and Qt only publish their controls once something says
+# an assistive technology is listening. On, E.V. says so the first time it
+# finds an empty window; an app already running then needs a restart.
+A11Y_AUTO_ENABLE = _env_bool("EV_A11Y_AUTO_ENABLE", True)
+A11Y_MAX_NODES = _env_int("EV_A11Y_MAX_NODES", 250)
+A11Y_MAX_DEPTH = _env_int("EV_A11Y_MAX_DEPTH", 40)
+# A frozen application blocks every accessibility call made to it, so each
+# one is bounded, and a whole read of a window is bounded again.
+A11Y_CALL_TIMEOUT_S = _env_float("EV_A11Y_CALL_TIMEOUT_S", 1.5)
+A11Y_TREE_TIMEOUT_S = _env_float("EV_A11Y_TREE_TIMEOUT_S", 6.0)
+# What the planner is shown of a window, in characters.
+A11Y_INVENTORY_CHARS = _env_int("EV_A11Y_INVENTORY_CHARS", 2400)
+# A window with fewer operable elements than this is drawn rather than
+# described (a game, a canvas, a remote desktop), and goes to vision.
+A11Y_MIN_ELEMENTS = _env_int("EV_A11Y_MIN_ELEMENTS", 4)
+APP_AGENT_MAX_ROUNDS = _env_int("EV_APP_AGENT_MAX_ROUNDS", 14)
+# Screenshots an accessibility run may take when the tree cannot answer.
+APP_AGENT_LOOK_MAX = _env_int("EV_APP_AGENT_LOOK_MAX", 2)
 
 
 # ---------------------------------------------------------------------------
@@ -1348,12 +1391,11 @@ you do not know where something is, let file_manager 'find' or 'open' look.
 engine mail, calendar or drive and no query. Do not ask which provider.
 - take_screenshot is how you look at the screen - an error, an inbox, what \
 is on it. Use it before any mouse_action; pass region to read small text.
-- mouse_action and keyboard_action drive the real pointer. Last resort, no \
-undo. Coordinates are fractions 0 to 1; always fill in label.
-- screen_task does a whole desktop job: opens apps, focuses windows, clicks \
-and types, looking between steps. "Open Notepad and type hello" is ONE \
-screen_task. agent_task keeps going across apps and pages until the whole \
-errand is done.
+- mouse_action and keyboard_action are a last resort, with no undo.
+- Switching to, closing, minimising or quitting a program is app_control. \
+Changing things inside one is screen_task, which looks between steps: "Open \
+Notepad and type hello" is ONE screen_task. agent_task keeps going across \
+apps and pages until the whole errand is done.
 - You really can take over the screen and browser; a red frame shows the \
 user while you do. Never claim you can't.
 - browser_task beats screen_task on a website: it reads the page, not the \

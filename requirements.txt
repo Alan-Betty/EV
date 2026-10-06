@@ -17,6 +17,15 @@ rich>=13.0                # sci-fi terminal UI: panels, spinners, colour
 pyautogui>=0.9.54         # keystrokes, clicks and drags; the hands
 pynput>=1.7.6             # global push-to-talk hotkey
 
+# Any application: windows, menus, buttons and fields by name, not by pixel.
+# Each is small and imported lazily; without one, that OS's in-app jobs fall
+# back to the vision loop and nothing else changes. macOS needs no package
+# (System Events through osascript).
+jeepney>=0.8 ; sys_platform == "linux"     # pure-Python D-Bus: AT-SPI, and
+                                           # GNOME's own screen/input session
+                                           # on Wayland, where X11 grabs are black
+comtypes>=1.4 ; sys_platform == "win32"    # UI Automation
+
 # --- screen perception ------------------------------------------------------
 # The eyes. There is still no local model here: the frame is grabbed into
 # memory, downscaled, JPEG-encoded and posted to the same endpoint the brain

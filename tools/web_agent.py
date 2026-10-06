@@ -1385,7 +1385,7 @@ def parse_plan(raw: str) -> dict[str, Any]:
 
 
 _ROUTE_SYSTEM = """You decide where one errand should be carried out on a \
-Windows machine. Reply with ONE JSON object and nothing else:
+computer. Reply with ONE JSON object and nothing else:
 
 {"mode": "web", "url": "amazon.in", "why": "shopping happens on a website"}
 {"mode": "desktop", "why": "the volume mixer is not a web page"}

@@ -134,6 +134,10 @@ HIGH_RISK_REASONS: frozenset[str] = frozenset(
         "downloads a file",
         "runs code through another interpreter",
         "runs an installer or a system binary directly",
+        # app_control: closing without saving and killing a process both
+        # lose work that no undo brings back.
+        "discards unsaved work",
+        "force quits a program",
     }
 )
 

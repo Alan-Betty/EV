@@ -230,6 +230,14 @@ measured live, the vaguer "give every chat a mood that fits" had
 gpt-oss-20b answer "look angry" with `surprised` and "show me a demo" with
 `happy`.
 
+`app_control` cost ~172 tokens of schema and a TOOL RULES line, against 15
+of headroom. Paid by compressing argument descriptions that restated the
+enum or the tool description (`mouse_action`'s coordinates and drag ends,
+`keyboard_action`'s action, `take_screenshot`, `web_search`,
+`terminal_command`), `screen_task`'s description, and folding the
+`mouse_action` and `screen_task` prompt bullets into the new one. The floor
+is ~3980, 20 tokens of headroom - lower than before the tool existed.
+
 ### Confirmation and safety
 
 Every confirmation asks **"Confirm?"**, and asks it identically everywhere.
@@ -803,6 +811,80 @@ every sub-tool already honours and - by default, `AGENT_KILL_LOCKS_DOWN` -
 locks E.V. down, because a person reaching for a kill switch means everything,
 not this click. A hotkey with no modifier is refused outright: `RegisterHotKey`
 would take a bare letter and swallow it system-wide for the length of the run.
+
+### Any application: three tiers, cheapest first
+
+"Close the text editor", "switch to Spotify", "turn on dark mode in
+Settings" used to have one route between them: the vision loop, a frame at
+~1900 tokens, and a coordinate read off a grid. On Ubuntu Wayland even that
+did not work - and finding out why is most of this section.
+
+[tools/desktop/](tools/desktop/) splits the job the way the web side was
+split, so vision is the exception rather than the route:
+
+1. **Window tier** - list, focus, close, quit, minimise, maximise, kill,
+   through the OS, with no model call. `tools/window.py` is now a facade
+   over `win32` (user32), `x11` (EWMH over ctypes libX11), `gnome` (E.V.'s
+   own Shell extension) and `atspi`, plus JXA on macOS.
+2. **Accessibility tier** - the app's own description of its controls
+   (AT-SPI over `jeepney`, UI Automation over `comtypes`, System Events),
+   numbered like the browser route's `data-ev` elements. `app_control`
+   acts on one by ref; [tools/app_agent.py](tools/app_agent.py) plans a
+   whole in-app job over it on the planner's text buckets.
+3. **Vision tier** - `screen_task`'s loop, unchanged, reached when the tree
+   cannot do the job and handed what the tree already did as `prior`.
+
+`app_control` is deterministic: it never calls a model. `screen_task` tries
+`app_agent` first and falls to vision on a window that publishes too little
+(`A11Y_MIN_ELEMENTS`), a sandboxed one, two rounds that changed nothing, a
+planner failure, or the planner asking for it.
+
+**Wayland, measured on GNOME 50.** An X11 grab (`mss`) returns a perfectly
+black frame of the right size, so the vision loop was describing black.
+XTest input reaches XWayland windows only, so VS Code took clicks and Files
+did not. The Screenshot portal refuses a background caller outright ("Only
+the focused app is allowed to show a system access dialog"). What works with
+no dialog at all is Mutter's own `org.gnome.Mutter.ScreenCast` and
+`RemoteDesktop`: one session gives a PipeWire stream (one PNG frame through
+`gst-launch-1.0 pipewiresrc`) and absolute pointer and keysym input in the
+*same* coordinate space as the frame. GNOME shows its screen-sharing
+indicator while that session is open, so it closes `CAPTURE_SESSION_IDLE_S`
+after its last use, and anything that only *describes* the desktop - the
+window list, `--check` - asks for the size with `passive=True` and never
+opens one. Other Wayland desktops get a uinput device pair (needs the
+`input` group), which types US-layout ASCII only. A black frame from any
+grabber is now an error, never a picture.
+
+**Closing is graceful plus confirm.** A close is always the polite one, so
+an editor with unsaved work gets to ask its own question; that question
+belongs to the user, and E.V. reads it out (text and buttons) and stops.
+`discard` and `kill` are held as "discards unsaved work" / "force quits a
+program", both in `HIGH_RISK_REASONS`. The held call pins the window by its
+title, because "the focused window" at replay time may be E.V.'s terminal.
+`list` and `read` pass through lockdown, like `take_screenshot`.
+
+**What the planner is shown is budgeted, measured on Files.** GTK 4 hangs a
+widget's action group off containers (`view.new-folder`, `slot.reload`), and
+an icon and caption inside a list item repeat its name. Listed, those pushed
+a third of the window past `A11Y_INVENTORY_CHARS`; dropped, the same window
+is 62 lines and fits whole.
+
+Three traps, each of which looks like "accessibility does not work":
+
+- **Chromium, Electron and Qt publish nothing** until `org.a11y.Status
+  IsEnabled` is set. `A11Y_AUTO_ENABLE` sets it the first time an empty
+  window is met; an app already running needs a restart to notice.
+- **Snapped apps refuse AT-SPI** across an AppArmor boundary, the same trap
+  as MPRIS. Reported as `sandboxed`, never as an empty window.
+- **Wayland windows without the extension have no rectangle.** They are
+  found through AT-SPI, described as "(position not available)", focused
+  through the overview (super, the name, Enter) and verified.
+  `python ev_core.py --install-gnome-extension` installs `org.ev.Windows`
+  for exact windows and focus; Wayland loads it at the next login.
+
+`conftest.py` turns the tier off and stubs the window listing, because on a
+live desktop a test would otherwise read - and plan over - the user's real
+windows.
 
 ### The face: a second process, so the core never pays for Qt
 

@@ -28,9 +28,9 @@ TOOL_SPECS: list[ToolSpec] = [
     {
         "name": "open_app",
         "description": (
-            "Launch or find a program by name - 'find me Firefox', 'open "
-            "Spotify'. Programs only: web_search for the web, file_manager "
-            "'open' for a folder."
+            "Launch a program by name - 'open Spotify'. Programs only: "
+            "web_search for the web, file_manager 'open' for a folder; "
+            "close/switch: app_control."
         ),
         "parameters": {
             "type": "object",
@@ -51,6 +51,31 @@ TOOL_SPECS: list[ToolSpec] = [
         },
     },
     {
+        "name": "app_control",
+        "description": (
+            "Act on an open program: switch to, close, quit, minimize, kill, "
+            "list what's open; read its window, then press, set_text or menu "
+            "by ref - no mouse."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "list", "focus", "close", "quit", "minimize", "maximize",
+                        "kill", "read", "press", "set_text", "menu",
+                    ],
+                },
+                "app": {"type": "string", "description": "Program; empty = focused."},
+                "target": {"type": "string", "description": "Ref, label, or 'File > Save As'."},
+                "text": {"type": "string"},
+                "discard": {"type": "boolean", "description": "Close without saving."},
+            },
+            "required": ["action"],
+        },
+    },
+    {
         "name": "web_search",
         "description": (
             "Only opens a page - a search, a URL, or engine mail, calendar "
@@ -62,10 +87,7 @@ TOOL_SPECS: list[ToolSpec] = [
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": (
-                        "Search terms, cleaned of filler. Empty for mail, "
-                        "calendar and drive."
-                    ),
+                    "description": "Search terms. Empty for mail, calendar, drive.",
                 },
                 "engine": {
                     "type": "string",
@@ -91,12 +113,11 @@ TOOL_SPECS: list[ToolSpec] = [
                 },
                 "browser": {
                     "type": "string",
-                    "description": "Only if the user named one.",
                     "enum": ["chrome", "edge", "firefox", "brave", "default"],
                 },
                 "url": {
                     "type": "string",
-                    "description": "An exact URL, if the user named a site.",
+                    "description": "Exact URL, if named.",
                 },
             },
             "required": [],
@@ -145,19 +166,15 @@ TOOL_SPECS: list[ToolSpec] = [
                 },
                 "shell": {
                     "type": "string",
-                    "description": "Which shell to use. Defaults to powershell.",
                     "enum": ["powershell", "cmd", "bash"],
                 },
                 "working_directory": {
                     "type": "string",
-                    "description": "Directory to run in. Omit for the default.",
+                    "description": "Omit for the default.",
                 },
                 "background": {
                     "type": "boolean",
-                    "description": (
-                        "True detaches it into its own window; false "
-                        "reads the output back."
-                    ),
+                    "description": "True detaches; false reads output back.",
                 },
             },
             "required": ["command"],
@@ -339,23 +356,15 @@ TOOL_SPECS: list[ToolSpec] = [
             "properties": {
                 "question": {
                     "type": "string",
-                    "description": (
-                        "What to find out. Omit for a general description."
-                    ),
+                    "description": "Omit to describe it.",
                 },
                 "region": {
                     "type": "string",
-                    "description": (
-                        "'left,top,right,bottom' as fractions 0-1, to look "
-                        "closely."
-                    ),
+                    "description": "Zoom: 'left,top,right,bottom' as 0-1.",
                 },
                 "save_as": {
                     "type": "string",
-                    "description": (
-                        "Only if the user asked for it to be kept. "
-                        "Looking needs no file."
-                    ),
+                    "description": "Only if asked to keep it.",
                 },
             },
             "required": [],
@@ -384,24 +393,21 @@ TOOL_SPECS: list[ToolSpec] = [
                 },
                 "x": {
                     "type": "string",
-                    "description": "Fraction across: 0 left, 1 right.",
+                    "description": "0-1 from left.",
                 },
                 "y": {
                     "type": "string",
-                    "description": "Fraction down: 0 top, 1 bottom.",
+                    "description": "0-1 from top.",
                 },
-                "to_x": {"type": "string", "description": "Drag end x. 'drag' only."},
-                "to_y": {"type": "string", "description": "Drag end y. 'drag' only."},
+                "to_x": {"type": "string", "description": "Drag end."},
+                "to_y": {"type": "string", "description": "Drag end."},
                 "amount": {
                     "type": "string",
-                    "description": "Scroll distance, ~400 a screenful. Negative is down.",
+                    "description": "Scroll; ~400 a screen, negative down.",
                 },
                 "label": {
                     "type": "string",
-                    "description": (
-                        "Visible name of the target: 'the Save button'. "
-                        "Always fill it in - the user approves it."
-                    ),
+                    "description": "Target's visible name: 'the Save button'. Always set.",
                 },
             },
             "required": ["action"],
@@ -418,14 +424,11 @@ TOOL_SPECS: list[ToolSpec] = [
             "properties": {
                 "action": {
                     "type": "string",
-                    "description": (
-                        "'type' writes 'text'. 'press' sends 'keys'."
-                    ),
                     "enum": ["type", "press"],
                 },
                 "text": {
                     "type": "string",
-                    "description": "The exact characters to type, for 'type'.",
+                    "description": "Exact characters, for 'type'.",
                 },
                 "keys": {
                     "type": "string",
@@ -433,10 +436,7 @@ TOOL_SPECS: list[ToolSpec] = [
                 },
                 "label": {
                     "type": "string",
-                    "description": (
-                        "What this is for. Shown to the user when it "
-                        "needs approving."
-                    ),
+                    "description": "What it is for; shown for approval.",
                 },
             },
             "required": ["action"],
@@ -445,11 +445,9 @@ TOOL_SPECS: list[ToolSpec] = [
     {
         "name": "screen_task",
         "description": (
-            "A whole desktop job: looks, acts, looks again. Opens apps, "
-            "focuses windows, clicks, types, sends shortcuts. Use it when a "
-            "request needs more than one of those: 'open Notepad and type "
-            "hello'. State the whole goal in one call. For a web page use "
-            "browser_task."
+            "A whole job inside desktop apps: looks, acts, looks again - "
+            "'open Notepad and type hello', 'turn on dark mode in Settings'. "
+            "One call per goal. Web pages: browser_task."
         ),
         "parameters": {
             "type": "object",
@@ -457,14 +455,13 @@ TOOL_SPECS: list[ToolSpec] = [
                 "task": {
                     "type": "string",
                     "description": (
-                        "The whole goal in one sentence, so someone looking "
-                        "at the screen could tell it was done. Name the app "
-                        "and file if you know them."
+                        "The whole goal, checkable on screen. Name the app "
+                        "and file if known."
                     ),
                 },
                 "max_steps": {
                     "type": "string",
-                    "description": "Optional ceiling on how many actions it may take.",
+                    "description": "Optional step ceiling.",
                 },
             },
             "required": ["task"],
@@ -727,7 +724,16 @@ _TRIGGERS: dict[str, tuple[str, ...]] = {
     "screen_task": (
         "click", "type", "screen", "window", "button", "menu", "dialog",
         "settings", "toggle", "checkbox",
-        "close", "minimis", "minimiz", "maximis", "maximiz",
+    ),
+    # Window-level verbs. These used to pull in the whole screen family, so a
+    # plain "close Spotify" paid for four vision schemas to reach something
+    # the window manager does in one call.
+    "app_control": (
+        "close", "quit", "exit", "kill", "force quit", "switch to", "switch",
+        "focus", "bring up", "go back to", "minimis", "minimiz", "maximis",
+        "maximiz", "what's open", "whats open", "apps",
+        "window", "windows", "running", "save", "menu", "button", "dialog",
+        "settings",
     ),
     # Anything that happens *on* a site. Missing here is the expensive
     # direction: with only `web_search` on offer, "log into netflix" or

@@ -58,6 +58,9 @@ log = logging.getLogger("ev.tools.guard")
 SIDE_EFFECT_TOOLS: frozenset[str] = frozenset(
     {
         "open_app",
+        # Closes, quits, presses and types into other programs. Its two
+        # read-only actions are let through below - see `_read_only`.
+        "app_control",
         "web_search",
         "dev_workflow",
         "terminal_command",
@@ -87,6 +90,9 @@ SIDE_EFFECT_TOOLS: frozenset[str] = frozenset(
 UNTRUSTED_OUTPUT: frozenset[str] = frozenset(
     {
         "agent_task",
+        # Window titles and an app's own labels are written by whoever made
+        # the document or the page the app is showing.
+        "app_control",
         "browser_task",
         "file_manager",
         # A track title is whatever the uploader called it.
@@ -297,6 +303,24 @@ def _trip(reason: str, speech: str, detail: str) -> ToolResult:
     return ToolResult.failure(speech, detail)
 
 
+# Calls to a side-effecting tool that only look. Listing the open windows or
+# reading what is in one changes nothing, and refusing it under lockdown
+# would leave E.V. unable to say what is on screen - the same argument that
+# keeps take_screenshot working. Named per tool rather than imported from
+# the tool, so the guard stays importable before any tool module is.
+_READ_ONLY_ACTIONS: dict[str, frozenset[str]] = {
+    "app_control": frozenset({"list", "read", "inspect", "look", "windows", "list_windows", "apps"}),
+}
+
+
+def _read_only(name: str, arguments: dict[str, Any]) -> bool:
+    actions = _READ_ONLY_ACTIONS.get(name)
+    if not actions:
+        return False
+    verb = str(arguments.get("action", "") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return verb in actions
+
+
 def check(name: str, arguments: dict[str, Any]) -> ToolResult | None:
     """Decide whether this call may run at all. None means "carry on".
 
@@ -305,6 +329,9 @@ def check(name: str, arguments: dict[str, Any]) -> ToolResult | None:
     and then refused the yes would be worse than useless, because the user
     would have said yes to something that was never going to happen.
     """
+    if _read_only(name, arguments):
+        return None
+
     if config.LOCKDOWN_ENABLED and is_locked_down() and name in SIDE_EFFECT_TOOLS:
         reason = lockdown_reason()
         audit("refused", tool=name, why="locked down", args=_loggable(arguments))
@@ -366,7 +393,7 @@ def check(name: str, arguments: dict[str, Any]) -> ToolResult | None:
 
 def note(name: str, arguments: dict[str, Any]) -> None:
     """Record that a side-effecting call is going ahead."""
-    if name not in SIDE_EFFECT_TOOLS:
+    if name not in SIDE_EFFECT_TOOLS or _read_only(name, arguments):
         return
     with _state.lock:
         _state.recent.append((time.monotonic(), _signature(name, arguments)))

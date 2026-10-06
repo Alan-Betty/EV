@@ -49,7 +49,6 @@ import ctypes
 import logging
 import queue
 import re
-import sys
 import threading
 import time
 from contextlib import contextmanager
@@ -59,7 +58,7 @@ import config
 
 log = logging.getLogger("ev.tools.overlay")
 
-IS_WINDOWS = sys.platform == "win32"
+from tools.desktop.system import IS_WINDOWS  # noqa: E402
 
 # Keyed out by the window manager, so the middle of the screen is both
 # see-through and click-through. Deliberately a colour nothing else uses:

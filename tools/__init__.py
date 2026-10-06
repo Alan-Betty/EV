@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
+from tools.app_control import app_control
 from tools.app_launcher import open_app
 from tools.backlog import backlog
 from tools.base import CancelToken, ToolResult
@@ -65,6 +66,7 @@ def chat(reply: str = "", **_: object) -> ToolResult:
 
 REGISTRY: dict[str, Callable[..., ToolResult]] = {
     "open_app": open_app,
+    "app_control": app_control,
     "web_search": web_search,
     "dev_workflow": dev_workflow,
     "terminal_command": terminal_command,
@@ -123,6 +125,9 @@ for _gated in (
     # downloaded - but the argument still has to be declared here or the
     # spoken yes would be filtered out on its way back in.
     "open_app",
+    # Closing without saving and force-quitting lose work no undo brings
+    # back; a press inside an app can be a purchase like any other click.
+    "app_control",
     "terminal_command",
     "file_manager",
     "backlog",
@@ -222,7 +227,7 @@ def dispatch(
     for key, value in list(kwargs.items()):
         if isinstance(value, bool) or value is None:
             continue
-        if key in {"start_claude", "background", "confirmed", "recursive", "headless"}:
+        if key in {"start_claude", "background", "confirmed", "recursive", "headless", "discard"}:
             kwargs[key] = str(value).strip().lower() in {"true", "1", "yes"}
         elif not isinstance(value, str):
             kwargs[key] = str(value)

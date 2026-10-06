@@ -34,20 +34,20 @@ _VSCODE_WINDOW_HINT = "Visual Studio Code"
 
 
 def _type_into_focused(lines: list[str], settle: float = 0.4) -> bool:
-    """Type lines plus Enter into the focused window via pyautogui."""
-    try:
-        import pyautogui
-    except Exception as exc:  # ImportError, or no display / DISPLAY errors
-        log.warning("pyautogui unavailable: %s", exc)
+    """Type lines plus Enter into the focused window, through E.V.'s hands."""
+    from tools.desktop.hands import hands
+
+    gui = hands()
+    if gui is None:
+        log.warning("No input backend available to type into the terminal")
         return False
 
-    pyautogui.FAILSAFE = False
     for line in lines:
         if line:
             # `write` sends real characters, which survives terminal apps that
             # swallow clipboard paste.
-            pyautogui.write(line, interval=0.01)
-        pyautogui.press("enter")
+            gui.write(line, interval=0.01)
+        gui.press("enter")
         time.sleep(settle)
     return True
 
@@ -143,12 +143,14 @@ def dev_workflow(
     used_integrated = False
     if IS_WINDOWS and focus_by_title(_VSCODE_WINDOW_HINT, timeout=config.VSCODE_BOOT_S):
         try:
-            import pyautogui
+            from tools.desktop.hands import hands
 
-            pyautogui.FAILSAFE = False
+            gui = hands()
+            if gui is None:
+                raise RuntimeError("no input backend")
             # Ctrl+` toggles the integrated terminal; Ctrl+Shift+` forces a new
             # one so we never reuse a pane that already has something running.
-            pyautogui.hotkey("ctrl", "shift", "`")
+            gui.hotkey("ctrl", "shift", "`")
             time.sleep(config.TERMINAL_SPAWN_S)
 
             lines = [config.CLAUDE_CLI]

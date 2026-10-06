@@ -53,6 +53,8 @@ import httpx
 import config
 from tools import window
 from tools.base import IS_WINDOWS, CancelToken, ToolResult, was_cancelled
+from tools.desktop import hands as desktop_hands
+from tools.desktop import system as desktop_system
 from tools.safety import classify, classify_gui
 from tools.overlay import taking_over
 
@@ -114,12 +116,13 @@ class CaptureError(RuntimeError):
     """The screen could not be grabbed, with a reason worth saying aloud."""
 
 
-def screen_size() -> tuple[int, int]:
+def screen_size(passive: bool = False) -> tuple[int, int]:
     """Desktop size in real pixels.
 
     `ctypes` first on Windows, because it is free and needs nothing
     installed. `pyautogui` only as a fallback, since importing it pulls in
-    Pillow on most installations.
+    Pillow on most installations. `passive` never opens a screen-capture
+    session to find out - for callers that only describe the desktop.
     """
     if IS_WINDOWS:
         try:
@@ -133,6 +136,12 @@ def screen_size() -> tuple[int, int]:
                 return width, height
         except Exception as exc:  # pragma: no cover - platform specific
             log.debug("GetSystemMetrics failed: %s", exc)
+
+    # On GNOME Wayland the coordinate space is the Mutter stream's, because
+    # that is what both the frame and the injected pointer are measured in.
+    backend_size = desktop_hands.screen_size(open_session=not passive)
+    if backend_size:
+        return backend_size
 
     try:
         import pyautogui
@@ -371,7 +380,6 @@ def capture_screen(
     squeezing the desktop down to 1280. Small text is readable or it is not,
     and that is decided here.
     """
-    screen = screen_size()
     errors: list[str] = []
 
     def _finish(image: Any, size: tuple[int, int]) -> Frame:
@@ -382,6 +390,25 @@ def capture_screen(
             cropped, size, region=region, max_width=max_width, quality=quality, grid=grid
         )
 
+    # A compositor-side backend first, where the session has one. On GNOME
+    # Wayland every X11 route below returns a black frame, so a failure here
+    # is reported rather than quietly replaced by a picture of nothing.
+    try:
+        png = desktop_hands.capture_png()
+    except Exception as exc:
+        png = None
+        errors.append(f"{desktop_hands.capture_choice()} capture failed: {exc}")
+    if png:
+        import io
+
+        from PIL import Image
+
+        image = Image.open(io.BytesIO(png)).convert("RGB")
+        return _finish(image, image.size)
+    if errors and desktop_system.is_wayland():
+        raise CaptureError("; ".join(errors))
+
+    screen = screen_size()
     try:
         import mss
 
@@ -393,6 +420,8 @@ def capture_screen(
                 from PIL import Image
 
                 image = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+                if _is_blank(image):
+                    raise CaptureError(_BLANK_REASON)
                 return _finish(image, screen)
             except ImportError:
                 # No Pillow: mss can still produce a PNG on its own. Larger,
@@ -427,11 +456,35 @@ def capture_screen(
             errors.append(f"{label} failed: {exc}")
             continue
         if image is not None:
+            if _is_blank(image):
+                errors.append(f"{label}: {_BLANK_REASON}")
+                continue
             if not screen[0]:
                 screen = image.size
             return _finish(image, screen)
 
     raise CaptureError("; ".join(errors) or "no screen capture backend available")
+
+
+_BLANK_REASON = (
+    "the screen grab came back entirely black - on Wayland an X11 grab cannot "
+    "see native windows (set EV_CAPTURE_BACKEND, or see --check)"
+)
+
+
+def _is_blank(image: Any) -> bool:
+    """True for a frame that is one flat black, which is no picture at all.
+
+    Under Wayland an X11 grab returns a frame of the right size with nothing
+    in it. Sent to a vision model it is answered confidently - "the screen
+    is dark" - and every step after that is a guess. A 32px thumbnail is
+    enough to tell, and costs nothing next to the grab itself.
+    """
+    try:
+        extrema = image.resize((32, 18)).getextrema()
+    except Exception:
+        return False
+    return all(high == 0 for _low, high in extrema)
 
 
 def _grab_with_imagegrab() -> Any:
@@ -716,34 +769,17 @@ def _ask_gemini(frame: Frame, prompt: str, system: str) -> str:
 # ---------------------------------------------------------------------------
 # The hands
 # ---------------------------------------------------------------------------
-_gui_lock = threading.Lock()
-_gui_module: Any = None
-
-
 def _gui() -> Any:
-    """The configured `pyautogui`, or None if it cannot be used here.
+    """Something with pyautogui's mouse and keyboard methods, or None.
 
-    A function rather than a module-level import so that the cost is paid on
-    first use, and so the tests can replace the whole backend with a recorder
-    instead of driving the developer's actual mouse.
+    Usually `pyautogui` itself. On a Wayland session it is an adapter with
+    the same methods over Mutter's remote-desktop session or a uinput
+    device, because XTest there reaches XWayland windows only - see
+    `tools.desktop.hands`. A function rather than a module-level import so
+    the cost is paid on first use, and so the tests can replace the whole
+    backend with a recorder instead of driving the developer's real mouse.
     """
-    global _gui_module
-    with _gui_lock:
-        if _gui_module is not None:
-            return _gui_module
-        try:
-            import pyautogui
-        except Exception as exc:  # ImportError, or no display
-            log.warning("pyautogui unavailable: %s", exc)
-            return None
-        # The corner failsafe aborts mid-drag if the pointer happens to pass
-        # through 0,0, which turns a legitimate action into a half-finished
-        # one. The confirmation gate is the safety mechanism here, not a
-        # screen corner.
-        pyautogui.FAILSAFE = False
-        pyautogui.PAUSE = 0
-        _gui_module = pyautogui
-        return _gui_module
+    return desktop_hands.hands()
 
 
 # ---------------------------------------------------------------------------
@@ -876,6 +912,12 @@ def _enter_text(gui: Any, text: str) -> str:
     some fields refuse a paste outright. The clipboard is for the cases
     typing genuinely cannot serve.
     """
+    if _needs_paste(text) and getattr(gui, "types_unicode", False):
+        # Mutter's keysyms carry any character in any layout, so there is no
+        # clipboard to disturb and nothing for a layout to drop.
+        gui.write(text, interval=0.0)
+        return "typed"
+
     if _needs_paste(text) and IS_WINDOWS:
         previous = _clipboard_read()
         if _clipboard_write(text):
@@ -993,7 +1035,7 @@ def _gate(description: str, confirmed: bool, speech: str, **data: Any) -> ToolRe
 # take_screenshot
 # ---------------------------------------------------------------------------
 _LOOK_SYSTEM = (
-    "You are the eyes of a voice assistant looking at a Windows desktop. "
+    "You are the eyes of a voice assistant looking at a computer desktop. "
     "Answer in one or two short spoken sentences, under thirty words. "
     "Plain speech: no markdown, no bullet points, no headings, no labels, "
     "no coordinates unless you were asked for them. Describe what is "
@@ -1062,7 +1104,7 @@ def take_screenshot(
 
     asked = question.strip() or "What is on this screen right now?"
     try:
-        answer = ask_vision(frame, asked, _LOOK_SYSTEM)
+        answer = ask_vision(frame, asked, _LOOK_SYSTEM + " " + desktop_system.prompt_line())
     except VisionError as exc:
         return ToolResult.failure(str(exc), f"Vision call failed: {exc}")
 
@@ -1187,7 +1229,7 @@ def mouse_action(
     if gui is None:
         return ToolResult.failure(
             "I can't reach the mouse from here.",
-            "pyautogui is unavailable, so no pointer action ran.",
+            f"No input backend ({desktop_hands.last_error() or 'pyautogui unavailable'}), so no pointer action ran.",
         )
 
     if verb == "scroll":
@@ -1263,6 +1305,15 @@ _KEY_ALIASES = {
 }
 
 
+# On a Mac the command key is real and is what every shortcut uses, so it
+# must not be quietly turned into a Windows key pyautogui would press as
+# nothing. "super" is GNOME's name for the same key on Linux.
+if desktop_system.IS_MAC:
+    _KEY_ALIASES.update({"cmd": "command", "win": "command", "windows": "command", "super": "command"})
+else:
+    _KEY_ALIASES["super"] = "win"
+
+
 def _split_keys(raw: str) -> list[str]:
     """Turn 'ctrl+shift+t' or 'ctrl shift t' into pyautogui key names."""
     parts = [p for p in re.split(r"[+\s,]+", (raw or "").strip().lower()) if p]
@@ -1335,7 +1386,7 @@ def keyboard_action(
     if gui is None:
         return ToolResult.failure(
             "I can't reach the keyboard from here.",
-            "pyautogui is unavailable, so nothing was typed.",
+            f"No input backend ({desktop_hands.last_error() or 'pyautogui unavailable'}), so nothing was typed.",
         )
 
     if verb == "type":
@@ -1376,7 +1427,7 @@ def keyboard_action(
 # keeps clicking on a page which never changes, and `SCREEN_TASK_TIMEOUT_S`
 # stops one where every step is slow rather than repeated. Without them an
 # autonomous mouse is a mouse nobody can get back.
-_STEP_SYSTEM = """You are driving a Windows desktop for a voice assistant, one look at a time.
+_STEP_SYSTEM = """You are driving a computer desktop for a voice assistant, one look at a time.
 
 You are shown the current screen with a coordinate grid ruled over it, and a
 list of the windows that are actually open. Reply with ONE JSON object and
@@ -1664,12 +1715,6 @@ def screen_task(
             "Screen control is switched off.",
             "EV_COMPUTER_USE_ENABLED is false; the screen task did not run.",
         )
-    if not config.VISION_ENABLED:
-        return ToolResult.failure(
-            "I can't see the screen, so I can't drive it.",
-            "EV_VISION_ENABLED is false; screen_task needs vision.",
-        )
-
     # The goal itself is gated up front. "Buy the first result" should ask
     # before the first click, not three clicks in at the checkout.
     held = _gate(
@@ -1687,7 +1732,59 @@ def screen_task(
     # why is indistinguishable from a machine somebody else has taken over.
     token = cancel if cancel is not None else CancelToken()
     with taking_over(goal, token) as hud:
+        # Text first: an application that describes its own controls is
+        # driven from that description, on the planner's buckets, and the
+        # vision loop only gets what the tree could not do.
+        finished, prior = _through_accessibility(goal, max_steps, confirmed, token, hud)
+        if finished is not None:
+            return finished
+        if not config.VISION_ENABLED:
+            return ToolResult.failure(
+                "I can't see the screen, so I can't drive it.",
+                "EV_VISION_ENABLED is false; screen_task needs vision for this window.",
+            )
+        if prior:
+            return _drive_screen(goal, max_steps, confirmed, token, hud, prior=prior)
         return _drive_screen(goal, max_steps, confirmed, token, hud)
+
+
+def _through_accessibility(
+    goal: str, max_steps: Any, confirmed: bool, cancel: CancelToken, hud: Any
+) -> tuple[ToolResult | None, list[str]]:
+    """Run `goal` on the accessibility route. (result, []) when it finished
+    the job one way or another; (None, steps taken) when vision should carry on.
+    """
+    from tools import app_agent
+
+    try:
+        if not app_agent.available():
+            return None, []
+        outcome = app_agent.run(goal, cancel=cancel, note=hud.note, confirmed=confirmed)
+    except Exception as exc:  # noqa: BLE001 - the text route is an optimisation
+        log.warning("Accessibility route failed, using vision: %s", exc)
+        return None, []
+
+    trail = "; ".join(outcome.history) or "nothing"
+    detail = f"screen_task '{goal}' through the app's accessibility tree ({outcome.detail}). Steps: {trail}."
+    if outcome.status == "vision":
+        log.info("Handing '%s' to vision: %s", goal, outcome.detail)
+        return None, outcome.history
+    if outcome.status == "done":
+        return ToolResult.success(outcome.speech or "That's done.", detail), []
+    if outcome.status == "fail":
+        return ToolResult.failure(outcome.speech or "I couldn't get that done.", detail), []
+    if outcome.status == "confirm":
+        # Saying yes re-runs the whole goal confirmed; the route is stateless,
+        # so it re-reads the window and carries on from where it really is.
+        return ToolResult.confirm(
+            outcome.speech, detail + " Confirming re-reads the window and carries on.",
+            task=goal, max_steps=str(max_steps), reason=outcome.reason,
+        ), []
+    if outcome.status == "stopped":
+        return ToolResult.stopped(outcome.speech or "Stopped.", detail), []
+    if outcome.status == "ask":
+        return ToolResult.success(outcome.speech, detail + " Stopped for the user's answer: ask them."), []
+    return ToolResult.success(outcome.speech or "That's as far as I got.", detail + " Not finished."), []
 
 
 def _drive_screen(
@@ -1696,8 +1793,14 @@ def _drive_screen(
     confirmed: bool,
     cancel: CancelToken,
     hud: Any,
+    prior: list[str] | None = None,
 ) -> ToolResult:
-    """The look-act loop behind `screen_task`, run under the overlay."""
+    """The look-act loop behind `screen_task`, run under the overlay.
+
+    `prior` is what the accessibility route already did before handing
+    over. It is shown to the model as done, and does not count against the
+    step ceiling, which is a promise about what *this* loop will do.
+    """
     ceiling = int(_number(max_steps, config.SCREEN_TASK_MAX_STEPS))
     ceiling = max(
         1, min(ceiling or config.SCREEN_TASK_MAX_STEPS, config.SCREEN_TASK_MAX_STEPS)
@@ -1809,12 +1912,18 @@ def _drive_screen(
                 else ""
             )
             + (f"Windows open, front to back:\n{windows}\n" if windows else "")
-            + f"Done so far: {'; '.join(history[-6:]) if history else 'nothing yet'}."
+            + (
+                "Done so far: "
+                + ("; ".join(((prior or []) + history)[-6:]) or "nothing yet")
+                + "."
+            )
             + nudge
             + "\nWhat next?"
         )
         try:
-            reply = _parse_step(ask_vision(frame, prompt, _STEP_SYSTEM))
+            reply = _parse_step(
+                ask_vision(frame, prompt, _STEP_SYSTEM + "\n" + desktop_system.prompt_line())
+            )
         except VisionError as exc:
             return ToolResult.failure(str(exc), f"Vision failed mid-task: {exc}")
 

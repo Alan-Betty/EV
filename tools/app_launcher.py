@@ -43,11 +43,10 @@ from pathlib import Path
 import config
 from ev.memory import read_json, write_json
 import subprocess
-import sys
 
 from tools.base import IS_WINDOWS, ToolResult, popen_detached, resolve_executable
 
-IS_LINUX = sys.platform.startswith("linux")
+from tools.desktop.system import IS_LINUX
 
 log = logging.getLogger("ev.tools.app")
 
