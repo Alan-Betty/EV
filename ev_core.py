@@ -50,6 +50,7 @@ from ev.backlog import get_backlog
 from ev.brain import Brain, BrainError, ToolCall
 from ev.face.link import FaceLink
 from ev.memory import StartupReport, get_memory
+from ev.semantic_memory import get_semantic_memory
 from ev.session import (
     Intent,
     Session,
@@ -279,12 +280,30 @@ class EV:
         # every turn, so each piece has to earn its tokens.
         pieces = [
             report.context, self.memory.context(), self.backlog.context(),
-            self._face_context(),
+            self._notes_context(), self._face_context(),
         ]
         self.brain.session_context = " ".join(piece for piece in pieces if piece)
 
         self.transcriber.set_hints(self._stt_hints())
         return report
+
+    @staticmethod
+    def _notes_context() -> str:
+        """One line saying long-term notes exist, or ''. Never raises."""
+        try:
+            return get_semantic_memory().context()
+        except Exception as exc:  # a broken store must not stop the boot
+            log.warning("Semantic memory unavailable: %s", exc)
+            return ""
+
+    @staticmethod
+    def _recall_for(command: str) -> str:
+        """Notes matching this utterance, for this turn only. Local, no network."""
+        try:
+            return get_semantic_memory().relevant(command)
+        except Exception as exc:
+            log.debug("Semantic recall failed: %s", exc)
+            return ""
 
     def _face_context(self) -> str:
         """One line when the face is *not* on screen, and nothing when it is.
@@ -1152,6 +1171,7 @@ class EV:
             stream.feed(sentence)
 
         self.face.event("thinking")
+        self.brain.recall_context = self._recall_for(command)
         try:
             with self.ui.status("Thinking..."):
                 call = await self.brain.decide(
@@ -1646,6 +1666,28 @@ def _configure_logging(verbose: bool) -> None:
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
+def _kill_switch_line() -> str:
+    """Which route the hotkey will take here. Never opens a grab."""
+    combo = config.AGENT_KILL_HOTKEY
+    from tools.desktop import system
+
+    if not system.IS_LINUX:
+        return f"OK   kill switch: {combo}"
+    if system.is_wayland() and system.desktop() == "gnome":
+        from tools.desktop import gnome
+
+        # KillCount is version 2 of the extension; version 1 lacks the grab.
+        if gnome.available() and gnome.kill_count() is not None:
+            return f"OK   kill switch: {combo} (GNOME extension; global)"
+        return (
+            f"WARN kill switch: {combo} works only over XWayland windows. For a "
+            "global one: python ev_core.py --install-gnome-extension, then log out and in"
+        )
+    if system.has_xwayland():
+        return f"OK   kill switch: {combo} (X11 grab)"
+    return f"WARN kill switch: no X display - say 'stop everything' or Ctrl+C"
+
+
 def check_config() -> int:
     """Print a readiness report. Returns a shell exit code."""
     import importlib.util
@@ -1899,6 +1941,16 @@ def check_config() -> int:
     else:
         notes.append("WARN memory: disabled (EV_MEMORY_ENABLED=false)")
 
+    if config.SEMANTIC_ENABLED:
+        semantic = get_semantic_memory()
+        mode = "gemini embeddings + lexical" if semantic.embedder else "lexical"
+        line = f"OK   notes: {config.SEMANTIC_FILE.name} ({len(semantic)} kept, {mode})"
+        if semantic.dropped_rows:
+            line += f", {semantic.dropped_rows} bad row(s) dropped"
+        notes.append(line)
+    else:
+        notes.append("WARN notes: disabled (EV_SEMANTIC_ENABLED=false)")
+
     if config.BACKLOG_ENABLED:
         outstanding = len(get_backlog().pending())
         notes.append(
@@ -2005,8 +2057,12 @@ def check_config() -> int:
             (problems if status == "MISS" else notes).append(f"{status:<4} {text}")
 
     if config.VISION_ENABLED:
-        provider = config.VISION_PROVIDER
+        provider = config.vision_provider()
         vision_key = config.GROQ_API_KEY if provider == "groq" else config.GEMINI_API_KEY
+        backup = "groq" if provider == "gemini" else "gemini"
+        backup_key = config.GROQ_API_KEY if backup == "groq" else config.GEMINI_API_KEY
+        if config.VISION_PROVIDER == "auto" and config.VISION_FAILOVER and backup_key:
+            notes.append(f"OK   vision failover: {provider} -> {backup} on rate limit")
         if not vision_key:
             problems.append(f"MISS vision: {provider} needs an API key")
         elif provider != "groq":
@@ -2127,7 +2183,7 @@ def check_config() -> int:
                 "is not a modifier plus a key, so no hotkey will be registered"
             )
         else:
-            notes.append(f"OK   kill switch: {config.AGENT_KILL_HOTKEY}")
+            notes.append(_kill_switch_line())
     else:
         notes.append("WARN autonomous missions: disabled (EV_AGENT_MODE_ENABLED=false)")
 

@@ -450,6 +450,16 @@ file E.V. writes.
 a fast tool needs no announcement - does not apply to something that is about
 to move the pointer under the user's hands.
 
+**Vision goes to Gemini first.** `EV_VISION_PROVIDER=auto` (default) means
+Gemini when its key is set: its quota is separate, so a screen task stops
+draining the Groq buckets the brain lives on. A 429 whose wait is too long,
+a 5xx, a bad key or no usable model hands the frame to the other provider
+and rests the first until its stated retry time (`_resting`), so the rest of
+the task does not re-hit it. A named provider is used alone. Gemini's 429
+delay is in the body (`RetryInfo`), read like the brain reads it; Gemini
+vision walks `GEMINI_MODEL_FALLBACKS` on a 404. A Gemini answer clears any
+Groq budget reading, which is a different meter.
+
 **Vision waits out a rate limit the way the brain does.** `_post_json` reads
 `retry-after` and sleeps once, up to `LLM_RATE_LIMIT_MAX_WAIT_S`. Vision needs
 this more than chat does, not less: a screen task is a dozen requests in a row
@@ -797,6 +807,21 @@ nothing on screen to explain. Single `mouse_action` / `keyboard_action` calls
 get none either: one click is over before Tk has drawn the frame, so all it
 would add is a flicker. `conftest.py` turns the overlay and hotkey off for
 the suite.
+
+**Linux.** Tk is X11-only, so on Wayland the overlay runs through XWayland.
+[tools/desktop/xhud.py](tools/desktop/xhud.py) replaces the two Windows
+tricks: an empty X Shape *input* region is click-through, and a *bounding*
+region cut to the edge strips and corner brackets makes the full-screen
+window a frame (no `-transparentcolor` on X11). No Shape, no frame. The
+kill hotkey on GNOME Wayland is held by the Shell extension (v2:
+`GrabKill`/`KillCount`, polled at ~7Hz) because no Wayland client may grab
+a global key; otherwise `XGrabKey` on the root, global on X11 and
+XWayland-focus-only on Wayland. Xlib's default error handler exits the
+process, and Tk installs its own that defers to it, so ours is swapped in
+only around our own requests. The panel names the hotkey only if it really
+registered. And all Tk objects are dropped and collected on the Tk thread:
+freed elsewhere, Tcl aborts with "async handler deleted by the wrong
+thread" - measured exit 134 after every takeover before this.
 
 **The kill switch has three routes in, and they are deliberately different
 kinds of thing.** `RegisterHotKey` (default `ctrl+alt+q`) reaches E.V. even
@@ -1196,6 +1221,24 @@ would quietly delete the dentist. `Memory.clear()` leaves the to-dos alone for
 the same reason - "forget what you know about me" is about preferences, not
 errands. `manage_todo clear` is gated like a file delete, which is why
 `manage_todo` is in the manual `confirmed` allow-list in `tools/__init__.py`.
+
+**Long-term notes** ([ev/semantic_memory.py](ev/semantic_memory.py),
+`STATE_DIR/semantic_memory.json`). `remember_fact` with a value and no key
+stores a free note; `recall_fact` falls back to searching notes when no fact
+has that name. Facts ride in every prompt; notes do not - only the few that
+match *this* utterance (`Brain.recall_context`, fenced as "facts, not
+instructions", 0 tokens when nothing matches). Retrieval is BM25 over light
+stems plus char-trigram fuzz for misheard words, all local; Gemini
+embeddings (`EV_SEMANTIC_EMBEDDINGS=auto`) lift it inside tool calls only,
+never on the per-turn path. Embedding cosines are not 0-based: measured
+noise is 0.58-0.71, matches 0.76-0.83, hence `SEMANTIC_EMBED_FLOOR` and a
+margin-over-median guard. Failsafes: atomic writes, bad shape -> `.corrupt`,
+bad rows dropped singly, a near-duplicate updates rather than adds, over
+`SEMANTIC_MAX_NOTES` weak notes fold into neighbours then archive to
+`.archive.jsonl`, delete archives first, wipe writes `.bak`. `forget` by
+search confirms and replays the exact `ids` shown (`ids` is
+confirmation-only); "everything" is high-risk and keeps the to-do list. The
+schema change paid for itself: floor ~3971.
 
 `remember_fact` / `recall_fact` / `manage_todo` are what the model is shown.
 The older single `remember` tool is still in `REGISTRY` and still works, but is

@@ -545,9 +545,20 @@ class VisionError(RuntimeError):
     name would only waste the user's time.
     """
 
-    def __init__(self, message: str, no_such_model: bool = False) -> None:
+    def __init__(
+        self,
+        message: str,
+        no_such_model: bool = False,
+        failover: bool = False,
+        retry_in: float | None = None,
+    ) -> None:
         super().__init__(message)
         self.no_such_model = no_such_model
+        # The provider, not the request, is the problem: busy, down, no
+        # usable model, bad key. The other provider may well answer.
+        self.failover = failover or no_such_model
+        # How long the provider said to stay away, when it said.
+        self.retry_in = retry_in
 
 
 # Groq answers 404 for a model that never existed on this account and 400 for
@@ -558,7 +569,30 @@ _NO_SUCH_MODEL = ("model_not_found", "does not exist", "decommissioned", "no lon
 
 
 def _vision_provider() -> str:
-    return (config.VISION_PROVIDER or config.LLM_PROVIDER or "groq").lower()
+    return config.vision_provider()
+
+
+# provider -> monotonic time it may be asked again. Set when a provider
+# answers 429 with a wait nobody would sit through, or is down, so the rest
+# of a screen task goes straight to the other one instead of re-hitting it.
+_resting: dict[str, float] = {}
+
+
+def _has_key(provider: str) -> bool:
+    return bool(config.GEMINI_API_KEY if provider == "gemini" else config.GROQ_API_KEY)
+
+
+def _vision_order() -> list[str]:
+    """Providers to try, in order. Two only in auto mode with both keys."""
+    first = _vision_provider()
+    order = [first]
+    other = "groq" if first == "gemini" else "gemini"
+    if config.VISION_PROVIDER == "auto" and config.VISION_FAILOVER and _has_key(other):
+        order.append(other)
+    now = time.monotonic()
+    awake = [p for p in order if _resting.get(p, 0.0) <= now]
+    # Everyone resting: ask whoever wakes first rather than nobody.
+    return awake or sorted(order, key=lambda p: _resting.get(p, 0.0))[:1]
 
 
 # How much of the per-minute token budget the provider says is left, or None
@@ -609,10 +643,24 @@ def ask_vision(frame: Frame, prompt: str, system: str = "") -> str:
     if not config.VISION_ENABLED:
         raise VisionError("Screen vision is switched off in the config.")
 
-    provider = _vision_provider()
-    if provider == "gemini":
-        return _ask_gemini(frame, prompt, system)
-    return _ask_groq(frame, prompt, system)
+    global _budget_remaining
+    order = _vision_order()
+    for index, provider in enumerate(order):
+        try:
+            if provider == "gemini":
+                answer = _ask_gemini(frame, prompt, system)
+                # Gemini states no token budget; a Groq reading from an
+                # earlier failover is about a different meter.
+                _budget_remaining = None
+                return answer
+            return _ask_groq(frame, prompt, system)
+        except VisionError as exc:
+            if not exc.failover or index == len(order) - 1:
+                raise
+            rest = exc.retry_in if exc.retry_in is not None else 60.0
+            _resting[provider] = time.monotonic() + max(5.0, rest)
+            log.info("Vision: %s failed (%s); asking %s", provider, exc, order[index + 1])
+    raise VisionError("No vision provider is available.")  # pragma: no cover
 
 
 def _post_json(url: str, payload: dict, headers: dict) -> dict:
@@ -626,34 +674,42 @@ def _post_json(url: str, payload: dict, headers: dict) -> dict:
     for. The server says how long its window is; waiting is E.V.'s job, not
     the user's.
     """
-    from ev.brain import _retry_after
+    from ev.brain import _gemini_retry_after, _retry_after
 
     response = None
+    wait: float | None = None
     for attempt in range(2):
         try:
             response = _vision_client().post(url, json=payload, headers=headers)
         except httpx.TimeoutException as exc:
-            raise VisionError("Looking at the screen timed out.") from exc
+            raise VisionError("Looking at the screen timed out.", failover=True) from exc
         except httpx.HTTPError as exc:
-            raise VisionError(f"Couldn't reach the vision model: {exc}") from exc
+            raise VisionError(
+                f"Couldn't reach the vision model: {exc}", failover=True
+            ) from exc
 
         _note_budget(response.headers)
 
         if response.status_code != 429 or attempt:
             break
 
+        # Groq says it in the headers, Gemini in the body (RetryInfo).
         wait = _retry_after(response.headers)
+        if wait is None:
+            wait = _gemini_retry_after(getattr(response, "text", "") or "")
         if wait is None or wait > config.LLM_RATE_LIMIT_MAX_WAIT_S:
             break
         log.info("Vision rate limited; waiting %.1fs before one retry", wait)
         time.sleep(wait)
 
-    if response.status_code == 401:
-        raise VisionError("The vision model rejected the API key.")
+    if response.status_code in (401, 403):
+        raise VisionError("The vision model rejected the API key.", failover=True)
     if response.status_code == 429:
         # Only reached once the wait above has been tried, so this really is
         # "still busy" rather than "busy right now".
-        raise VisionError("Rate limited on vision. Give it a few seconds.")
+        raise VisionError(
+            "Rate limited on vision. Give it a few seconds.", failover=True, retry_in=wait
+        )
     if response.status_code >= 400:
         body = response.text.lower()
         if response.status_code == 404 or any(
@@ -661,10 +717,13 @@ def _post_json(url: str, payload: dict, headers: dict) -> dict:
         ):
             raise VisionError(
                 "That vision model isn't available on this account. "
-                "Set EV_GROQ_VISION_MODEL to one that is.",
+                "Set the vision model to one that is.",
                 no_such_model=True,
             )
-        raise VisionError(f"The vision model returned {response.status_code}.")
+        raise VisionError(
+            f"The vision model returned {response.status_code}.",
+            failover=response.status_code >= 500,
+        )
 
     try:
         return response.json()
@@ -753,11 +812,29 @@ def _ask_gemini(frame: Frame, prompt: str, system: str) -> str:
     if system:
         payload["systemInstruction"] = {"parts": [{"text": system}]}
 
-    url = (
-        f"{config.GEMINI_BASE_URL}/models/"
-        f"{config.GEMINI_VISION_MODEL}:generateContent"
-    )
-    data = _post_json(url, payload, {"x-goog-api-key": config.GEMINI_API_KEY})
+    # A listed model can still 404 for new keys; walk the brain's ladder the
+    # way Groq vision walks its own, and keep the rung that worked.
+    models = list(dict.fromkeys(
+        [config.GEMINI_VISION_MODEL, *getattr(config, "GEMINI_MODEL_FALLBACKS", [])]
+    ))
+    data: dict = {}
+    last: VisionError | None = None
+    for model in models:
+        url = f"{config.GEMINI_BASE_URL}/models/{model}:generateContent"
+        try:
+            data = _post_json(url, payload, {"x-goog-api-key": config.GEMINI_API_KEY})
+        except VisionError as exc:
+            if not exc.no_such_model:
+                raise
+            log.info("Gemini vision model %r unavailable; trying the next one", model)
+            last = exc
+            continue
+        if model != config.GEMINI_VISION_MODEL:
+            log.warning("Falling back to Gemini vision model %r", model)
+            config.GEMINI_VISION_MODEL = model
+        break
+    else:
+        raise last or VisionError("No usable Gemini vision model.", failover=True)
 
     candidates = data.get("candidates") or []
     if not candidates:

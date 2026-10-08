@@ -293,31 +293,29 @@ TOOL_SPECS: list[ToolSpec] = [
     {
         "name": "remember_fact",
         "description": (
-            "Store one lasting fact about the user: 'remember I take my "
-            "coffee black', 'my name is Alan'."
+            "Save something lasting: key+value a short fact ('coffee'="
+            "'black'); value alone a free note. forget deletes it."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "key": {
-                    "type": "string",
-                    "description": "One or two words: 'coffee', 'name'.",
-                },
-                "value": {"type": "string", "description": "The fact itself, short."},
+                "key": {"type": "string", "description": "1-2 words; omit for a note."},
+                "value": {"type": "string"},
+                "forget": {"type": "boolean"},
             },
-            "required": ["key", "value"],
+            "required": [],
         },
     },
     {
         "name": "recall_fact",
         "description": (
-            "Look up a stored fact: 'what do you know about me', 'what's my "
-            "main project'. Omit key to list everything."
+            "Look up a fact or search notes by meaning: 'where's my spare "
+            "key'. No key lists all."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "key": {"type": "string", "description": "The fact to fetch."},
+                "key": {"type": "string", "description": "Name or search words."},
             },
             "required": [],
         },
@@ -707,6 +705,11 @@ _TRIGGERS: dict[str, tuple[str, ...]] = {
         "remember", "remind", "reminder", "forget", "recall", "memoris",
         "memoriz", "prefer", "favourite", "favorite", "todo", "to-do",
         "task", "tasks", "shopping", "errand", "agenda", "know about me",
+        # Notes are recalled by question, not by the word "remember".
+        # Phrases, not "note": these are prefix matches and "notepad" exists.
+        "note that", "note down", "make a note", "take a note", "my notes",
+        "your notes", "where did i", "where's my", "wheres my", "what did i",
+        "did i tell", "i told you", "last time",
     ),
     "recall_fact": (),
     "manage_todo": (),

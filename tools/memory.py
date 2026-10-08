@@ -7,6 +7,10 @@ Three tools, because the model picks better from three narrow names than from
 one wide one. `remember_fact` and `recall_fact` are a key-value store;
 `manage_todo` is a standing list of errands.
 
+No key = a free-form note in `ev.semantic_memory`, recalled by meaning.
+`recall_fact` falls back to that search when no fact has the name. Forget
+by search, or wipe, asks first; the yes replays the exact note ids shown.
+
 Everything stored here ends up in the system prompt on every turn, which is
 why `ev.memory` caps both the facts and the open to-dos: an assistant that
 remembers four hundred things is an assistant with a four-hundred-line
@@ -24,6 +28,7 @@ turn.
 
 from __future__ import annotations
 
+import config
 from ev.memory import get_memory
 from tools.base import ToolResult
 
@@ -125,20 +130,71 @@ def _disabled() -> ToolResult:
     )
 
 
-def remember_fact(key: str = "", value: str = "", **_: object) -> ToolResult:
-    """Store one durable fact about the user. Never raises."""
+_WIPE_WORDS = frozenset(
+    {"everything", "all", "all of it", "all notes", "all memories", "every note",
+     "everything about me", "it all"}
+)
+
+
+def _notes():
+    from ev.semantic_memory import get_semantic_memory
+
+    return get_semantic_memory()
+
+
+def _clip(text: str, limit: int = 90) -> str:
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def remember_fact(
+    key: str = "",
+    value: str = "",
+    forget: bool = False,
+    ids: str = "",
+    confirmed: bool = False,
+    **_: object,
+) -> ToolResult:
+    """Store a fact (key+value) or a free-form note (value only); or forget.
+
+    Notes go to `ev.semantic_memory` and are recalled by meaning. A note close
+    to an existing one replaces it, which is how an update lands. Forgetting
+    a named fact is immediate; forgetting by search or wiping everything asks
+    first, and the yes replays the exact `ids` that were shown.
+    """
     store = get_memory()
     if not store.enabled:
         return _disabled()
 
     name = (key or "").strip()
     fact = (value or "").strip()
-    if not name or not fact:
+
+    if forget:
+        return _forget(store, name or fact, ids, confirmed)
+
+    if not fact:
         return ToolResult.failure(
             "Remember what, exactly?",
-            "remember_fact needs both key and value, e.g. key='coffee', "
-            "value='black'.",
+            "remember_fact needs a value: a fact with a key ('coffee'='black'), "
+            "or a note with value alone.",
         )
+    if not name:
+        notes = _notes()
+        if not notes.enabled:
+            return ToolResult.failure(
+                "Long-term notes are switched off.",
+                "Semantic memory disabled; set EV_SEMANTIC_ENABLED=true, or give a key.",
+            )
+        note, verb = notes.add(fact)
+        if note is None:
+            return ToolResult.failure(
+                "Couldn't hold on to that.", f"Failed to persist a note to {notes.path}."
+            )
+        if verb == "updated":
+            return ToolResult.success(
+                "Updated that note.", f"Updated note {note.id}: {note.text}"
+            )
+        return ToolResult.success("Noted.", f"Saved note {note.id}: {note.text}")
+
     if not store.remember(name, fact):
         return ToolResult.failure(
             "Couldn't hold on to that.",
@@ -147,31 +203,120 @@ def remember_fact(key: str = "", value: str = "", **_: object) -> ToolResult:
     return ToolResult.success("Noted.", f"Remembered that {name.lower()} is {fact}.")
 
 
+def _forget(store, target: str, ids: str, confirmed: bool) -> ToolResult:
+    notes = _notes()
+    if not target and not ids:
+        return ToolResult.failure("Forget what?", "forget needs key or value naming it.")
+
+    if target.lower().strip(" .!") in _WIPE_WORDS:
+        facts = len(store.preferences) + len(store.profile)
+        count = facts + len(notes)
+        if not count:
+            return ToolResult.success("There's nothing saved to forget.", "Nothing stored.")
+        if not confirmed:
+            return ToolResult.confirm(
+                f"Forget all {count} things I've saved about you? Confirm?",
+                f"Waiting on a yes before wiping {facts} facts and {len(notes)} notes.",
+                forget=True,
+                value="everything",
+                reason="erases all saved memories",
+            )
+        store.clear()
+        wiped = notes.wipe()
+        return ToolResult.success(
+            "Done. I've forgotten all of it.",
+            f"Wiped {facts} facts and {wiped} notes; to-do list kept; "
+            f"notes backup at {notes.path.name}.bak.",
+        )
+
+    # A named fact is exact, so it goes without a question, as it always has.
+    if target and store.recall(target) is not None:
+        store.forget(target)
+        return ToolResult.success("Forgotten.", f"Dropped the stored fact '{target}'.")
+
+    if confirmed and ids:
+        gone = notes.delete([i for i in ids.split(",")])
+        if not gone:
+            return ToolResult.failure(
+                "Those notes are already gone.", f"No notes matched ids {ids}."
+            )
+        return ToolResult.success(
+            "Forgotten." if len(gone) == 1 else f"Forgot {len(gone)} notes.",
+            "Deleted notes (archived): " + "; ".join(f"{n.id}: {n.text}" for n in gone),
+        )
+
+    hits = notes.search(target, limit=5, min_score=config.SEMANTIC_RECALL_MIN_SCORE)
+    if hits:
+        # Only the clear winners: a weak tail match is not what was meant.
+        hits = [h for h in hits if h.score >= hits[0].score * 0.8]
+    if not hits:
+        return ToolResult.failure(
+            f"I don't have anything saved about {target}.",
+            f"No fact or note matched '{target}'.",
+        )
+    listing = "; ".join(f"{h.note.id}: {h.note.text}" for h in hits)
+    if len(hits) == 1:
+        speech = f"Forget the note: {_clip(hits[0].note.text)}. Confirm?"
+    else:
+        speech = f"Forget {len(hits)} notes about {target}? Confirm?"
+    return ToolResult.confirm(
+        speech,
+        f"Waiting on a yes before deleting: {listing}",
+        forget=True,
+        value=target,
+        ids=",".join(h.note.id for h in hits),
+        reason="forgets saved notes",
+    )
+
+
 def recall_fact(key: str = "", **_: object) -> ToolResult:
-    """Look one fact back up, or list everything when no key is given."""
+    """Look up a fact by name, else search notes by meaning; no key lists all."""
     store = get_memory()
     if not store.enabled:
         return _disabled()
+    notes = _notes()
 
     name = (key or "").strip()
     if not name:
         # A bare "what do you know about me" is a listing, not a failure.
         facts = {**store.profile, **store.preferences}
-        if not facts:
+        kept = notes.notes
+        if not facts and not kept:
             return ToolResult.success("I'm not holding anything yet.", "No stored facts.")
         listing = "\n".join(f"  {k}: {v}" for k, v in facts.items())
+        recent = sorted(kept, key=lambda n: n.updated, reverse=True)[:10]
+        if recent:
+            listing += f"\nNotes ({len(kept)}, newest first):\n" + "\n".join(
+                f"  {n.text}" for n in recent
+            )
+        total = len(facts) + len(kept)
         return ToolResult.success(
-            f"I've got {len(facts)} things on you.",
+            f"I've got {total} things on you.",
             f"Stored facts ({len(facts)}):\n{listing}",
         )
 
     found = store.recall(name)
-    if found is None:
-        return ToolResult.failure(
-            f"Nothing on {name}.",
-            f"No stored fact for '{name}'. Use remember_fact to set one.",
+    if found is not None:
+        return ToolResult.success(f"{name.capitalize()}: {found}.", f"{name} = {found}")
+
+    hits = notes.search(name, limit=3, min_score=config.SEMANTIC_RECALL_MIN_SCORE)
+    if hits:
+        notes.touch(hits)
+        more = len(hits) - 1
+        speech = f"You told me: {hits[0].note.text}"
+        if not speech.endswith((".", "!", "?")):
+            speech += "."
+        if more:
+            speech += f" I've {more} more that might fit."
+        return ToolResult.success(
+            speech,
+            f"Notes matching '{name}':\n"
+            + "\n".join(f"  ({h.score:.2f}) {h.note.text}" for h in hits),
         )
-    return ToolResult.success(f"{name.capitalize()}: {found}.", f"{name} = {found}")
+    return ToolResult.failure(
+        f"Nothing on {name}.",
+        f"No stored fact or note for '{name}'. Use remember_fact to save one.",
+    )
 
 
 def manage_todo(

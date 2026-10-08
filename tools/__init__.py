@@ -113,6 +113,8 @@ _ALLOWED_ARGS["agent_task"] |= {"notes", "max_rounds", "start", "approved"}
 # a paused run carries its progress, and the risk the user just said yes to,
 # back in through its own confirmation.
 _ALLOWED_ARGS["browser_task"] |= {"notes", "approved"}
+# The note ids a forget confirmation showed; the yes deletes exactly those.
+_ALLOWED_ARGS["remember_fact"] |= {"ids"}
 # `confirmed` is injected by the core loop after a spoken yes, so it is
 # never something the model can set for itself.
 #
@@ -134,6 +136,8 @@ for _gated in (
     # `manage_todo clear` wipes a list the user built by hand. Same gate as a
     # file delete, for the same reason: a misheard "clear my list" should ask.
     "manage_todo",
+    # Forgetting notes by search, or everything, asks first.
+    "remember_fact",
     "mouse_action",
     "keyboard_action",
     "screen_task",
@@ -151,7 +155,9 @@ for _gated in (
 # page that told the model to add it would have done the same. So the core
 # loop strips these from every call the model makes, and only a replay of a
 # confirmation can supply them.
-CONFIRMATION_ONLY_ARGS: frozenset[str] = frozenset({"confirmed", "notes", "approved"})
+CONFIRMATION_ONLY_ARGS: frozenset[str] = frozenset(
+    {"confirmed", "notes", "approved", "ids"}
+)
 
 
 def from_model(arguments: Any) -> Any:
@@ -227,7 +233,10 @@ def dispatch(
     for key, value in list(kwargs.items()):
         if isinstance(value, bool) or value is None:
             continue
-        if key in {"start_claude", "background", "confirmed", "recursive", "headless", "discard"}:
+        if key in {
+            "start_claude", "background", "confirmed", "recursive", "headless",
+            "discard", "forget",
+        }:
             kwargs[key] = str(value).strip().lower() in {"true", "1", "yes"}
         elif not isinstance(value, str):
             kwargs[key] = str(value)

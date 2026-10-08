@@ -22,7 +22,7 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _reset_guard(monkeypatch):
+def _reset_guard(monkeypatch, tmp_path):
     """Start every test with the runaway limiter empty and lockdown off.
 
     The audit log goes with it. It is the one guard that writes outside the
@@ -51,6 +51,12 @@ def _reset_guard(monkeypatch):
     # Learned hearing lives in STATE_DIR like the audit log, and the suite
     # must neither read the user's real one nor teach it test sentences.
     monkeypatch.setattr(config, "STT_LEARN", False, raising=False)
+    # Long-term notes: never the user's real file, never a real embedding
+    # call. Tests of the store build their own against tmp_path.
+    monkeypatch.setattr(config, "SEMANTIC_EMBEDDINGS", "off", raising=False)
+    monkeypatch.setattr(
+        config, "SEMANTIC_FILE", tmp_path / "semantic_memory.json", raising=False
+    )
     # On a GNOME Wayland machine "auto" opens a real Mutter remote-desktop
     # session - GNOME's screen-sharing indicator, real injected input - and
     # on others a real uinput device. Tests that want a backend ask for one.

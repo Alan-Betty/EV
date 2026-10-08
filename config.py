@@ -574,8 +574,23 @@ TERMINAL_SPAWN_S = _env_float("EV_TERMINAL_SPAWN_S", 2.5)
 # Nothing is written to disk unless the user explicitly asks for a saved copy,
 # and that path goes through `file_manager`'s root check like any other write.
 VISION_ENABLED = _env_bool("EV_VISION_ENABLED", True)
-# Defaults to whatever the brain is using, so one key covers both.
-VISION_PROVIDER = _env("EV_VISION_PROVIDER", "").lower() or LLM_PROVIDER
+# auto (default): Gemini when GEMINI_API_KEY is set, else the brain's
+# provider. Gemini's vision quota is its own, so a screen task stops eating
+# the Groq per-minute buckets the brain lives on. In auto, a rate-limited or
+# failing provider hands the frame to the other one (VISION_FAILOVER) and is
+# rested until its stated retry time. A named provider is used alone.
+VISION_PROVIDER = _env("EV_VISION_PROVIDER", "auto").lower() or "auto"
+VISION_FAILOVER = _env_bool("EV_VISION_FAILOVER", True)
+
+
+def vision_provider() -> str:
+    """The provider vision asks first: 'gemini' or 'groq'."""
+    choice = (VISION_PROVIDER or "auto").lower()
+    if choice == "auto":
+        return "gemini" if GEMINI_API_KEY else (LLM_PROVIDER or "groq")
+    return choice
+
+
 GROQ_VISION_MODEL = _env("EV_GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
 GROQ_VISION_FALLBACKS = [
     name.strip()
@@ -1143,6 +1158,30 @@ MEMORY_MAX_TODOS = _env_int("EV_MEMORY_MAX_TODOS", 50)
 # How many of those open items the model is actually shown. The list may
 # legitimately be long; the prompt may not.
 MEMORY_CONTEXT_TODOS = _env_int("EV_MEMORY_CONTEXT_TODOS", 8)
+
+# Long-term notes, recalled by meaning (ev/semantic_memory.py). Free-form
+# "remember the spare key is under the mat" lands here, not in the fact store.
+SEMANTIC_ENABLED = _env_bool("EV_SEMANTIC_ENABLED", True)
+SEMANTIC_FILE = Path(_env("EV_SEMANTIC_FILE") or (STATE_DIR / "semantic_memory.json"))
+# Over this, near notes merge and the least used are archived, not lost.
+SEMANTIC_MAX_NOTES = _env_int("EV_SEMANTIC_MAX_NOTES", 200)
+SEMANTIC_MAX_CHARS = _env_int("EV_SEMANTIC_MAX_CHARS", 400)
+# A new note this close to an old one replaces it (an update, not a twin).
+SEMANTIC_MERGE_SIM = _env_float("EV_SEMANTIC_MERGE_SIM", 0.8)
+# Per-turn recall: notes scoring over the floor ride in the prompt, capped.
+SEMANTIC_CONTEXT_ITEMS = _env_int("EV_SEMANTIC_CONTEXT_ITEMS", 3)
+SEMANTIC_CONTEXT_CHARS = _env_int("EV_SEMANTIC_CONTEXT_CHARS", 360)
+SEMANTIC_CONTEXT_MIN_SCORE = _env_float("EV_SEMANTIC_CONTEXT_MIN_SCORE", 0.5)
+SEMANTIC_RECALL_MIN_SCORE = _env_float("EV_SEMANTIC_RECALL_MIN_SCORE", 0.25)
+# auto = Gemini embeddings when GEMINI_API_KEY is set; off = lexical only.
+# Embeddings are only fetched in tool calls, never on the per-turn path.
+SEMANTIC_EMBEDDINGS = _env("EV_SEMANTIC_EMBEDDINGS", "auto").lower()
+SEMANTIC_EMBED_MODEL = _env("EV_SEMANTIC_EMBED_MODEL", "gemini-embedding-001")
+SEMANTIC_EMBED_DIM = _env_int("EV_SEMANTIC_EMBED_DIM", 256)
+SEMANTIC_EMBED_TIMEOUT_S = _env_float("EV_SEMANTIC_EMBED_TIMEOUT_S", 8.0)
+# Cosine below which two texts are noise. Measured on gemini-embedding-001
+# at 256 dims: unrelated 0.58-0.71, true matches 0.76-0.83. Retune per model.
+SEMANTIC_EMBED_FLOOR = _env_float("EV_SEMANTIC_EMBED_FLOOR", 0.72)
 
 # What E.V. calls the user out loud. Overridden by a `name` stored through
 # `remember_fact`, so "call me Al" outranks the file - the value here is only

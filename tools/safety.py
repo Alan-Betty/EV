@@ -138,6 +138,8 @@ HIGH_RISK_REASONS: frozenset[str] = frozenset(
         # lose work that no undo brings back.
         "discards unsaved work",
         "force quits a program",
+        # remember_fact forget=everything: every saved fact and note.
+        "erases all saved memories",
     }
 )
 

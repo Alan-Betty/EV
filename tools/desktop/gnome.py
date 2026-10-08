@@ -107,6 +107,35 @@ def exists(window: WindowInfo) -> bool:
     return any(item.hwnd == window.hwnd for item in list_windows(limit=200))
 
 
+# -- kill-switch hotkey ------------------------------------------------------
+# Wayland lets no client grab a global key; the compositor can. Extension
+# version 2 holds the accelerator and counts presses; E.V. polls the count.
+# An older extension answers UnknownMethod, and the caller falls back to X11.
+def grab_kill(accelerator: str) -> bool:
+    try:
+        (action,) = bus.call(NAME, PATH, NAME, "GrabKill", "s", (accelerator,), timeout=2.0)
+    except Exception as exc:
+        log.debug("org.ev.Windows GrabKill failed: %s", exc)
+        return False
+    return bool(action)
+
+
+def release_kill() -> None:
+    try:
+        bus.call(NAME, PATH, NAME, "ReleaseKill", timeout=2.0)
+    except Exception as exc:
+        log.debug("org.ev.Windows ReleaseKill failed: %s", exc)
+
+
+def kill_count() -> int | None:
+    """Presses so far, or None when the extension cannot be asked."""
+    try:
+        (count,) = bus.call(NAME, PATH, NAME, "KillCount", timeout=1.0)
+    except Exception:
+        return None
+    return int(count)
+
+
 def install() -> tuple[bool, str]:
     """Copy the extension into the user's extensions folder and enable it.
 

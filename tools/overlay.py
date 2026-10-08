@@ -46,6 +46,7 @@ unannounced rather than not at all.
 from __future__ import annotations
 
 import ctypes
+import gc
 import logging
 import queue
 import re
@@ -58,7 +59,7 @@ import config
 
 log = logging.getLogger("ev.tools.overlay")
 
-from tools.desktop.system import IS_WINDOWS  # noqa: E402
+from tools.desktop.system import IS_LINUX, IS_WINDOWS  # noqa: E402
 
 # Keyed out by the window manager, so the middle of the screen is both
 # see-through and click-through. Deliberately a colour nothing else uses:
@@ -107,11 +108,23 @@ def _window_handle(widget: Any) -> int:
     return parent or handle
 
 
-def _harden(widget: Any, click_through: bool) -> None:
-    """Make a Tk window unfocusable, invisible to Alt-Tab, optionally inert."""
+def _harden(widget: Any, click_through: bool) -> bool:
+    """Make a Tk window unfocusable, invisible to Alt-Tab, optionally inert.
+
+    True when click-through was asked for and applied. On Linux an
+    override-redirect window already takes no focus and stays out of the
+    switcher; click-through is an empty X Shape input region.
+    """
+    if IS_LINUX:
+        if not click_through:
+            return False
+        from tools.desktop import xhud
+
+        widget.update_idletasks()
+        return xhud.shape_window(xhud.window_ids(widget), None, click_through=True)
     user32 = _user32()
     if user32 is None:
-        return
+        return False
     try:
         handle = _window_handle(widget)
         getter = getattr(user32, "GetWindowLongPtrW", user32.GetWindowLongW)
@@ -121,8 +134,10 @@ def _harden(widget: Any, click_through: bool) -> None:
         if click_through:
             style |= _WS_EX_TRANSPARENT
         setter(handle, _GWL_EXSTYLE, style)
+        return click_through
     except Exception as exc:  # pragma: no cover - cosmetic either way
         log.debug("Could not set overlay window styles: %s", exc)
+        return False
 
 
 def _raise_without_focus(widget: Any) -> None:
@@ -134,6 +149,14 @@ def _raise_without_focus(widget: Any) -> None:
     would also hand the overlay focus, which is the one thing it must never
     take.
     """
+    if IS_LINUX:
+        # X stacking and X focus are separate: raising an override-redirect
+        # window restacks it and touches no one's focus.
+        try:
+            widget.lift()
+        except Exception:  # pragma: no cover - cosmetic
+            pass
+        return
     user32 = _user32()
     if user32 is None:
         return
@@ -321,6 +344,16 @@ class Overlay:
                 root.destroy()
             except Exception:
                 pass
+            # The interpreter must die on the thread that made it. A widget
+            # left on `self`, or a widget cycle collected later by some other
+            # thread's GC, frees it there instead - and Tcl answers that with
+            # "Tcl_AsyncDelete: async handler deleted by the wrong thread"
+            # and abort(), taking E.V. down after every takeover. Measured:
+            # exit 134 on the first gc.collect() after a run.
+            self._glow_canvas = None
+            self._badge_canvas = None
+            del root
+            gc.collect()
 
     def _build(self) -> Any:
         import tkinter as tk
@@ -362,11 +395,20 @@ class Overlay:
         reads as an error dialog; this reads as a viewfinder, which is what
         it actually is.
         """
+        glow = None
         try:
             glow = tk.Toplevel(root)
             glow.overrideredirect(True)
             glow.attributes("-topmost", True)
-            glow.attributes("-transparentcolor", _KEY_COLOUR)
+            # Windows keys a colour out; X11 has no such attribute, and gets
+            # an X Shape cut to the band instead (tools/desktop/xhud.py).
+            keyed = True
+            try:
+                glow.attributes("-transparentcolor", _KEY_COLOUR)
+            except Exception:
+                keyed = False
+            if not keyed and not IS_LINUX:
+                raise RuntimeError("no colour keying and no shape extension")
             glow.configure(bg=_KEY_COLOUR)
             width = glow.winfo_screenwidth()
             height = glow.winfo_screenheight()
@@ -425,10 +467,27 @@ class Overlay:
                 pass
             # Always inert, whatever the panel is set to: this one covers
             # every pixel of the screen, so a click it ate could be any click.
-            _harden(glow, click_through=True)
+            if keyed:
+                _harden(glow, click_through=True)
+            else:
+                from tools.desktop import xhud
+
+                glow.update_idletasks()
+                # Only the crisp edge and the brackets survive the cut: the
+                # halo fades towards the key colour, which unkeyed is black.
+                band = max(2, config.AGENT_OVERLAY_BORDER_PX // 3)
+                cut = xhud.frame_rects(width, height, band, arm, max(band, thick // 2 + 1))
+                if not xhud.shape_window(xhud.window_ids(glow), cut, click_through=True):
+                    # A full-screen sheet that eats clicks is worse than none.
+                    raise RuntimeError("X Shape unavailable")
             return glow
         except Exception as exc:
             log.debug("No full-screen frame: %s", exc)
+            if glow is not None:
+                try:
+                    glow.destroy()
+                except Exception:
+                    pass
             self._glow_canvas = None
             self._brackets = []
             return None
@@ -620,7 +679,8 @@ class Overlay:
     def _kill_hint(self) -> str:
         hotkey = (config.AGENT_KILL_HOTKEY or "").strip()
         parts = []
-        if hotkey and config.AGENT_HOTKEY_ENABLED:
+        live = getattr(self, "hotkey_live", None)
+        if hotkey and config.AGENT_HOTKEY_ENABLED and live is not False:
             parts.append(hotkey.upper())
         parts.append("say “stop everything”")
         # The STOP button is not listed when it is drawn: it is right there,
@@ -789,10 +849,19 @@ class KillSwitch:
         self._thread_id = 0
         self._registered = threading.Event()
         self._started = threading.Event()
+        # Linux: the compositor's grab (GNOME extension) or an X11 grab.
+        self._halt = threading.Event()
+        self._gnome = False
+        self._x11: Any = None
+        self.route = ""
 
     def start(self) -> bool:
         """Register it. False means the user has the other exits, not none."""
-        if not config.AGENT_HOTKEY_ENABLED or not IS_WINDOWS:
+        if not config.AGENT_HOTKEY_ENABLED:
+            return False
+        if IS_LINUX:
+            return self._start_linux()
+        if not IS_WINDOWS:
             return False
         if parse_hotkey(self.combo) is None:
             log.warning("Unusable kill-switch hotkey %r; not registered", self.combo)
@@ -804,7 +873,72 @@ class KillSwitch:
         self._started.wait(timeout=2.0)
         return self._registered.is_set()
 
+    def _start_linux(self) -> bool:
+        """GNOME Wayland: the Shell extension holds the key (global, works
+        over full screen apps). Otherwise XGrabKey: global on X11, and on
+        Wayland only while an XWayland window has focus - better than none."""
+        from tools.desktop import system, xhud
+
+        accel = xhud.gnome_accelerator(self.combo)
+        if not accel:
+            log.warning("Unusable kill-switch hotkey %r; not registered", self.combo)
+            return False
+        if system.is_wayland() and system.desktop() == "gnome":
+            from tools.desktop import gnome
+
+            if gnome.available() and gnome.grab_kill(accel):
+                self._gnome = True
+                self.route = "gnome"
+                self._thread = threading.Thread(
+                    target=self._poll_gnome, name="ev-killswitch-gnome", daemon=True
+                )
+                self._thread.start()
+                return True
+        grab = xhud.X11KillGrab(self.combo, self._on_fire)
+        if grab.start():
+            self._x11 = grab
+            self.route = "x11-wayland" if system.is_wayland() else "x11"
+            if system.is_wayland():
+                log.info(
+                    "Kill switch on XWayland only; run --install-gnome-extension "
+                    "for a global one"
+                )
+            return True
+        return False
+
+    def _poll_gnome(self) -> None:
+        from tools.desktop import gnome
+
+        baseline = gnome.kill_count()
+        while not self._halt.wait(0.15):
+            count = gnome.kill_count()
+            if count is None:
+                continue
+            if baseline is None:
+                baseline = count
+                continue
+            if count > baseline:
+                log.warning("Kill switch pressed (%s)", self.combo)
+                try:
+                    self._on_fire()
+                except Exception as exc:
+                    log.debug("Kill callback raised: %s", exc)
+                return
+
     def stop(self) -> None:
+        self._halt.set()
+        if self._x11 is not None:
+            self._x11.stop()
+            self._x11 = None
+        if self._gnome:
+            from tools.desktop import gnome
+
+            gnome.release_kill()
+            self._gnome = False
+            thread = self._thread
+            if thread is not None and thread is not threading.current_thread():
+                thread.join(timeout=1.0)
+            return
         user32 = _user32()
         if user32 is None or not self._thread_id:
             return
@@ -886,8 +1020,10 @@ class Takeover:
         self.hotkey_live = False
 
     def __enter__(self) -> "Takeover":
-        self.drawing = self._overlay.start()
+        # Hotkey first, so the panel only names a key that really works.
         self.hotkey_live = self._switch.start()
+        self._overlay.hotkey_live = self.hotkey_live
+        self.drawing = self._overlay.start()
         return self
 
     def __exit__(self, *_: object) -> None:

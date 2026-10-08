@@ -3,8 +3,9 @@
  * Under Wayland no ordinary program may list, focus or close another
  * program's windows; only the compositor can. This extension runs inside
  * GNOME Shell and offers exactly that on the session bus as org.ev.Windows:
- * List, Activate, Close, Minimize, Maximize. Nothing else - no Eval, no
- * input, no screenshots.
+ * List, Activate, Close, Minimize, Maximize, plus a kill-switch hotkey grab
+ * (GrabKill / ReleaseKill / KillCount). Nothing else - no Eval, no input,
+ * no screenshots.
  *
  * Close is Meta.Window.delete(): the same request as the title bar's X, so
  * an editor with unsaved work asks its own "Save changes?" question.
@@ -38,10 +39,68 @@ const IFACE = `
       <arg type="t" direction="in" name="id"/>
       <arg type="b" direction="out" name="ok"/>
     </method>
+    <method name="GrabKill">
+      <arg type="s" direction="in" name="accelerator"/>
+      <arg type="u" direction="out" name="action"/>
+    </method>
+    <method name="ReleaseKill">
+      <arg type="b" direction="out" name="ok"/>
+    </method>
+    <method name="KillCount">
+      <arg type="u" direction="out" name="count"/>
+    </method>
   </interface>
 </node>`;
 
 class WindowService {
+    constructor() {
+        this._killAction = 0;
+        this._killCount = 0;
+        this._killSignal = global.display.connect('accelerator-activated',
+            (_display, action) => {
+                if (this._killAction && action === this._killAction)
+                    this._killCount += 1;
+            });
+    }
+
+    destroy() {
+        this.ReleaseKill();
+        if (this._killSignal) {
+            global.display.disconnect(this._killSignal);
+            this._killSignal = 0;
+        }
+    }
+
+    // E.V.'s kill switch while it drives the screen. Wayland gives no client
+    // a global hotkey, so the compositor holds it; E.V. polls KillCount.
+    // Allowed in every action mode, so it works over full screen apps too.
+    GrabKill(accelerator) {
+        this.ReleaseKill();
+        const action = global.display.grab_accelerator(
+            accelerator, Meta.KeyBindingFlags.NONE);
+        if (action === Meta.KeyBindingAction.NONE)
+            return 0;
+        Main.wm.allowKeybinding(
+            Meta.external_binding_name_for_action(action), Shell.ActionMode.ALL);
+        this._killAction = action;
+        return action;
+    }
+
+    ReleaseKill() {
+        if (!this._killAction)
+            return false;
+        Main.wm.allowKeybinding(
+            Meta.external_binding_name_for_action(this._killAction),
+            Shell.ActionMode.NONE);
+        global.display.ungrab_accelerator(this._killAction);
+        this._killAction = 0;
+        return true;
+    }
+
+    KillCount() {
+        return this._killCount;
+    }
+
     _windows() {
         // Most-recently-used first, all workspaces: the order Alt+Tab uses,
         // which is also the order "the window I was just in" lives in.
@@ -114,13 +173,18 @@ class WindowService {
 
 export default class EvWindowsExtension extends Extension {
     enable() {
-        this._service = Gio.DBusExportedObject.wrapJSObject(IFACE, new WindowService());
+        this._impl = new WindowService();
+        this._service = Gio.DBusExportedObject.wrapJSObject(IFACE, this._impl);
         this._service.export(Gio.DBus.session, '/org/ev/Windows');
         this._owner = Gio.bus_own_name(
             Gio.BusType.SESSION, 'org.ev.Windows', Gio.BusNameOwnerFlags.NONE, null, null, null);
     }
 
     disable() {
+        if (this._impl) {
+            this._impl.destroy();
+            this._impl = null;
+        }
         if (this._service) {
             this._service.unexport();
             this._service = null;

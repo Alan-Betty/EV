@@ -1,7 +1,7 @@
 {
   "uuid": "ev-windows@ev.local",
   "name": "E.V. Windows",
-  "description": "Lets the E.V. voice assistant list, focus, close, minimise and maximise windows on GNOME Wayland, over the session bus (org.ev.Windows).",
+  "description": "Lets the E.V. voice assistant list, focus, close, minimise and maximise windows on GNOME Wayland, over the session bus (org.ev.Windows), and holds its kill-switch hotkey while it drives the screen.",
   "shell-version": ["45", "46", "47", "48", "49", "50"],
-  "version": 1
+  "version": 2
 }
