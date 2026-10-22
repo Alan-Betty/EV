@@ -319,3 +319,78 @@
   .tk-f { @apply text-electric; }
   .tk-d { @apply text-amber-200/80; }
 }
+
+/* Activity -------------------------------------------------------------- */
+@layer components {
+  .log-chip {
+    @apply inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 font-mono text-[11.5px] text-slate-400 transition-colors hover:bg-white/[0.04] hover:text-white;
+  }
+  .log-chip [data-n] { @apply tabular text-slate-600; }
+  .log-chip[aria-pressed='true'] { @apply bg-white/[0.07] text-white; }
+  .log-chip[aria-pressed='true'] [data-n] { @apply text-electric; }
+
+  .log-search {
+    @apply flex h-8 w-full items-center gap-2 rounded-lg border border-white/[0.08] bg-black/30 px-2.5 transition-colors focus-within:border-cyan-400/50 sm:w-56;
+  }
+  .log-search input {
+    @apply min-w-0 flex-1 bg-transparent font-mono text-[12px] text-slate-200 placeholder:text-slate-600 focus:outline-none;
+  }
+  .log-search input::-webkit-search-cancel-button { filter: invert(0.6); }
+
+  .log-row {
+    @apply grid min-h-[30px] grid-cols-[4.25rem_3.75rem_minmax(0,1fr)_auto] items-center gap-3 px-4 py-0.5 hover:bg-white/[0.025];
+    animation: row-in 0.35s ease-out;
+  }
+  @keyframes row-in { from { background-color: rgba(0, 242, 254, 0.06); } }
+  .log-time { @apply tabular text-slate-600; }
+  .log-type { @apply text-slate-500; }
+  .log-type[data-type='commit'] { @apply text-violet-300; }
+  .log-type[data-type='build'] { @apply text-sky-300; }
+  .log-type[data-type='test'] { @apply text-emerald-300; }
+  .log-type[data-type='ipc'] { @apply text-electric/80; }
+  .log-msg { @apply truncate text-slate-300; }
+  .log-msg[data-status='warn'] { @apply text-amber-200/90; }
+  .log-status { @apply text-[10.5px] text-emerald-400/80; }
+  .log-status[data-status='warn'] { @apply text-amber-300/90; }
+
+  .log-hash {
+    @apply inline-flex h-6 items-center gap-1.5 rounded-md border border-white/[0.07] bg-white/[0.03] px-1.5 text-[11px] text-slate-400
+      transition-colors hover:border-cyan-400/40 hover:text-electric;
+  }
+  .log-hash .check-icon, [data-copied] .copy-icon { display: none; }
+  [data-copied] .check-icon { display: inline; @apply text-pulse; }
+
+  .log-live-dot { @apply size-1.5 rounded-full bg-slate-600; }
+  .log-live[data-live='true'] .log-live-dot { @apply bg-pulse animate-pulse; }
+  .log-live[data-live='true'] .log-live-off,
+  .log-live[data-live='false'] .log-live-on { display: none; }
+
+  .readiness-track { @apply relative h-2 overflow-hidden rounded-full bg-white/[0.06]; }
+  .readiness-fill {
+    @apply absolute inset-y-0 left-0 rounded-full;
+    width: var(--fill);
+    background: linear-gradient(90deg, #00f2fe, #7f00ff);
+    box-shadow: 0 0 16px rgba(0, 242, 254, 0.45);
+    transition: width 1.4s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .milestone { @apply flex items-center gap-3 rounded-lg px-2 py-2 text-[13.5px] text-slate-400; }
+  .milestone-mark { @apply grid size-[18px] shrink-0 place-items-center rounded-full border border-white/15; }
+  .milestone[data-state='done'] { @apply text-slate-200; }
+  .milestone[data-state='done'] .milestone-mark { @apply border-pulse/50 bg-pulse/15 text-pulse; }
+  .milestone[data-state='active'] { @apply bg-white/[0.03] text-white; }
+  .milestone[data-state='active'] .milestone-mark { @apply border-electric/60; box-shadow: inset 0 0 0 3px #0f1117, inset 0 0 0 9px rgba(0, 242, 254, 0.8); }
+  .milestone[data-state='todo'] .milestone-mark { @apply border-dashed; }
+}
+
+/* Toast ----------------------------------------------------------------- */
+.toast {
+  @apply pointer-events-none fixed bottom-6 left-1/2 z-[90] flex items-center gap-2 rounded-xl border border-white/10 px-3.5 py-2.5 text-[13px] text-slate-100 shadow-lift backdrop-blur-xl;
+  background: rgb(22 25 34 / 0.9);
+  transform: translate(-50%, 12px);
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.toast[data-show='true'] { opacity: 1; transform: translate(-50%, 0); }
+.toast-dot { @apply size-1.5 rounded-full bg-pulse; }
+.toast[data-tone='error'] .toast-dot { @apply bg-rose-400; }

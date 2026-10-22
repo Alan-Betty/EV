@@ -331,7 +331,60 @@
           </div>
         </div>
       </section>
-      <!-- @activity -->
+      <section id="activity" aria-labelledby="activity-title" class="relative py-24 sm:py-32">
+        <div class="shell">
+          <div class="section-head">
+            <h2 id="activity-title">Built in the open, every commit</h2>
+            <p>Commits, builds, test runs and IPC events from the release pipeline as they land. Filter by kind, search, and copy any commit hash.</p>
+          </div>
+
+          <div class="mt-12 grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+            <div class="surface flex min-w-0 flex-col overflow-hidden rounded-2xl border border-white/[0.08] backdrop-blur-xl">
+              <div class="flex flex-wrap items-center gap-2 border-b border-white/[0.06] p-3">
+                <div id="log-filters" class="flex flex-wrap gap-1" role="group" aria-label="Filter by kind">
+                  <button type="button" class="log-chip" data-filter="all" aria-pressed="true">all <span data-n></span></button>
+                  <button type="button" class="log-chip" data-filter="commit" aria-pressed="false">commit <span data-n></span></button>
+                  <button type="button" class="log-chip" data-filter="build" aria-pressed="false">build <span data-n></span></button>
+                  <button type="button" class="log-chip" data-filter="test" aria-pressed="false">test <span data-n></span></button>
+                  <button type="button" class="log-chip" data-filter="ipc" aria-pressed="false">ipc <span data-n></span></button>
+                </div>
+                <label class="log-search ml-auto">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" class="size-3.5 shrink-0 text-slate-500" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="m20 20-4.2-4.2" /></svg>
+                  <span class="sr-only">Search logs</span>
+                  <input id="log-search" type="search" placeholder="Search logs" autocomplete="off" spellcheck="false" />
+                  <kbd class="kbd hidden sm:inline-flex" aria-hidden="true">/</kbd>
+                </label>
+              </div>
+
+              <ol id="log-list" class="h-[420px] overflow-y-auto overscroll-contain py-2 font-mono text-[11.5px] sm:text-[12px]" aria-label="Activity log"></ol>
+              <p id="log-empty" class="py-10 text-center text-[13px] text-slate-500" hidden>No entries match. Clear the search or pick another kind.</p>
+
+              <div class="flex h-10 items-center gap-3 border-t border-white/[0.06] px-3 font-mono text-[10.5px] text-slate-500">
+                <span id="log-live" class="log-live flex items-center gap-1.5" data-live="true"><span class="log-live-dot"></span><span class="log-live-on">streaming</span><span class="log-live-off">paused</span></span>
+                <span id="log-count" class="tabular"></span>
+                <button id="log-pause" type="button" class="ml-auto inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-slate-400 transition-colors hover:bg-white/[0.05] hover:text-white" aria-pressed="false">
+                  <span data-icon class="grid place-items-center"></span><span data-label>Pause</span>
+                </button>
+              </div>
+            </div>
+
+            <aside id="readiness" class="glass relative flex flex-col overflow-hidden rounded-2xl p-6" aria-labelledby="readiness-title" style="--fill: 0%">
+              <h3 id="readiness-title" class="text-[15px] font-semibold text-white">Release readiness</h3>
+              <p class="mt-1 text-[13px] text-slate-500">Toward v1.0.0 Gold</p>
+
+              <p class="mt-7 flex items-baseline justify-between">
+                <span data-percent class="text-[44px] font-semibold leading-none tracking-[-0.04em] text-white tabular">0%</span>
+                <span data-closed class="text-right font-mono text-[11px] text-slate-500"></span>
+              </p>
+              <div id="readiness-bar" class="readiness-track mt-4" role="progressbar" aria-labelledby="readiness-title" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <span class="readiness-fill"></span>
+              </div>
+
+              <ol id="milestones" class="mt-7 space-y-1"></ol>
+            </aside>
+          </div>
+        </div>
+      </section>
       <!-- @download -->
     </main>
 
