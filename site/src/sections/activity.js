@@ -1,17 +1,17 @@
 import { POOLS, READINESS } from '../data/activity.js';
+import REPO from '../data/repo.json';
 import { copy, flashCopied } from '../lib/clipboard.js';
 import { icon } from '../lib/icons.js';
 
 const MAX_ROWS = 240;
-const TYPES = Object.keys(POOLS);
+const TYPES = ['commit', ...Object.keys(POOLS)];
 
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
-const hex = (n) => Array.from({ length: n }, () => '0123456789abcdef'[(Math.random() * 16) | 0]).join('');
 const clock = (d) => d.toTimeString().slice(0, 8);
+const day = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: '2-digit' });
 const escape = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
 function makeEntry(type, at = new Date()) {
-  if (type === 'commit') return { type, at, msg: pick(POOLS.commit), hash: hex(7), status: 'ok' };
   const [msg, status] = pick(POOLS[type]);
   return { type, at, msg, status };
 }
@@ -45,12 +45,12 @@ export function initActivity() {
     li.dataset.type = entry.type;
     li.dataset.text = `${entry.type} ${entry.msg} ${entry.hash ?? ''}`.toLowerCase();
     li.innerHTML = `
-      <time class="log-time">${clock(entry.at)}</time>
+      <time class="log-time">${entry.date ? day(entry.date) : clock(entry.at)}</time>
       <span class="log-type" data-type="${entry.type}">${entry.type}</span>
       <span class="log-msg" data-status="${entry.status}">${escape(entry.msg)}</span>
       ${
         entry.hash
-          ? `<button type="button" class="log-hash" data-hash="${entry.hash}" aria-label="Copy commit hash ${entry.hash}"><span>${entry.hash}</span><span class="copy-icon">${icon.copy('size-3')}</span><span class="check-icon">${icon.check('size-3')}</span></button>`
+          ? `<button type="button" class="log-hash" data-hash="${entry.full ?? entry.hash}" aria-label="Copy commit hash ${entry.hash}"><span>${entry.hash}</span><span class="copy-icon">${icon.copy('size-3')}</span><span class="check-icon">${icon.check('size-3')}</span></button>`
           : `<span class="log-status" data-status="${entry.status}">${entry.status === 'info' ? '' : entry.status}</span>`
       }`;
     li.hidden = !matches(li);
@@ -84,17 +84,20 @@ export function initActivity() {
     list.scrollTop = list.scrollHeight;
   }
 
-  // Seed with a believable recent history, oldest first.
+  // E.V.'s real history first, oldest at the top, then a short replayed session.
+  [...REPO.commits].reverse().forEach((c) =>
+    append({ type: 'commit', date: c.date, msg: c.subject, hash: c.hash.slice(0, 7), full: c.hash, status: 'ok' }),
+  );
   const now = Date.now();
-  const seedTypes = ['ipc', 'commit', 'build', 'test', 'commit', 'ipc', 'test', 'build', 'commit', 'ipc', 'test', 'commit', 'build', 'ipc', 'commit', 'test', 'ipc', 'build'];
-  seedTypes.forEach((t, i) => append(makeEntry(t, new Date(now - (seedTypes.length - i) * 47_000))));
+  const seedTypes = ['voice', 'tool', 'test', 'guard', 'voice', 'tool'];
+  seedTypes.forEach((t, i) => append(makeEntry(t, new Date(now - (seedTypes.length - i) * 9_000))));
 
   // Stream
   function schedule() {
     clearTimeout(timer);
     if (paused || !onScreen || document.hidden) return;
     timer = setTimeout(() => {
-      const weights = ['ipc', 'ipc', 'ipc', 'test', 'test', 'build', 'commit', 'commit'];
+      const weights = ['tool', 'tool', 'tool', 'voice', 'voice', 'test', 'test', 'guard'];
       append(makeEntry(pick(weights)));
       schedule();
     }, 900 + Math.random() * 1600);
@@ -136,14 +139,17 @@ export function initActivity() {
   list.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-hash]');
     if (!btn) return;
-    copy(btn.dataset.hash, `Copied ${btn.dataset.hash}`).then((ok) => ok && flashCopied(btn));
+    copy(btn.dataset.hash, `Copied ${btn.dataset.hash.slice(0, 7)}`).then((ok) => ok && flashCopied(btn));
   });
 
   // Readiness: fill the bars once, when the panel first comes into view.
   const panel = root.querySelector('#readiness');
-  panel.querySelector('[data-percent]').textContent = `${READINESS.percent}%`;
-  panel.querySelector('[data-closed]').textContent = `${READINESS.closed} of ${READINESS.total} issues closed`;
-  panel.querySelector('#readiness-bar').setAttribute('aria-valuenow', READINESS.percent);
+  const done = READINESS.milestones.filter((m) => m.state === 'done').length;
+  const partial = READINESS.milestones.reduce((n, m) => n + (m.state === 'active' ? m.progress / 100 : 0), 0);
+  const percent = Math.round(((done + partial) / READINESS.milestones.length) * 100);
+  panel.querySelector('[data-percent]').textContent = `${percent}%`;
+  panel.querySelector('[data-closed]').textContent = `${done} of ${READINESS.milestones.length} shipped`;
+  panel.querySelector('#readiness-bar').setAttribute('aria-valuenow', percent);
   panel.querySelector('#milestones').innerHTML = READINESS.milestones
     .map(
       (m) => `<li class="milestone" data-state="${m.state}">
@@ -157,7 +163,7 @@ export function initActivity() {
   const io = new IntersectionObserver(([e]) => {
     if (!e.isIntersecting) return;
     io.disconnect();
-    panel.style.setProperty('--fill', `${READINESS.percent}%`);
+    panel.style.setProperty('--fill', `${percent}%`);
   }, { threshold: 0.3 });
   io.observe(panel);
 }

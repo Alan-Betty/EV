@@ -346,9 +346,10 @@
   .log-time { @apply hidden tabular text-slate-600 sm:block; }
   .log-type { @apply text-slate-500; }
   .log-type[data-type='commit'] { @apply text-violet-300; }
-  .log-type[data-type='build'] { @apply text-sky-300; }
+  .log-type[data-type='tool'] { @apply text-electric/80; }
+  .log-type[data-type='voice'] { @apply text-sky-300; }
+  .log-type[data-type='guard'] { @apply text-amber-300/90; }
   .log-type[data-type='test'] { @apply text-emerald-300; }
-  .log-type[data-type='ipc'] { @apply text-electric/80; }
   .log-msg { @apply truncate text-slate-300; }
   .log-msg[data-status='warn'] { @apply text-amber-200/90; }
   .log-status { @apply text-[10.5px] text-emerald-400/80; }

@@ -1,59 +1,50 @@
-// Pools the activity stream draws from. Placeholder content until the page is
-// pointed at a real CI / event feed.
+// What the activity log streams after the real commit history: a replay of
+// the kinds of events one E.V. session writes. The shapes come from the code
+// (tool calls, the wake and echo checks, the guard), the values are examples.
+import REPO from './repo.json';
 
 export const POOLS = {
-  commit: [
-    'fix(voice): hold barge-in until the echo level is learned',
-    'feat(vision): crop before downscale for small dialogs',
-    'perf(stt): end the utterance 600 ms after a full sentence',
-    'fix(guard): strip confirmed from model-supplied arguments',
-    'feat(ipc): reconnect to hyprland socket2 with backoff',
-    'refactor(memory): atomic writes through os.replace',
-    'feat(plugins): hot reload on inotify close_write',
-    'fix(overlay): never take focus on XWayland',
-    'test(web): live log-in and basket flow',
-    'perf(orb): cache bloom per quantised energy',
-    'feat(a11y): number AT-SPI elements for the planner',
-    'fix(audio): pin a real microphone, never a monitor source',
+  tool: [
+    ['open_app app="firefox"  launched in 0.4 s', 'ok'],
+    ['file_manager organize ~/Downloads  41 files', 'ok'],
+    ['media_control action=volume_down  65% -> 55%', 'ok'],
+    ['web_search query="lofi beats" engine=youtube', 'ok'],
+    ['app_control focus "Visual Studio Code"  window tier', 'ok'],
+    ['take_screenshot question="what does that say"  95 KB', 'ok'],
+    ['browser_task  amazon.in  3 planner calls, 0 frames', 'ok'],
+    ['remember_fact key=browser value="Firefox"', 'ok'],
+    ['manage_todo add "call the dentist"', 'ok'],
   ],
-  build: [
-    ['linux-x86_64 AppImage packed, 48.2 MB', 'ok'],
-    ['macos-arm64 dmg notarized', 'ok'],
-    ['windows-x64 msi signed', 'ok'],
-    ['tarball reproducible, digest matches previous run', 'ok'],
-    ['cache hit 94%, build 1m 52s', 'ok'],
-    ['macos-x86_64 notarization queued', 'warn'],
+  voice: [
+    ['wake matched "Eve" -> E.V.', 'info'],
+    ['end of speech after 600 ms (full sentence)', 'info'],
+    ['stt avg_logprob -0.31  accepted', 'ok'],
+    ['stt avg_logprob -1.12  doubtful, told the model', 'warn'],
+    ['barge-in: user above echo level, reply stopped', 'info'],
+    ['self-echo dropped: 6 of 7 words were its own', 'warn'],
+    ['engaged window open, no name needed', 'info'],
   ],
-  test: [
-    ['tests/test_voice.py 41 passed', 'ok'],
-    ['suite 752 passed, 0 failed in 41.8 s', 'ok'],
-    ['e2e/hyprland 12 passed', 'ok'],
-    ['test_overlay_focus passed on retry 2', 'warn'],
-    ['tests/test_web_agent.py 88 passed', 'ok'],
-    ['bench: first word 0.87 s (p50), 1.21 s (p95)', 'ok'],
+  guard: [
+    ['Confirm? terminal_command "git push origin main"', 'warn'],
+    ['refused /etc/hosts: outside FILE_ROOTS', 'warn'],
+    ['blocked: curl ... | sh never runs', 'warn'],
+    ['redacted 1 key-shaped value from a file read', 'ok'],
+    ['fenced 2.1 KB of page text as untrusted', 'ok'],
+    ['audit: 1 line appended to audit.jsonl', 'ok'],
   ],
-  ipc: [
-    ['socket2 connected', 'info'],
-    ['workspace>>3', 'info'],
-    ['activewindow>>kitty,dev', 'info'],
-    ['openwindow>>5a1c,3,code,nexus', 'info'],
-    ['monitoradded>>DP-2', 'info'],
-    ['mpris spotify PlaybackStatus=Playing', 'info'],
-    ['focuswindow 4 ms', 'ok'],
-  ],
+  test: REPO.testFiles.slice(0, 18).map((t) => [`${t.file}  ${t.tests} passed`, 'ok']),
 };
 
+// "Still janky" and "next up" from devlog.md, as a checklist toward 1.0.
 export const READINESS = {
-  target: 'v1.0.0 Gold',
-  percent: 78,
-  closed: 142,
-  total: 182,
+  target: '1.0',
   milestones: [
-    { label: 'Full-duplex voice', state: 'done' },
-    { label: 'Vision loop with verification', state: 'done' },
-    { label: 'Hyprland and X11 IPC', state: 'done' },
-    { label: 'Plugin API freeze', state: 'active', progress: 60 },
-    { label: 'Signed builds on every platform', state: 'todo' },
-    { label: 'External security audit', state: 'todo' },
+    { label: 'Voice loop with barge-in', state: 'done' },
+    { label: 'Browser errands through the DOM', state: 'done' },
+    { label: 'Desktop apps on Windows and Ubuntu', state: 'done' },
+    { label: 'Long-term memory', state: 'done' },
+    { label: 'Wayland without the GNOME extension', state: 'active', progress: 40 },
+    { label: 'Accessibility for snapped apps', state: 'todo' },
+    { label: 'Desktop control on macOS', state: 'todo' },
   ],
 };
