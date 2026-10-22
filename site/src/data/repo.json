@@ -1,0 +1,259 @@
+{
+  "repo": "https://github.com/Alan-Betty/EV",
+  "head": {
+    "hash": "7ddad27084a0eb33cea1d4f4d988eb9a22174b75",
+    "date": "2026-10-08",
+    "subject": "14h Iteration - Added Semantic Memory and tests for semantic memory and implement X11 overlay functionality"
+  },
+  "iteration": {
+    "number": 14,
+    "hash": "7ddad27084a0eb33cea1d4f4d988eb9a22174b75",
+    "date": "2026-10-08",
+    "subject": "14h Iteration - Added Semantic Memory and tests for semantic memory and implement X11 overlay functionality"
+  },
+  "commitCount": 15,
+  "tests": 950,
+  "testFiles": [
+    {
+      "file": "tests/test_computer_use.py",
+      "tests": 85
+    },
+    {
+      "file": "tests/test_web_agent.py",
+      "tests": 46
+    },
+    {
+      "file": "tests/test_guard.py",
+      "tests": 39
+    },
+    {
+      "file": "tests/test_file_manager.py",
+      "tests": 33
+    },
+    {
+      "file": "tests/test_semantic_memory.py",
+      "tests": 32
+    },
+    {
+      "file": "tests/test_browser_automation.py",
+      "tests": 31
+    },
+    {
+      "file": "tests/test_standby_and_stt.py",
+      "tests": 30
+    },
+    {
+      "file": "tests/test_memory_tools.py",
+      "tests": 28
+    },
+    {
+      "file": "tests/test_memory.py",
+      "tests": 27
+    },
+    {
+      "file": "tests/test_smoke.py",
+      "tests": 27
+    },
+    {
+      "file": "tests/test_backlog.py",
+      "tests": 26
+    },
+    {
+      "file": "tests/test_cancel.py",
+      "tests": 26
+    },
+    {
+      "file": "tests/test_desktop_vision.py",
+      "tests": 26
+    },
+    {
+      "file": "tests/test_file_batch.py",
+      "tests": 26
+    },
+    {
+      "file": "tests/test_hearing.py",
+      "tests": 26
+    },
+    {
+      "file": "tests/test_mission.py",
+      "tests": 26
+    },
+    {
+      "file": "tests/test_rate_limits.py",
+      "tests": 26
+    },
+    {
+      "file": "tests/test_streaming_and_ui.py",
+      "tests": 25
+    },
+    {
+      "file": "tests/test_desktop_backends.py",
+      "tests": 24
+    },
+    {
+      "file": "tests/test_face_integration.py",
+      "tests": 24
+    },
+    {
+      "file": "tests/test_voice.py",
+      "tests": 23
+    },
+    {
+      "file": "tests/test_barge_in.py",
+      "tests": 22
+    },
+    {
+      "file": "tests/test_gemini_payload.py",
+      "tests": 22
+    },
+    {
+      "file": "tests/test_face_expression.py",
+      "tests": 21
+    },
+    {
+      "file": "tests/test_face_self_awareness.py",
+      "tests": 20
+    },
+    {
+      "file": "tests/test_app_control.py",
+      "tests": 19
+    },
+    {
+      "file": "tests/test_acknowledgement.py",
+      "tests": 18
+    },
+    {
+      "file": "tests/test_app_agent.py",
+      "tests": 17
+    },
+    {
+      "file": "tests/test_browser_routing.py",
+      "tests": 17
+    },
+    {
+      "file": "tests/test_mic_backends.py",
+      "tests": 17
+    },
+    {
+      "file": "tests/test_open_routing.py",
+      "tests": 16
+    },
+    {
+      "file": "tests/test_brain.py",
+      "tests": 15
+    },
+    {
+      "file": "tests/test_media.py",
+      "tests": 14
+    },
+    {
+      "file": "tests/test_speech_purity.py",
+      "tests": 13
+    },
+    {
+      "file": "tests/test_stream_integration.py",
+      "tests": 13
+    },
+    {
+      "file": "tests/test_unaddressed_speech.py",
+      "tests": 13
+    },
+    {
+      "file": "tests/test_compound_requests.py",
+      "tests": 12
+    },
+    {
+      "file": "tests/test_web_agent_live.py",
+      "tests": 10
+    },
+    {
+      "file": "tests/test_app_index_linux.py",
+      "tests": 6
+    },
+    {
+      "file": "tests/test_endpointing.py",
+      "tests": 5
+    },
+    {
+      "file": "tests/test_takeover.py",
+      "tests": 4
+    }
+  ],
+  "commits": [
+    {
+      "hash": "7ddad27084a0eb33cea1d4f4d988eb9a22174b75",
+      "date": "2026-10-08",
+      "subject": "14h Iteration - Added Semantic Memory and tests for semantic memory and implement X11 overlay functionality"
+    },
+    {
+      "hash": "7ce214d23b4fb2103bf2cb137fe9a9a13c71e66e",
+      "date": "2026-10-06",
+      "subject": "13th Iteration - Desktop Control optimization and impovements. ( i forgot what else i did and idk why there are soo many files)"
+    },
+    {
+      "hash": "0946e6c540cbee459bcc8d5b7631862ad55e4973",
+      "date": "2026-10-02",
+      "subject": "12th Iteration - Implement user-specific speech adaptation and face awareness features"
+    },
+    {
+      "hash": "2d58ff425830b4b4345b24324e699a2e6a28f667",
+      "date": "2026-10-02",
+      "subject": "Eleventh Iteration: Stopped EV from talking to itslef in an infinite loop"
+    },
+    {
+      "hash": "9e936d7cd5ac4bf55f417a470bdfe262f4f00c19",
+      "date": "2026-10-01",
+      "subject": "Ninth and Tenth Iteration: Added a face to EV, rerouted all communications through it, gave it ability to reduce system volume and much more. (Now acessible on UBUNTU)"
+    },
+    {
+      "hash": "527aa61c36cd4f70e5d1c3785005de602f23173a",
+      "date": "2026-09-26",
+      "subject": "Eight Iteration - Made EV Realize it had Playwright, and added optimizations"
+    },
+    {
+      "hash": "7fb9e19ab18293f640008241f52518f603200a53",
+      "date": "2026-09-21",
+      "subject": "Seventh Iteration - Switching to Playwright for Vision and taking over control"
+    },
+    {
+      "hash": "023034665f7c37e8ab02ce52faea596286ddccfb",
+      "date": "2026-09-20",
+      "subject": "Security Update - Implemented Failsafes and prevented it from going rogue."
+    },
+    {
+      "hash": "8483e1500ce708e74bbc7c3c1488eedf1c2e8603",
+      "date": "2026-09-19",
+      "subject": "Sixth Iteration - Added Memory, Reduced Rate Limit Problems."
+    },
+    {
+      "hash": "d15cf33844d2691d976e0c0d456595069ac823bd",
+      "date": "2026-09-19",
+      "subject": "Fifth Iteration - Implementing auto screen reading and more advanced real life functions. (still not good enough)"
+    },
+    {
+      "hash": "ff4750d953a62fb1325f5d5293f210610966a8bf",
+      "date": "2026-09-17",
+      "subject": "FOURTH Iteration - Added Memory, backlog and optimized EV a lot."
+    },
+    {
+      "hash": "e65139f6ac418560c750ab01341c24c3d74b123c",
+      "date": "2026-09-16",
+      "subject": "Actual Third Iteration -  Faster outputs and attemtped advanced file handling capabilities and file creation"
+    },
+    {
+      "hash": "deafd56b0172535b020b92e0fc91930d899af7a2",
+      "date": "2026-09-16",
+      "subject": "Third Iteration - Faster Outputs and attempted advanced task handling and file creation"
+    },
+    {
+      "hash": "087be2c49deed1e8ae9de01263fd23d8e28999f1",
+      "date": "2026-09-16",
+      "subject": "Second Iteration - Introduced better Output Voice and Reduced the time taken for most processes"
+    },
+    {
+      "hash": "760613472ccb2686a8fafcc76747b901200b5a05",
+      "date": "2026-09-16",
+      "subject": "EV Initial Commit and First Iteration"
+    }
+  ]
+}
