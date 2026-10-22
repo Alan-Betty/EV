@@ -11,7 +11,58 @@
   <body>
     <a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-lg focus:bg-ink-900 focus:px-4 focus:py-2 focus:text-white">Skip to content</a>
 
-    <!-- @header -->
+    <header id="site-header" class="site-header fixed inset-x-0 top-0 z-50" data-scrolled="false">
+      <div class="shell flex h-16 items-center gap-8">
+        <a href="#top" class="group -ml-1 flex items-center gap-3 rounded-lg p-1" aria-label="NEXUS, back to top">
+          <span class="relative grid size-8 place-items-center">
+            <span aria-hidden="true" class="logo-aura absolute -inset-2.5 rounded-full animate-aura"></span>
+            <svg viewBox="0 0 32 32" fill="none" class="relative size-8" aria-hidden="true">
+              <defs>
+                <linearGradient id="logo-g" x1="6" y1="6" x2="26" y2="26" gradientUnits="userSpaceOnUse">
+                  <stop stop-color="#00F2FE" /><stop offset="1" stop-color="#7F00FF" />
+                </linearGradient>
+              </defs>
+              <rect x=".5" y=".5" width="31" height="31" rx="8.5" fill="#0F1117" stroke="rgba(255,255,255,.1)" />
+              <path d="M10 22V10l12 12V10" stroke="url(#logo-g)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </span>
+          <span class="text-[13px] font-semibold tracking-[0.22em] text-white">NEXUS</span>
+        </a>
+
+        <nav aria-label="Primary" class="hidden md:block">
+          <ul class="flex items-center gap-0.5 text-[13.5px]">
+            <li><a data-nav href="#features" class="nav-link">Features</a></li>
+            <li><a data-nav href="#demo" class="nav-link">Live demo</a></li>
+            <li><a data-nav href="#activity" class="nav-link">System logs</a></li>
+            <li><a data-nav href="#download" class="nav-link">Download specs</a></li>
+          </ul>
+        </nav>
+
+        <div class="ml-auto flex items-center gap-2">
+          <button id="cmdk-trigger" type="button" class="glass glass-hover hidden h-9 items-center gap-2 rounded-lg pl-3 pr-2 text-[12.5px] text-slate-400 hover:text-slate-100 lg:inline-flex" aria-label="Open command menu">
+            Jump to
+            <span class="flex gap-0.5"><kbd class="kbd" data-mod-key>Ctrl</kbd><kbd class="kbd">K</kbd></span>
+          </button>
+          <a id="os-badge" href="#download" class="group inline-flex h-9 items-center gap-2 rounded-lg bg-white pl-3 pr-3 text-[13px] font-medium text-ink-950 shadow-[0_0_0_1px_rgba(255,255,255,.2),0_6px_24px_-8px_rgba(0,242,254,.6)] transition-[background-color,transform] duration-200 hover:bg-cyan-50 active:scale-[0.98]">
+            <span data-os-icon class="grid size-4 place-items-center"></span>
+            <span data-os-label>Download</span>
+            <span data-os-version class="hidden font-mono text-[10.5px] text-slate-500 sm:inline"></span>
+          </a>
+          <button id="menu-toggle" type="button" class="glass grid size-9 place-items-center rounded-lg text-slate-300 md:hidden" aria-label="Menu" aria-expanded="false" aria-controls="mobile-nav">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" class="size-5" aria-hidden="true"><path class="menu-top" d="M4 8h16" /><path class="menu-bottom" d="M4 16h16" /></svg>
+          </button>
+        </div>
+      </div>
+
+      <nav id="mobile-nav" aria-label="Mobile" class="border-t border-white/[0.06] md:hidden" hidden>
+        <ul class="shell grid gap-1 py-3 text-[15px]">
+          <li><a data-nav href="#features" class="nav-link block py-3">Features</a></li>
+          <li><a data-nav href="#demo" class="nav-link block py-3">Live demo</a></li>
+          <li><a data-nav href="#activity" class="nav-link block py-3">System logs</a></li>
+          <li><a data-nav href="#download" class="nav-link block py-3">Download specs</a></li>
+        </ul>
+      </nav>
+    </header>
 
     <main id="main">
       <!-- @hero -->
