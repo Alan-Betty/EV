@@ -385,7 +385,58 @@
           </div>
         </div>
       </section>
-      <!-- @download -->
+      <section id="download" aria-labelledby="download-title" class="relative py-24 sm:py-32">
+        <div aria-hidden="true" class="download-glow absolute inset-x-0 top-0 -z-10 h-[520px]"></div>
+        <div class="shell">
+          <div class="flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
+            <div class="section-head">
+              <h2 id="download-title">Download NEXUS</h2>
+              <p>Every build is signed and published with its SHA-256 checksum. Pick a channel, grab the file for your system, and verify it before you run it.</p>
+            </div>
+            <dl id="dl-stats" class="flex gap-8 sm:gap-10">
+              <div>
+                <dt class="text-[12.5px] text-slate-500">Total downloads</dt>
+                <dd data-counter="downloads" class="mt-1 text-[26px] font-semibold tracking-[-0.03em] text-white tabular">0</dd>
+              </div>
+              <div>
+                <dt class="flex items-center gap-1.5 text-[12.5px] text-slate-500"><span class="size-1.5 rounded-full bg-pulse animate-pulse"></span>Active local nodes</dt>
+                <dd data-counter="nodes" class="mt-1 text-[26px] font-semibold tracking-[-0.03em] text-white tabular">0</dd>
+              </div>
+            </dl>
+          </div>
+
+          <div class="mt-12 flex flex-col gap-4 sm:flex-row sm:items-center">
+            <div id="dl-channels" class="segmented" role="radiogroup" aria-label="Release channel" style="--seg: 0">
+              <span class="segmented-thumb" aria-hidden="true"></span>
+              <button type="button" role="radio" data-channel="stable" aria-checked="true">Stable</button>
+              <button type="button" role="radio" data-channel="nightly" aria-checked="false" tabindex="-1">Nightly</button>
+              <button type="button" role="radio" data-channel="canary" aria-checked="false" tabindex="-1">Canary</button>
+            </div>
+            <p id="dl-note" class="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[13px] text-slate-400" aria-live="polite"></p>
+          </div>
+
+          <div id="dl-grid" class="mt-6 grid gap-4 lg:grid-cols-3"></div>
+
+          <div id="dl-verify" class="surface mt-4 flex flex-col gap-3 rounded-2xl border border-white/[0.08] p-4 sm:flex-row sm:items-center sm:gap-5 sm:p-5">
+            <div class="flex shrink-0 items-center gap-3">
+              <span class="grid size-9 place-items-center rounded-lg border border-emerald-400/20 bg-emerald-400/10 text-pulse">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-[18px]" aria-hidden="true"><path d="M12 3.5 5 6v5.5c0 4.3 3 7.8 7 9 4-1.2 7-4.7 7-9V6z" /><path d="m9 12 2.2 2.2L15.5 10" /></svg>
+              </span>
+              <div>
+                <p class="text-[14px] font-medium text-white">Verify your download</p>
+                <p data-verify-os class="text-[12px] text-slate-500"></p>
+              </div>
+            </div>
+            <div class="artifact-code min-w-0 flex-1 !mt-0">
+              <code class="truncate"></code>
+              <button type="button" class="copy-btn" data-copy="" data-copy-label="Copy verify command" aria-label="Copy verify command">
+                <span class="copy-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-3.5" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2.5" /><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8" /></svg></span>
+                <span class="check-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-3.5" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg></span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
 
     <!-- @footer -->
