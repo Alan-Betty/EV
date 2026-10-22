@@ -1,4 +1,4 @@
-import { CHANNELS, PLATFORMS, artifactsFor, primaryFor } from '../data/release.js';
+import { CHANNELS, PLATFORMS, artifactsFor, primaryFor, verifyCommand } from '../data/release.js';
 import { copy, flashCopied } from '../lib/clipboard.js';
 import { icon, platformIcon } from '../lib/icons.js';
 import { store } from '../lib/store.js';
@@ -18,15 +18,18 @@ function artifactRow(a) {
       <div class="artifact-code"><code class="truncate" title="${escape(a.command)}"><span class="text-slate-600">$</span> ${escape(a.command)}</code>${copyButton(a.command, `Copy ${a.name.toLowerCase()} command`)}</div>
     </li>`;
   }
+  // A hosted file is checked by its SHA-256, a source archive by its commit.
+  const [kind, value] = a.sha256 ? ['sha256', a.sha256] : ['commit', a.commit];
+  const ext = a.file.match(/\.[a-z0-9]+$/i)?.[0] ?? '';
   return `<li class="artifact">
     <div class="flex items-start justify-between gap-3">
-      <div class="min-w-0"><p class="artifact-name">${a.name}</p><p class="artifact-detail">${a.detail}</p></div>
-      <a href="${a.url}" class="artifact-dl" aria-label="Download ${a.file}">${icon.download('size-4')}<span>.zip</span></a>
+      <div class="min-w-0"><p class="artifact-name">${escape(a.name)}</p><p class="artifact-detail truncate">${escape(a.detail)}</p></div>
+      <a href="${escape(a.url)}" class="artifact-dl" aria-label="Download ${escape(a.file)}"${a.sha256 ? ' download' : ''}>${icon.download('size-4')}<span>${a.size ?? ext}</span></a>
     </div>
     <div class="artifact-code">
-      <span class="shrink-0 text-slate-600">commit</span>
-      <code class="truncate" title="${a.commit}">${a.commit.slice(0, 12)}…${a.commit.slice(-6)}</code>
-      ${copyButton(a.commit, `Copy commit id ${a.commit.slice(0, 7)}`)}
+      <span class="shrink-0 text-slate-600">${kind}</span>
+      <code class="truncate" title="${value}">${value.slice(0, 12)}…${value.slice(-6)}</code>
+      ${copyButton(value, kind === 'sha256' ? `Copy SHA-256 for ${a.file}` : `Copy commit id ${value.slice(0, 7)}`)}
     </div>
   </li>`;
 }
@@ -74,7 +77,7 @@ export function initDownloads() {
 
     // How to check which commit you actually got, for this visitor's system.
     const platform = store.get('platform');
-    const cmd = PLATFORMS[platform].verify(primaryFor(platform, channel));
+    const cmd = verifyCommand(platform, primaryFor(platform, channel));
     verify.querySelector('code').textContent = cmd;
     verify.querySelector('[data-copy]').dataset.copy = cmd;
   }

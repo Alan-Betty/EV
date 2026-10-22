@@ -1,0 +1,69 @@
+{
+  "hero": {
+    "status": "WINDOWS + UBUNTU WAYLAND OPERATIONAL",
+    "statusLink": "#features",
+    "headline": "Intelligence at the Velocity of Thought.",
+    "sub": "E.V. is a voice assistant that does things on your computer. It opens apps, moves files, runs commands, drives the browser, and takes the mouse when it has to. Say its name once and keep talking."
+  },
+  "demo": {
+    "title": "Watch it hear, plan and act",
+    "body": "Pick an errand. Each one replays a run through E.V.'s real tools. Pick another mid-run to cut in, the way you would by talking over it."
+  },
+  "features": {
+    "title": "Built to act, not only answer",
+    "body": "One loop owns everything: listen, transcribe, decide, act, speak. Every part of it closes the gap between saying something and it being done, without handing the model the keys.",
+    "voice": {
+      "title": "Full-duplex voice",
+      "body": "Say \"E.V.\" once and keep talking. Talk over a reply and it stops mid-word to listen. It learns your voice and its own, so it never answers itself on loudspeakers."
+    },
+    "apps": {
+      "title": "Eyes and hands for any app",
+      "body": "The window list and the accessibility tree first, screenshots only when those cannot do the job. Every click gets a second look."
+    },
+    "light": {
+      "title": "Runs in about 120 MB",
+      "body": "No local model, no vendor SDKs, no audio libraries. The brain, the ears and the voice are plain HTTP calls on one warm connection."
+    },
+    "memory": {
+      "title": "Remembers, and picks up again",
+      "body": "Facts, notes, a to-do list and a backlog of unfinished work, written so a power cut cannot corrupt them."
+    },
+    "guard": {
+      "title": "Guardrails that assume the model is wrong",
+      "body": "Anything destructive or that spends money asks \"Confirm?\" first. \"Stop everything\" or Ctrl+Alt+Q locks it down, and only your voice can unlock it."
+    },
+    "web": {
+      "title": "Web errands without screenshots",
+      "body": "E.V. reads the page, numbers every control and plans in plain text. It remembers what it already clicked, so one mouse means one mouse in the basket."
+    }
+  },
+  "activity": {
+    "title": "{iteration} iterations, in the open",
+    "body": "Every commit so far, then a replay of what a session writes as it runs. Filter it, search it, copy any hash."
+  },
+  "download": {
+    "title": "Get E.V.",
+    "body": "Grab it for your system, run the setup line, add a free Groq or Gemini key, then check everything with python ev_core.py --check."
+  },
+  "footer": {
+    "privacy": "No telemetry. Your keys, your providers. Want speech kept local? Use whisper.cpp."
+  },
+  "release": {
+    "pin": "auto",
+    "label": "",
+    "downloads": {
+      "linux": { "source": "github" },
+      "macos": { "source": "github" },
+      "windows": { "source": "github" }
+    }
+  },
+  "roadmap": [
+    { "label": "Voice loop with barge-in", "state": "done" },
+    { "label": "Browser errands through the DOM", "state": "done" },
+    { "label": "Desktop apps on Windows and Ubuntu", "state": "done" },
+    { "label": "Long-term memory", "state": "done" },
+    { "label": "Wayland without the GNOME extension", "state": "active", "progress": 40 },
+    { "label": "Accessibility for snapped apps", "state": "todo" },
+    { "label": "Desktop control on macOS", "state": "todo" }
+  ]
+}
