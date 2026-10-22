@@ -53,14 +53,23 @@ function resolve(name) {
 
 const clone = (m) => ({ left: { ...m.left }, right: { ...m.right }, face: { ...m.face, color: [...m.face.color] } });
 
+// Ease every number towards the target. Returns the largest gap left, so the
+// loop can tell a face at rest from one mid-transition.
 function approach(cur, target, k) {
+  let gap = 0;
+  const step = (obj, key, to) => {
+    const d = to - obj[key];
+    obj[key] += d * k;
+    gap = Math.max(gap, Math.abs(d));
+  };
   for (const side of ['left', 'right']) {
-    for (const key in target[side]) cur[side][key] += (target[side][key] - cur[side][key]) * k;
+    for (const key in target[side]) step(cur[side], key, target[side][key]);
   }
   for (const key in target.face) {
-    if (key === 'color') cur.face.color = cur.face.color.map((v, i) => v + (target.face.color[i] - v) * k);
-    else cur.face[key] += (target.face[key] - cur.face[key]) * k;
+    if (key === 'color') cur.face.color.forEach((_, i) => step(cur.face.color, i, target.face.color[i]));
+    else step(cur.face, key, target.face[key]);
   }
+  return gap;
 }
 
 export function createFace(canvas, { onTick } = {}) {
@@ -77,6 +86,9 @@ export function createFace(canvas, { onTick } = {}) {
   const blink = { next: 0, start: -1, dur: 0.16 };
   let ringPhase = 0;
   let reel = null;
+  let settling = true; // false once nothing is moving: then draw at half rate
+  let lastDraw = 0;
+  let jolt = 0; // a quick scale bump on surprise, decays on its own
 
   let W = 0, H = 0, dpr = 1;
   let t = 0, last = 0, raf = 0, visible = false, running = false;
@@ -93,6 +105,7 @@ export function createFace(canvas, { onTick } = {}) {
   function emote(name, hold) {
     reel = name === 'demo' ? reel : null;
     const mood = resolve(name);
+    if (name === 'surprised') jolt = 1;
     setTarget(mood);
     emoteUntil = t + (hold ?? Math.max(mood.hold || 0, 2.4));
     if (!running) settle();
@@ -139,7 +152,8 @@ export function createFace(canvas, { onTick } = {}) {
     }
 
     const tau = Math.max(0.03, target.transition / 1000 / 3);
-    approach(cur, target, 1 - Math.exp(-dt / tau));
+    const gap = approach(cur, target, 1 - Math.exp(-dt / tau));
+    jolt *= Math.exp(-dt / 0.09);
 
     // Where the eyes look: the cursor when the mood tracks it and it moved
     // lately, otherwise small saccades around the mood's own gaze.
@@ -165,6 +179,10 @@ export function createFace(canvas, { onTick } = {}) {
       blink.next = Math.random() < target.blink.double_chance ? t + 0.12 : t + rand(target.blink.interval_s);
     }
     ringPhase = (ringPhase + cur.face.ring_speed * dt) % 1;
+
+    settling = gap > 0.002 || blink.start >= 0 || jolt > 0.01 || reel !== null
+      || Math.abs(look.tx - look.x) + Math.abs(look.ty - look.y) > 0.004
+      || cur.face.bob_hz > 0 || cur.face.pulse_hz > 0 || cur.face.ring > 0.02;
   }
 
   // Snap straight to the target: used when animation is off.
@@ -260,11 +278,14 @@ export function createFace(canvas, { onTick } = {}) {
     const h = Math.max(baseH * e.height * e.open, 1.6);
     if (h < 0.5) return;
 
-    // Soft bloom behind the eye.
-    const reach = Math.max(w, h) * 0.95;
+    // Soft bloom behind the eye. Additive and a little stronger than the Qt
+    // version: on a web page next to bright text, the original reads as a dark rim.
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const reach = Math.max(w, h) * 1.05;
     const bloom = ctx.createRadialGradient(0, 0, 0, 0, 0, reach);
-    bloom.addColorStop(0, rgba(color, 0.22 * glow));
-    bloom.addColorStop(0.55, rgba(color, 0.07 * glow));
+    bloom.addColorStop(0, rgba(color, 0.3 * glow));
+    bloom.addColorStop(0.55, rgba(color, 0.1 * glow));
     bloom.addColorStop(1, rgba(color, 0));
     ctx.fillStyle = bloom;
     ctx.beginPath();
@@ -273,10 +294,9 @@ export function createFace(canvas, { onTick } = {}) {
 
     // One tight halo: the eye again, a little larger and fainter.
     const grow = 0.05 * baseH;
-    ctx.save();
     ctx.scale((w + 2 * grow) / w, (h + 2 * grow) / h);
     eyePath(e, side, w, h);
-    ctx.fillStyle = rgba(color, 0.14 * glow);
+    ctx.fillStyle = rgba(color, 0.12 * glow);
     ctx.fill();
     ctx.restore();
 
@@ -354,6 +374,12 @@ export function createFace(canvas, { onTick } = {}) {
 
     ctx.save();
     ctx.clip(body);
+    if (jolt > 0.01) {
+      const s = 1 + 0.06 * jolt;
+      ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+      ctx.scale(s, s);
+      ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+    }
     ctx.translate(rect.x + rect.w / 2 + gaze.x * GAZE_TRAVEL * rect.w, rect.y + rect.h / 2 - 0.02 * rect.h + gaze.y * GAZE_TRAVEL * rect.h + bob);
     ctx.rotate(f.roll * DEG);
     for (const [e, side] of [[cur.left, -1], [cur.right, 1]]) {
@@ -374,7 +400,11 @@ export function createFace(canvas, { onTick } = {}) {
     last = s;
     t += dt;
     update(dt);
-    draw();
+    // At rest the eyes only drift; 30fps is indistinguishable and half the work.
+    if (settling || now - lastDraw > 32) {
+      draw();
+      lastDraw = now;
+    }
     if (dt > 0) {
       fpsAcc += dt;
       fpsN++;
@@ -421,6 +451,7 @@ export function createFace(canvas, { onTick } = {}) {
     },
     { passive: true },
   );
+  document.documentElement.addEventListener('pointerleave', () => (pointer.at = -1e9));
   new ResizeObserver(resize).observe(canvas);
   new IntersectionObserver(([e]) => {
     visible = e.isIntersecting;
