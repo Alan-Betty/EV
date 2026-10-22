@@ -8,6 +8,7 @@ export const PRODUCT = {
   name: 'NEXUS',
   repo: 'https://github.com/nexus-assistant/nexus',
   docs: '#',
+  stars: 18_432,
 };
 
 export const CHANNELS = {

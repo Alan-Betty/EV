@@ -182,6 +182,12 @@ export function initSimulator() {
     play(match ?? freeform(text));
   });
 
+  // The command palette asks for a run without knowing about this module.
+  document.addEventListener('nexus:demo', (e) => {
+    const script = SCRIPTS.find((s) => s.id === e.detail);
+    if (script) play(script);
+  });
+
   setState('idle');
 
   // Run the first errand once, the first time the demo is properly on screen.
@@ -191,9 +197,9 @@ export function initSimulator() {
       io.disconnect();
       if (runId === 0) setTimeout(() => runId === 0 && play(SCRIPTS[0]), 500);
     },
-    { threshold: 0.45 },
+    // Low threshold: on phones the window is taller than the viewport.
+    { threshold: 0.2 },
   );
   io.observe(root.querySelector('.sim-window'));
 
-  return { play: (id) => play(SCRIPTS.find((s) => s.id === id) ?? SCRIPTS[0]) };
 }
