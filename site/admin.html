@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>E.V. site manager</title>
+    <meta name="robots" content="noindex" />
+    <meta name="theme-color" content="#090A0F" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+  </head>
+  <body class="admin">
+    <header class="admin-top">
+      <div class="flex min-w-0 items-center gap-3">
+        <svg viewBox="0 0 32 32" fill="none" class="size-7 shrink-0" aria-hidden="true">
+          <defs><linearGradient id="g" x1="6" y1="6" x2="26" y2="26" gradientUnits="userSpaceOnUse"><stop stop-color="#00F2FE" /><stop offset="1" stop-color="#7F00FF" /></linearGradient></defs>
+          <rect x=".5" y=".5" width="31" height="31" rx="8.5" fill="#0F1117" stroke="rgba(255,255,255,.1)" />
+          <path d="M8.5 10.5h6M8.5 16h5M8.5 21.5h6M8.5 10.5v11M17.5 10.5l3.25 11 3.25-11" stroke="url(#g)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <h1 class="hidden truncate text-[14px] font-semibold text-white sm:block">Site manager</h1>
+        <span id="save-state" class="save-state" data-state="idle" role="status" aria-live="polite">Loading</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <span id="git-state" class="git-state hidden sm:inline-flex"></span>
+        <button type="button" class="admin-btn" data-action="sync" title="Read the iteration, commits and test count from git again">Re-read <span class="hidden sm:inline">git</span></button>
+        <button type="button" class="admin-btn" data-action="build" title="Build the static site into dist/">Build</button>
+        <a href="./" target="_blank" rel="noopener" class="admin-btn is-primary">Open site</a>
+      </div>
+    </header>
+
+    <div class="admin-layout">
+      <main id="editor" class="admin-editor" aria-label="Site content">
+        <p class="p-8 text-[14px] text-slate-500">Loading the site content.</p>
+      </main>
+
+      <aside class="admin-preview" aria-label="Live preview">
+        <div class="flex items-center justify-between gap-3 px-1 pb-3">
+          <p class="text-[12.5px] text-slate-500">Live preview. Edits show up as you type.</p>
+          <div class="seg" role="radiogroup" aria-label="Preview size">
+            <button type="button" role="radio" data-device="desktop" aria-checked="true">Desktop</button>
+            <button type="button" role="radio" data-device="phone" aria-checked="false">Phone</button>
+          </div>
+        </div>
+        <div id="frame-wrap" class="frame-wrap" data-device="desktop">
+          <iframe id="preview" src="./" title="Live preview of the site"></iframe>
+        </div>
+      </aside>
+    </div>
+
+    <dialog id="build-dialog" class="build-dialog" aria-labelledby="build-title">
+      <h2 id="build-title" class="text-[15px] font-semibold text-white">Build</h2>
+      <pre id="build-output" class="mt-3 max-h-[50vh] overflow-auto rounded-lg bg-black/40 p-3 font-mono text-[11.5px] leading-[1.6] text-slate-300"></pre>
+      <form method="dialog" class="mt-4 flex justify-end"><button class="admin-btn is-primary">Done</button></form>
+    </dialog>
+
+    <script type="module" src="./src/admin/admin.js"></script>
+  </body>
+</html>

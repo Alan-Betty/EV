@@ -1,0 +1,122 @@
+/* Site manager. Same tokens as the public page, calmer: it is a tool, so
+   nothing moves unless it is telling you something changed. */
+
+.admin { @apply min-h-screen; }
+
+.admin-top {
+  @apply sticky top-0 z-40 flex h-14 items-center justify-between gap-4 border-b border-white/[0.06] bg-ink-950/80 px-4 backdrop-blur-xl sm:px-6;
+}
+
+.admin-btn {
+  @apply inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg border border-white/[0.09] bg-white/[0.03] px-2.5 text-[12.5px] font-medium text-slate-200 sm:px-3
+    transition-[background-color,border-color,transform] duration-150 hover:border-white/20 hover:bg-white/[0.06] active:scale-[0.97] disabled:opacity-50;
+}
+.admin-btn.is-primary { @apply border-transparent bg-white text-ink-950 hover:bg-cyan-50; }
+
+.save-state {
+  @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[11.5px] text-slate-500 transition-colors;
+}
+.save-state::before { content: ''; @apply size-1.5 rounded-full bg-slate-600 transition-colors; }
+.save-state[data-state='saved']::before { @apply bg-pulse; }
+.save-state[data-state='saving']::before,
+.save-state[data-state='dirty']::before { @apply animate-pulse bg-amber-300; }
+.save-state[data-state='error'] { @apply bg-rose-500/10 text-rose-300; }
+.save-state[data-state='error']::before { @apply bg-rose-400; }
+
+.git-state { @apply items-center rounded-full border border-amber-300/20 px-2 py-0.5 text-[11.5px] text-amber-200/90; }
+.git-state[data-clean='true'] { @apply border-emerald-400/20 text-emerald-300/90; }
+.git-state:empty { display: none; }
+
+.admin-layout { @apply grid lg:grid-cols-[minmax(0,560px)_minmax(0,1fr)]; }
+.admin-editor { @apply space-y-4 p-4 sm:p-6; }
+
+.admin-preview {
+  @apply sticky top-14 hidden h-[calc(100vh-3.5rem)] flex-col border-l border-white/[0.06] p-4 lg:flex;
+}
+.frame-wrap {
+  @apply mx-auto h-full w-full overflow-hidden rounded-xl border border-white/[0.08] bg-ink-950 shadow-lift;
+  transition: width 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.frame-wrap[data-device='phone'] { width: 390px; }
+.frame-wrap iframe { @apply h-full w-full; }
+
+.card {
+  @apply rounded-2xl border border-white/[0.08] bg-white/[0.02] transition-[border-color] duration-200;
+}
+.card:focus-within { @apply border-cyan-400/25; }
+.card-head { @apply flex items-start justify-between gap-4 border-b border-white/[0.06] px-5 py-4; }
+.card-head h2 { @apply text-[15px] font-semibold text-white; }
+.card-head p { @apply mt-1 text-[12.5px] leading-5 text-slate-500; }
+.card-body { @apply space-y-4 p-5; }
+
+.field { @apply block; }
+.field-label { @apply mb-1.5 block text-[12.5px] font-medium text-slate-300; }
+.field small { @apply mt-1.5 block text-[11.5px] leading-4 text-slate-500; }
+.field input:not([type='range']),
+.field textarea,
+.field select,
+.road-row > input,
+.road-row > select {
+  @apply w-full rounded-lg border border-white/[0.09] bg-black/30 px-3 py-2 text-[13.5px] text-slate-100 placeholder:text-slate-600
+    transition-[border-color,box-shadow] duration-150 focus:border-cyan-400/50 focus:outline-none;
+  box-shadow: 0 0 0 0 transparent;
+}
+.field input:focus,
+.field textarea:focus,
+.field select:focus,
+.road-row > input:focus,
+.road-row > select:focus { box-shadow: 0 0 0 3px rgba(0, 242, 254, 0.12); }
+.field textarea { @apply resize-none leading-6; min-height: 4.5rem; }
+.field select,
+.road-row > select { @apply cursor-pointer; }
+.hint { @apply text-[12.5px] leading-5 text-slate-500; }
+
+.facts { @apply grid grid-cols-3 gap-2 sm:grid-cols-5; }
+.fact { @apply rounded-lg border border-white/[0.06] bg-black/20 px-2.5 py-2; }
+.fact dt { @apply text-[10.5px] text-slate-500; }
+.fact dd { @apply mt-0.5 truncate font-mono text-[12.5px] text-slate-100; }
+
+.seg { @apply inline-flex rounded-lg border border-white/[0.08] bg-black/30 p-0.5; }
+.seg button { @apply h-7 rounded-md px-2.5 text-[12px] text-slate-400 transition-colors hover:text-white; }
+.seg button[aria-checked='true'] { @apply bg-white/[0.09] text-white; }
+
+.platform { @apply rounded-xl border border-white/[0.06] bg-black/20 p-4; }
+.platform-icon { @apply grid size-7 place-items-center rounded-lg border border-white/[0.08] bg-white/[0.04]; }
+.platform-body { @apply mt-3 space-y-3; }
+
+.dropzone {
+  @apply flex cursor-pointer flex-col items-center gap-1 rounded-xl border border-dashed border-white/15 px-4 py-6 text-center
+    transition-[border-color,background-color] duration-150 hover:border-cyan-400/40 hover:bg-cyan-400/[0.03];
+}
+.dropzone[data-over='true'] { @apply border-cyan-400/70 bg-cyan-400/[0.06]; }
+.dropzone:focus-within { @apply border-cyan-400/60; }
+
+.upload-progress { @apply h-1.5 overflow-hidden rounded-full bg-white/[0.06]; }
+.upload-progress span { @apply block h-full rounded-full; background: linear-gradient(90deg, #00f2fe, #7f00ff); transition: width 0.2s ease; }
+
+.file-row { @apply flex items-center gap-3 rounded-lg border border-white/[0.06] bg-black/30 p-2.5; }
+.file-icon { @apply grid size-8 shrink-0 place-items-center rounded-md bg-emerald-400/10 text-pulse; }
+
+.icon-btn {
+  @apply grid size-8 shrink-0 cursor-pointer place-items-center rounded-md text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-white disabled:pointer-events-none disabled:opacity-30;
+}
+
+.pct { @apply rounded-full border border-cyan-400/25 bg-cyan-400/10 px-2.5 py-1 font-mono text-[12px] text-electric; }
+.roadmap { @apply space-y-2; }
+.road-row { @apply grid grid-cols-[minmax(0,1fr)_8.5rem_auto] items-center gap-2; }
+.road-row > input,
+.road-row > select { @apply py-1.5; }
+.road-tools { @apply flex; }
+.road-progress { @apply col-span-3 flex items-center gap-3 pl-1; }
+.road-progress input { @apply flex-1; accent-color: #00f2fe; }
+.road-progress output { @apply w-10 text-right font-mono text-[12px] text-slate-400; }
+
+.text-group { @apply rounded-xl border border-white/[0.06] bg-black/20 px-4 py-3; }
+.text-group summary { @apply cursor-pointer select-none text-[13.5px] font-medium text-slate-200 marker:text-slate-500; }
+.text-group[open] summary { @apply text-white; }
+
+.build-dialog {
+  @apply m-auto w-[min(640px,calc(100vw-2rem))] rounded-2xl border border-white/10 p-5 text-slate-200 shadow-lift;
+  background: rgb(22 25 34 / 0.96);
+}
+.build-dialog::backdrop { background: rgba(9, 10, 15, 0.6); backdrop-filter: blur(4px); }
