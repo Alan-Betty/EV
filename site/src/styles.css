@@ -170,6 +170,11 @@
   .orb-frame .corner {
     @apply absolute size-5 border-white/20;
   }
+
+  .mood-chip {
+    @apply h-7 rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 font-mono text-[11px] text-slate-400
+      transition-[border-color,color,background-color,transform] duration-150 hover:border-cyan-500/30 hover:text-white active:scale-[0.96];
+  }
 }
 
 /* Simulator ------------------------------------------------------------- */
