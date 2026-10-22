@@ -77,8 +77,13 @@ export function initHero() {
     face.emote('happy');
   });
 
-  // Pointer speed: a fast flick startles it. No movement for a while: standby.
-  let lx = 0, ly = 0, lt = 0, lastStartle = 0, idleTimer = 0, asleep = false;
+  // A real flick startles it; ordinary mouse movement must not. Speed is the
+  // distance covered over the last ~100ms, not between two events: pointer
+  // events can be 1ms apart, and a 5px hop over 1ms reads as 5000px/s.
+  // It also has to happen near the face; a flick across the nav bar is not
+  // something E.V. would see.
+  const trail = [];
+  let lastStartle = -1e9, idleTimer = 0, asleep = false;
   const doze = () => {
     asleep = true;
     event('standby');
@@ -86,10 +91,9 @@ export function initHero() {
   };
   window.addEventListener('pointermove', (e) => {
     const now = e.timeStamp;
-    const speed = lt ? (Math.hypot(e.clientX - lx, e.clientY - ly) / Math.max(1, now - lt)) * 1000 : 0;
-    lx = e.clientX;
-    ly = e.clientY;
-    lt = now;
+    trail.push({ t: now, x: e.clientX, y: e.clientY });
+    while (trail.length && now - trail[0].t > 110) trail.shift();
+
     clearTimeout(idleTimer);
     idleTimer = setTimeout(doze, 15000);
     if (asleep) {
@@ -97,8 +101,17 @@ export function initHero() {
       event('wake');
       face.setBase('idle');
       face.emote('listening', 1.4);
-    } else if (speed > 3200 && now - lastStartle > 4000) {
+      return;
+    }
+
+    const first = trail[0];
+    const dist = Math.hypot(e.clientX - first.x, e.clientY - first.y);
+    const speed = (dist / Math.max(16, now - first.t)) * 1000;
+    const r = canvas.getBoundingClientRect();
+    const near = e.clientX > r.left - 160 && e.clientX < r.right + 160 && e.clientY > r.top - 160 && e.clientY < r.bottom + 160;
+    if (near && speed > 2400 && dist > 180 && now - lastStartle > 5000) {
       lastStartle = now;
+      trail.length = 0;
       event('barge_in');
       face.emote('surprised');
     } else if (hud.event.textContent === 'idle' || hud.event.textContent === 'standby') {
