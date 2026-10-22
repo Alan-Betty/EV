@@ -1,6 +1,6 @@
 import { CHANNELS, PLATFORMS, REPO, primaryFor } from '../data/release.js';
 import { platformIcon } from '../lib/icons.js';
-import { createOrb } from '../lib/orb.js';
+import { createFace } from '../lib/face.js';
 import { store } from '../lib/store.js';
 
 export function initHero() {
@@ -41,21 +41,69 @@ export function initHero() {
     if (pick) store.set('platform', pick);
   });
 
-  // Orb and its readouts
-  const canvas = document.getElementById('orb');
+  // E.V.'s face: follows the pointer, startles at a fast flick, dozes off when
+  // left alone, and wears any mood the chat tool can ask for.
   const hud = {
-    level: document.querySelector('[data-hud="level"]'),
-    state: document.querySelector('[data-hud="state"]'),
+    mood: document.querySelector('[data-hud="mood"]'),
+    event: document.querySelector('[data-hud="event"]'),
     fps: document.querySelector('[data-hud="fps"]'),
   };
-  const orb = createOrb(canvas, {
-    count: matchMedia('(max-width: 640px)').matches ? 900 : 1400,
-    onTick({ energy, fps }) {
-      hud.level.textContent = `${(-58 + energy * 46).toFixed(1)} dB`;
-      hud.state.textContent = energy > 0.62 ? 'speaking' : energy > 0.3 ? 'listening' : 'idle';
+  const canvas = document.getElementById('face');
+  const face = createFace(canvas, {
+    onTick({ mood, fps }) {
+      hud.mood.textContent = mood;
       hud.fps.textContent = `${Math.round(fps)} fps`;
     },
   });
-  cta.addEventListener('pointerenter', () => orb.pulse(0.6));
-  cta.addEventListener('focus', () => orb.pulse(0.6));
+  const event = (name) => (hud.event.textContent = name);
+
+  const moods = document.getElementById('face-moods');
+  moods.innerHTML = ['happy', 'angry', 'surprised', 'wink', 'skeptical', 'smug', 'sleepy', 'thinking', 'demo']
+    .map((m) => `<button type="button" class="mood-chip" data-mood="${m}">${m}</button>`)
+    .join('');
+  moods.addEventListener('click', (e) => {
+    const mood = e.target.closest('[data-mood]')?.dataset.mood;
+    if (!mood) return;
+    event(`chat mood=${mood}`);
+    mood === 'demo' ? face.demo() : face.emote(mood);
+  });
+
+  canvas.addEventListener('click', () => {
+    event('poke');
+    face.emote('surprised');
+  });
+  cta.addEventListener('pointerenter', () => {
+    event('success');
+    face.emote('happy');
+  });
+
+  // Pointer speed: a fast flick startles it. No movement for a while: standby.
+  let lx = 0, ly = 0, lt = 0, lastStartle = 0, idleTimer = 0, asleep = false;
+  const doze = () => {
+    asleep = true;
+    event('standby');
+    face.setBase('sleepy');
+  };
+  window.addEventListener('pointermove', (e) => {
+    const now = e.timeStamp;
+    const speed = lt ? (Math.hypot(e.clientX - lx, e.clientY - ly) / Math.max(1, now - lt)) * 1000 : 0;
+    lx = e.clientX;
+    ly = e.clientY;
+    lt = now;
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(doze, 15000);
+    if (asleep) {
+      asleep = false;
+      event('wake');
+      face.setBase('idle');
+      face.emote('listening', 1.4);
+    } else if (speed > 3200 && now - lastStartle > 4000) {
+      lastStartle = now;
+      event('barge_in');
+      face.emote('surprised');
+    } else if (hud.event.textContent === 'idle' || hud.event.textContent === 'standby') {
+      event('cursor');
+    }
+  }, { passive: true });
+  idleTimer = setTimeout(doze, 15000);
 }

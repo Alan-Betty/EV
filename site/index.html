@@ -118,23 +118,29 @@
             <p id="hero-alt" class="mt-6 text-[13px] text-slate-500"></p>
           </div>
 
-          <div class="orb-stage relative mx-auto aspect-square w-full max-w-[440px] sm:max-w-[540px] lg:-mr-8 lg:max-w-none">
-            <canvas id="orb" class="absolute inset-0 size-full" aria-hidden="true"></canvas>
-            <div aria-hidden="true" class="orb-frame pointer-events-none absolute inset-[9%]">
-              <span class="corner left-0 top-0 border-l border-t"></span>
-              <span class="corner right-0 top-0 border-r border-t"></span>
-              <span class="corner bottom-0 left-0 border-b border-l"></span>
-              <span class="corner bottom-0 right-0 border-b border-r"></span>
-              <dl class="absolute inset-x-3 top-3 flex justify-between font-mono text-[10.5px]">
-                <div class="flex gap-2"><dt class="text-slate-600">mic.in</dt><dd data-hud="level" class="tabular text-slate-300">-50.0 dB</dd></div>
-                <div class="flex gap-2"><dt class="text-slate-600">state</dt><dd data-hud="state" class="text-electric">idle</dd></div>
-              </dl>
-              <dl class="absolute inset-x-3 bottom-3 flex justify-between font-mono text-[10.5px]">
-                <div class="flex gap-2"><dt class="text-slate-600">ram</dt><dd class="tabular text-slate-300">~120 MB</dd></div>
-                <div class="flex gap-2"><dt class="text-slate-600">render</dt><dd data-hud="fps" class="tabular text-slate-300">60 fps</dd></div>
-              </dl>
+          <div class="relative mx-auto w-full max-w-[460px] sm:max-w-[560px] lg:-mr-6 lg:max-w-none">
+            <div class="face-stage relative aspect-[5/4] w-full">
+              <canvas id="face" class="absolute inset-0 size-full cursor-pointer" role="img" aria-label="E.V.'s face. Two glowing eyes that follow your pointer and change mood."></canvas>
+              <div aria-hidden="true" class="orb-frame pointer-events-none absolute inset-[3%]">
+                <span class="corner left-0 top-0 border-l border-t"></span>
+                <span class="corner right-0 top-0 border-r border-t"></span>
+                <span class="corner bottom-0 left-0 border-b border-l"></span>
+                <span class="corner bottom-0 right-0 border-b border-r"></span>
+                <dl class="absolute inset-x-3 -top-6 flex justify-between font-mono text-[10.5px]">
+                  <div class="flex gap-2"><dt class="text-slate-600">mood</dt><dd data-hud="mood" class="text-electric">idle</dd></div>
+                  <div class="flex gap-2"><dt class="text-slate-600">event</dt><dd data-hud="event" class="text-slate-300">idle</dd></div>
+                </dl>
+                <dl class="absolute inset-x-3 -bottom-6 flex justify-between font-mono text-[10.5px]">
+                  <div class="flex gap-2"><dt class="text-slate-600">ram</dt><dd class="tabular text-slate-300">~120 MB</dd></div>
+                  <div class="flex gap-2"><dt class="text-slate-600">render</dt><dd data-hud="fps" class="tabular text-slate-300">60 fps</dd></div>
+                </dl>
+              </div>
             </div>
-            <p class="sr-only">Animated particle sphere that reacts to how fast you move the pointer, standing in for the assistant's voice level.</p>
+            <div class="mt-12 flex flex-wrap items-center justify-center gap-1.5" role="group" aria-label="Try a mood">
+              <span class="mr-1 text-[12px] text-slate-500">Try a mood</span>
+              <div id="face-moods" class="contents"></div>
+            </div>
+          </div>
           </div>
         </div>
       </section>
