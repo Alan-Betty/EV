@@ -423,7 +423,7 @@
     box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset;
   }
 
-  .dl-card { @apply glass glass-hover relative flex flex-col rounded-2xl p-5 sm:p-6; }
+  .dl-card { @apply glass glass-hover relative flex min-w-0 flex-col rounded-2xl p-5 sm:p-6; }
   .dl-card.is-detected {
     @apply border-cyan-400/30;
     box-shadow: 0 0 0 1px rgba(0, 242, 254, 0.12), 0 20px 50px -24px rgba(0, 242, 254, 0.45);
