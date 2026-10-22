@@ -203,8 +203,8 @@
   .sim-msg { @apply grid grid-cols-[3.25rem_minmax(0,1fr)] items-baseline gap-3; }
   .sim-who { @apply text-right font-mono text-[10.5px] text-slate-600; }
   .sim-text { @apply text-[14.5px] leading-7 text-slate-300; }
-  .sim-msg[data-who='nexus'] .sim-who { @apply text-electric; }
-  .sim-msg[data-who='nexus'] .sim-text { @apply text-white; }
+  .sim-msg[data-who='E.V.'] .sim-who { @apply text-electric; }
+  .sim-msg[data-who='E.V.'] .sim-text { @apply text-white; }
   .sim-plan .sim-text { @apply font-mono text-[12px] leading-6 text-violet-300/80; }
   .sim-text.is-typing::after {
     content: '';

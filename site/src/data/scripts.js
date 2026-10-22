@@ -1,61 +1,56 @@
-// Simulator scripts. Each is one recorded errand: what was heard, the plan,
-// an optional spoken confirmation, the commands run, and the spoken reply.
+// Simulator scripts. Each replays one errand through E.V.'s real tools, with
+// the arguments those tools really take: what was heard, the plan, an optional
+// spoken confirmation, the tool calls, and the spoken reply.
 // `ms` on a step is the duration shown next to it once it finishes.
 
 export const SCRIPTS = [
   {
-    id: 'refactor',
-    label: 'Analyze screen & refactor current file',
-    heard: 'Look at my screen and refactor the file I have open.',
-    plan: 'capture focused window, read editor tree, plan edit, run tests',
+    id: 'error',
+    label: 'Read the error on screen & hand it to Claude Code',
+    heard: 'E.V., what does that error say? Get Claude Code to fix it.',
+    plan: 'take_screenshot to read the error, then dev_workflow to start Claude Code with it',
     steps: [
-      { cmd: 'nexus vision capture --window focused --ruler', ms: 182, out: ['frame 1600x1000  158 KB  "router.py - Visual Studio Code"'] },
-      { cmd: 'nexus a11y tree --app code --depth 4', ms: 64, out: ['412 elements  focus: editor[router.py:218]'] },
-      { cmd: 'nexus edit plan --file app/router.py --goal "flatten route()"', ms: 1340, out: ['3 hunks  -61 +19', 'nested if/elif chain -> dispatch table'] },
-      { cmd: 'pytest tests/ -q', ms: 41800, out: ['752 passed in 41.80s'], tone: 'ok' },
+      { cmd: 'take_screenshot question="what does the error say"', ms: 1840, out: ['frame 1280px  95 KB  sent to Gemini vision', 'TypeError: cannot unpack non-iterable NoneType  (router.py:218)'] },
+      { cmd: 'dev_workflow directory="~/GitHub/api" start_claude=true prompt="Fix the TypeError at router.py:218"', ms: 2310, out: ['VS Code focused, typing into its integrated terminal', 'claude started with the opening prompt'], tone: 'ok' },
     ],
-    reply: 'Done. route() was a forty-line if chain, so I turned it into a dispatch table. Same behaviour, 42 lines shorter, and all 752 tests still pass.',
+    reply: "It's a TypeError on line 218 of router.py. route() returned None. Claude Code's open in your terminal with the fix request.",
   },
   {
-    id: 'diagnostic',
-    label: 'Execute system diagnostic (RAM/Swap/CPU)',
-    heard: 'Run a quick system diagnostic. Memory, swap and CPU.',
-    plan: 'read memory, pressure stall info, top processes, thermals',
+    id: 'mouse',
+    label: 'Find a gaming mouse under ₹5,000 & add it to my basket',
+    heard: 'Find me a gaming mouse under five thousand with an infinite scroll wheel and put it in my Amazon basket.',
+    plan: 'agent_task, routed to the browser: search, sort, pick, add once, check the basket',
+    confirm: 'That adds something to your Amazon basket. Confirm?',
     steps: [
-      { cmd: 'free -h --si', ms: 3, out: ['Mem:   32G total   11G used   18G available', 'Swap:  8.0G total   0B used'] },
-      { cmd: 'cat /proc/pressure/cpu', ms: 1, out: ['some avg10=1.42 avg60=0.97 avg300=0.88'] },
-      { cmd: 'ps -eo comm,%cpu,rss --sort=-%cpu | head -3', ms: 21, out: ['chromium      18.2   1.4G', 'code           6.9   812M', 'nexus          1.1    96M'] },
-      { cmd: 'nexus diag thermals', ms: 140, out: ['cpu 54°C   gpu 47°C   fans 1180 rpm'], tone: 'ok' },
+      { cmd: 'agent_task task="gaming mouse under 5000, infinite scroll, add to basket"', ms: 610, out: ['route: web  amazon.in  DOM planner, no screenshots'] },
+      { cmd: 'web_agent fill 3 = "gaming mouse infinite scroll"', ms: 1420, out: ['48 results, 45 elements numbered'] },
+      { cmd: 'web_agent select 14 = "Price: Low to High"', ms: 1180, out: ['[12] link "Logitech G502 X Lightspeed"  ₹4,295'] },
+      { cmd: 'web_agent click 13 "Add to basket"', ms: 960, out: ['basket 0 -> 1', 'ALREADY DONE: Add to basket on /dp/B0C8'] },
+      { cmd: 'web_agent look "is the mouse in the basket?"', ms: 2040, out: ['yes: Logitech G502 X Lightspeed, qty 1'], tone: 'ok' },
     ],
-    reply: 'All healthy. Eighteen of thirty-two gigs free, swap untouched, CPU pressure under two percent. Chromium is the heaviest thing running at 1.4 gigs.',
+    reply: "Done. The Logitech G502 X at four thousand two ninety-five is in your basket, infinite scroll wheel and all. I didn't check out.",
   },
   {
-    id: 'hyprland',
-    label: 'Set up Hyprland workspace & launches',
-    heard: 'Set up my dev workspace on three. Terminal left, editor right.',
-    plan: 'switch workspace, launch kitty and code, set layout, wait for windows',
+    id: 'downloads',
+    label: 'Tidy up my Downloads folder',
+    heard: 'Tidy up my downloads folder.',
+    plan: 'file_manager organize, inside FILE_ROOTS, files only, nothing deleted',
     steps: [
-      { cmd: 'hyprctl dispatch workspace 3', ms: 2, out: ['ok'] },
-      { cmd: 'hyprctl dispatch exec "[workspace 3 silent] kitty --class dev"', ms: 4, out: ['ok  pid 51822'] },
-      { cmd: 'hyprctl dispatch exec "[workspace 3 silent] code ~/src/nexus"', ms: 5, out: ['ok  pid 51840'] },
-      { cmd: 'hyprctl dispatch layoutmsg orientationleft', ms: 1, out: ['ok'] },
-      { cmd: 'nexus ipc wait openwindow --class code --timeout 4s', ms: 812, out: ['openwindow>>5a1c,3,code,nexus - Visual Studio Code'], tone: 'ok' },
+      { cmd: 'file_manager action=organize path="~/Downloads"', ms: 1290, out: ['41 files sorted into 7 folders', 'Images 18  Documents 9  Archives 6  Installers 4  Audio 2  Video 1  Other 1'], tone: 'ok' },
     ],
-    reply: 'Workspace three is ready. Terminal on the left, editor on the right, both up in under a second.',
+    reply: 'Forty-one files, seven folders. Downloads is civilised again.',
   },
   {
-    id: 'release',
-    label: 'Automate local git push & release draft',
-    heard: 'Commit what I have, push it, and draft the release notes.',
-    plan: 'inspect tree, commit, push, draft release from merged commits',
-    confirm: 'That pushes to main and drafts v0.9.4. Confirm?',
+    id: 'system',
+    label: 'Run a quick system check (RAM, swap, CPU)',
+    heard: 'How is my system doing? Memory, swap and CPU.',
+    plan: 'terminal_command, read-only commands, classified SAFE so no confirmation',
     steps: [
-      { cmd: 'git status --porcelain', ms: 9, out: [' M src/lib/orb.js', ' M src/sections/hero.js'] },
-      { cmd: 'git commit -am "feat(hero): tune orb energy curve"', ms: 38, out: ['[main 4c1e9a2] 2 files changed, 14 insertions(+), 6 deletions(-)'] },
-      { cmd: 'git push origin main', ms: 1210, out: ['a81f0d3..4c1e9a2  main -> main'] },
-      { cmd: 'gh release create v0.9.4 --draft --generate-notes', ms: 960, out: ['draft created: releases/tag/v0.9.4  (23 commits, 4 contributors)'], tone: 'ok' },
+      { cmd: 'terminal_command command="free -h"', ms: 12, out: ['Mem:   31Gi total   11Gi used   18Gi available', 'Swap:  8.0Gi total   0B used'] },
+      { cmd: 'terminal_command command="cat /proc/pressure/cpu"', ms: 9, out: ['some avg10=1.42 avg60=0.97 avg300=0.88'] },
+      { cmd: 'terminal_command command="ps -eo comm,%cpu,rss --sort=-%cpu | head -4"', ms: 31, out: ['chromium   18.2   1.4G', 'code        6.9   812M', 'python3     1.1   118M'], tone: 'ok' },
     ],
-    reply: 'Pushed two files to main and drafted v0.9.4 from twenty-three commits. It is still a draft, so nothing is public until you publish it.',
+    reply: "All healthy. Eighteen gigs free, swap untouched, CPU barely working. Chromium's the heaviest thing running. I'm the 118 megabytes at the bottom.",
   },
 ];
 
@@ -64,10 +59,10 @@ export function freeform(text) {
   return {
     id: 'freeform',
     heard: text,
-    plan: 'route utterance, pick a tool subset',
+    plan: 'select_tools: offer only the tools this sentence could need',
     steps: [
-      { cmd: `nexus route --utterance ${JSON.stringify(text.slice(0, 48))}`, ms: 212, out: ['offered 3 of 21 tools: chat, open_app, web_search'] },
+      { cmd: `select_tools ${JSON.stringify(text.slice(0, 48))}`, ms: 4, out: ['offered chat, open_app, web_search (always on) plus matches'] },
     ],
-    reply: 'In the app I would act on that. This demo only replays the four errands above, so pick one of those to watch the whole pipeline run.',
+    reply: 'In the real thing I would act on that. This demo only replays the four errands above, so pick one of those to watch a whole run.',
   };
 }
