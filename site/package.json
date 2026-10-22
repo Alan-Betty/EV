@@ -9,7 +9,9 @@
     "dev": "vite",
     "prebuild": "node scripts/sync-repo.mjs",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "preadmin": "node scripts/sync-repo.mjs",
+    "admin": "vite --open /admin.html"
   },
   "devDependencies": {
     "autoprefixer": "^10.6.1",
