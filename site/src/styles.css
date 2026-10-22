@@ -94,3 +94,34 @@
   .text-pretty { text-wrap: pretty; }
   .tabular { font-variant-numeric: tabular-nums; }
 }
+
+/* Header ---------------------------------------------------------------- */
+@layer components {
+  .site-header {
+    @apply border-b border-transparent transition-[background-color,border-color] duration-300;
+  }
+  .site-header[data-scrolled='true'],
+  .site-header[data-menu='true'] {
+    @apply border-white/[0.06] bg-ink-950/70 backdrop-blur-xl;
+  }
+
+  .logo-aura {
+    background: radial-gradient(closest-side, rgba(0, 242, 254, 0.55), rgba(127, 0, 255, 0.35) 55%, transparent 100%);
+    filter: blur(8px);
+  }
+  a:hover .logo-aura { animation-duration: 1.4s; }
+
+  .nav-link {
+    @apply relative rounded-lg px-3 py-2 text-slate-400 transition-colors duration-150 hover:text-white;
+  }
+  .nav-link[aria-current] { @apply text-white; }
+  .nav-link[aria-current]::after {
+    content: '';
+    @apply absolute inset-x-3 -bottom-[13px] hidden h-px md:block;
+    background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  }
+
+  #menu-toggle path { transition: transform 0.2s ease; transform-origin: center; }
+  #menu-toggle[aria-expanded='true'] .menu-top { transform: translateY(4px) rotate(45deg); }
+  #menu-toggle[aria-expanded='true'] .menu-bottom { transform: translateY(-4px) rotate(-45deg); }
+}
