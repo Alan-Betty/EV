@@ -1,0 +1,27 @@
+{
+  "name": "ev-site",
+  "private": true,
+  "version": "0.14.0",
+  "type": "module",
+  "scripts": {
+    "sync": "node scripts/sync-repo.mjs",
+    "predev": "node scripts/sync-repo.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/sync-repo.mjs",
+    "build": "vite build",
+    "preview": "vite preview",
+    "preadmin": "node scripts/sync-repo.mjs",
+    "admin": "vite --open /admin.html"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.6.1",
+    "postcss": "^8.5.31",
+    "tailwindcss": "^3.4.19",
+    "vite": "^8.3.5"
+  },
+  "dependencies": {
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource-variable/plus-jakarta-sans": "^5.3.0",
+    "simple-icons": "^16.35.0"
+  }
+}
