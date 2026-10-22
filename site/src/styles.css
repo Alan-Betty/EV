@@ -71,7 +71,7 @@
   }
 
   .btn {
-    @apply relative inline-flex items-center justify-center gap-2 rounded-xl px-5 h-12 text-[15px] font-medium
+    @apply relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl px-5 h-12 text-[15px] font-medium
       transition-[transform,box-shadow,border-color,background-color] duration-200 ease-out
       active:scale-[0.98] select-none;
   }
@@ -338,11 +338,12 @@
   .log-search input::-webkit-search-cancel-button { filter: invert(0.6); }
 
   .log-row {
-    @apply grid min-h-[30px] grid-cols-[4.25rem_3.75rem_minmax(0,1fr)_auto] items-center gap-3 px-4 py-0.5 hover:bg-white/[0.025];
+    @apply grid min-h-[30px] grid-cols-[3rem_minmax(0,1fr)_auto] items-center gap-3 px-4 py-0.5 hover:bg-white/[0.025]
+      sm:grid-cols-[4.25rem_3.75rem_minmax(0,1fr)_auto];
     animation: row-in 0.35s ease-out;
   }
   @keyframes row-in { from { background-color: rgba(0, 242, 254, 0.06); } }
-  .log-time { @apply tabular text-slate-600; }
+  .log-time { @apply hidden tabular text-slate-600 sm:block; }
   .log-type { @apply text-slate-500; }
   .log-type[data-type='commit'] { @apply text-violet-300; }
   .log-type[data-type='build'] { @apply text-sky-300; }
@@ -446,4 +447,76 @@
   .copy-btn .check-icon { display: none; }
   .copy-btn[data-copied] .copy-icon { display: none; }
   .copy-btn[data-copied] .check-icon { display: grid; @apply text-pulse; }
+}
+
+/* Polish: sheen, lift, footer, command menu ----------------------------- */
+@layer components {
+  .sheen { isolation: isolate; }
+  .bento, .dl-card {
+    transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.3s ease, box-shadow 0.3s ease, background-color 0.3s ease;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .sheen::before,
+    .sheen::after {
+      content: '';
+      @apply pointer-events-none absolute rounded-[inherit] opacity-0;
+      transition: opacity 0.35s ease;
+    }
+    /* soft light inside the glass */
+    .sheen::before {
+      inset: 0;
+      z-index: -1;
+      background: radial-gradient(480px circle at var(--mx, 50%) var(--my, 50%), rgba(0, 242, 254, 0.06), transparent 45%);
+    }
+    /* brighter rim that tracks the pointer along the border */
+    .sheen::after {
+      inset: 0;
+      padding: 1px;
+      background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 50%), rgba(0, 242, 254, 0.55), rgba(127, 0, 255, 0.25) 40%, transparent 70%);
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+    }
+    .sheen:hover::before,
+    .sheen:hover::after { opacity: 1; }
+    .bento:hover,
+    .dl-card:hover {
+      transform: translateY(-2px) scale(1.01);
+      box-shadow: 0 24px 48px -28px rgba(0, 0, 0, 0.9), 0 10px 40px -30px rgba(0, 242, 254, 0.5);
+    }
+  }
+
+  .status-pill {
+    @apply inline-flex h-8 items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/[0.06] px-3 font-mono text-[11px] text-emerald-200/90;
+  }
+  .gh-badge {
+    @apply inline-flex h-8 items-center overflow-hidden rounded-full border border-white/10 bg-white/[0.03] font-mono text-[11px] text-slate-400
+      transition-colors hover:border-white/20 hover:text-white;
+  }
+  .footer-head { @apply text-[12.5px] font-medium text-slate-200; }
+  .footer-links { @apply mt-4 space-y-2.5 text-[13.5px]; }
+  .footer-links a { @apply text-slate-500 transition-colors hover:text-white; }
+
+  .cmdk {
+    @apply m-0 h-full max-h-none w-full max-w-none bg-transparent p-4 pt-[12vh] text-slate-200;
+    border: 0;
+  }
+  .cmdk[open] { @apply flex items-start justify-center; }
+  .cmdk::backdrop {
+    background: rgba(9, 10, 15, 0.6);
+    backdrop-filter: blur(6px);
+  }
+  .cmdk[open] .cmdk-panel { animation: cmdk-in 0.18s cubic-bezier(0.22, 1, 0.36, 1); }
+  @keyframes cmdk-in { from { opacity: 0; transform: translateY(-6px) scale(0.985); } }
+  .cmdk-panel {
+    @apply w-full max-w-[620px] overflow-hidden rounded-2xl border border-white/10 shadow-lift backdrop-blur-2xl;
+    background: rgb(22 25 34 / 0.92);
+    box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(0, 242, 254, 0.06);
+  }
+  .cmdk-group { @apply px-3 pb-1.5 pt-3 text-[11.5px] font-medium text-slate-500; }
+  .cmdk-item {
+    @apply flex h-10 cursor-pointer items-center gap-3 rounded-lg px-3 text-[14px] text-slate-300;
+  }
+  .cmdk-item[aria-selected='true'] { @apply bg-white/[0.06] text-white; box-shadow: inset 2px 0 0 #00f2fe; }
+  .cmdk-hint { @apply max-w-[45%] truncate font-mono text-[11px] text-slate-500; }
 }

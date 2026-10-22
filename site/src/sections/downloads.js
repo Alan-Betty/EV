@@ -53,7 +53,7 @@ export function initDownloads() {
     grid.innerHTML = Object.entries(PLATFORMS)
       .map(([id, p]) => {
         const here = id === detected;
-        return `<article class="dl-card ${here ? 'is-detected max-lg:order-first' : ''}" aria-labelledby="dl-${id}">
+        return `<article class="dl-card sheen ${here ? 'is-detected max-lg:order-first' : ''}" aria-labelledby="dl-${id}">
           <header class="flex items-center gap-3">
             <span class="dl-icon">${platformIcon(id, 'size-5')}</span>
             <div class="min-w-0 flex-1">
