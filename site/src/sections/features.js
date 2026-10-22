@@ -15,7 +15,7 @@ export function initFeatures() {
     let html = '';
     for (let i = 0; i < BARS; i++) {
       const x = i / BARS;
-      // NEXUS speaks until the cut, then yields within a few bars. The user starts just before it.
+      // E.V. speaks until the cut, then yields within a few bars. The user starts just before it.
       const active = you ? x > CUT - 0.03 : x < CUT + 0.02;
       const word = 0.35 + 0.65 * Math.abs(Math.sin(i * 0.55 + (you ? 1.3 : 0)));
       const h = active ? Math.max(0.12, word * (0.4 + rand() * 0.6)) : 0.06;

@@ -1,10 +1,13 @@
 {
-  "name": "nexus-site",
+  "name": "ev-site",
   "private": true,
-  "version": "0.9.4",
+  "version": "0.14.0",
   "type": "module",
   "scripts": {
+    "sync": "node scripts/sync-repo.mjs",
+    "predev": "node scripts/sync-repo.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/sync-repo.mjs",
     "build": "vite build",
     "preview": "vite preview"
   },

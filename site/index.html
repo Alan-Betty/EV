@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>NEXUS — voice and desktop AI assistant</title>
-    <meta name="description" content="NEXUS listens, looks at your screen and acts on your desktop. Full-duplex voice, screen perception and native window automation for Linux, macOS and Windows." />
+    <title>E.V. — a voice assistant that acts on your desktop</title>
+    <meta name="description" content="E.V. is a voice assistant for Windows and Ubuntu that opens apps, moves files, runs commands, drives the browser and takes the mouse when it has to. About 120 MB of RAM, guarded by Confirm? on anything risky." />
     <meta name="theme-color" content="#090A0F" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
   </head>
@@ -13,7 +13,7 @@
 
     <header id="site-header" class="site-header fixed inset-x-0 top-0 z-50" data-scrolled="false">
       <div class="shell flex h-16 items-center gap-8">
-        <a href="#top" class="group -ml-1 flex items-center gap-3 rounded-lg p-1" aria-label="NEXUS, back to top">
+        <a href="#top" class="group -ml-1 flex items-center gap-3 rounded-lg p-1" aria-label="E.V., back to top">
           <span class="relative grid size-8 place-items-center">
             <span aria-hidden="true" class="logo-aura absolute -inset-2.5 rounded-full animate-aura"></span>
             <svg viewBox="0 0 32 32" fill="none" class="relative size-8" aria-hidden="true">
@@ -23,10 +23,10 @@
                 </linearGradient>
               </defs>
               <rect x=".5" y=".5" width="31" height="31" rx="8.5" fill="#0F1117" stroke="rgba(255,255,255,.1)" />
-              <path d="M10 22V10l12 12V10" stroke="url(#logo-g)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" />
+              <path d="M8.5 10.5h6M8.5 16h5M8.5 21.5h6M8.5 10.5v11M17.5 10.5l3.25 11 3.25-11" stroke="url(#logo-g)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
           </span>
-          <span class="text-[13px] font-semibold tracking-[0.22em] text-white">NEXUS</span>
+          <span class="text-[14px] font-semibold tracking-[0.18em] text-white">E.V.</span>
         </a>
 
         <nav aria-label="Primary" class="hidden md:block">
@@ -76,9 +76,9 @@
                 <span class="absolute inset-0 rounded-full bg-pulse animate-ping"></span>
                 <span class="relative size-1.5 rounded-full bg-pulse"></span>
               </span>
-              <span class="text-slate-200">[ SYS_VER: 0.9.4-BETA ]</span>
+              <span class="text-slate-200" data-iteration-tag>[ BUILD: ITERATION 14 ]</span>
               <span class="text-slate-600" aria-hidden="true">::</span>
-              <span>LOCAL HYPRLAND / TERMINAL INTEGRATION OPERATIONAL</span>
+              <span>WINDOWS + UBUNTU WAYLAND OPERATIONAL</span>
             </p>
 
             <h1 id="hero-title" class="hero-title mt-8 text-balance text-display-sm font-semibold sm:text-display-md xl:text-display-lg">
@@ -86,8 +86,8 @@
             </h1>
 
             <p class="mt-6 max-w-[33rem] text-pretty text-[17px] leading-8 text-slate-400">
-              NEXUS hears you over its own voice, reads what is on your screen, and drives your windows, shell and files.
-              Talk over it, interrupt it, hand it an errand. It answers before you finish the sentence.
+              E.V. is a voice assistant that does things on your computer. It opens apps, moves files, runs commands,
+              drives the browser, and takes the mouse when it has to. Say its name once and keep talking.
             </p>
 
             <div class="mt-10 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
@@ -101,11 +101,11 @@
                   <div class="flex items-center justify-between gap-4">
                     <span class="flex items-center gap-1.5 text-[11px] font-medium text-slate-300">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" class="size-3.5 text-pulse" aria-hidden="true"><path d="M12 3.5 5 6v5.5c0 4.3 3 7.8 7 9 4-1.2 7-4.7 7-9V6z" /><path d="m9 12 2.2 2.2L15.5 10" /></svg>
-                      SHA-256
+                      Source archive
                     </span>
-                    <span data-size class="mono-meta"></span>
+                    <span class="mono-meta">commit</span>
                   </div>
-                  <code data-sha class="mt-2 block break-all font-mono text-[11px] leading-[1.55] text-electric/90"></code>
+                  <code data-commit class="mt-2 block break-all font-mono text-[11px] leading-[1.55] text-electric/90"></code>
                   <span data-file class="mt-2 block truncate font-mono text-[10.5px] text-slate-500"></span>
                 </div>
               </div>
@@ -130,7 +130,7 @@
                 <div class="flex gap-2"><dt class="text-slate-600">state</dt><dd data-hud="state" class="text-electric">idle</dd></div>
               </dl>
               <dl class="absolute inset-x-3 bottom-3 flex justify-between font-mono text-[10.5px]">
-                <div class="flex gap-2"><dt class="text-slate-600">ipc</dt><dd class="tabular text-slate-300">0.4 ms</dd></div>
+                <div class="flex gap-2"><dt class="text-slate-600">ram</dt><dd class="tabular text-slate-300">~120 MB</dd></div>
                 <div class="flex gap-2"><dt class="text-slate-600">render</dt><dd data-hud="fps" class="tabular text-slate-300">60 fps</dd></div>
               </dl>
             </div>
@@ -188,7 +188,7 @@
 
                 <div class="flex min-w-0 flex-col bg-black/30">
                   <div class="flex h-10 items-center justify-between border-b border-white/[0.06] px-4">
-                    <span class="mono-meta">~/src/nexus</span>
+                    <span class="mono-meta">~/EV</span>
                     <span class="mono-meta tabular">step <span id="sim-progress">0/0</span></span>
                   </div>
                   <ol id="sim-term" class="h-[300px] overflow-y-auto px-4 py-3 font-mono text-[12px] leading-[1.75] sm:text-[12.5px] lg:h-auto lg:flex-1" aria-label="Commands run"></ol>
@@ -209,35 +209,35 @@
         <div class="shell">
           <div class="section-head">
             <h2 id="features-title">Built to act, not only answer</h2>
-            <p>Six systems share one loop: listen, look, decide, act, speak. Each was built to shorten the gap between saying something and it being done.</p>
+            <p>One loop owns everything: listen, transcribe, decide, act, speak. Every part of it exists to close the gap between saying something and it being done, without handing the model the keys.</p>
           </div>
 
           <div class="mt-14 grid gap-3 sm:grid-cols-2 lg:grid-cols-6 lg:gap-4">
             <!-- Voice -->
             <article class="bento sheen sm:col-span-2 lg:col-span-4">
               <div class="bento-copy">
-                <h3>Full-duplex voice engine</h3>
-                <p>A direct audio stream with no push-to-talk. Speak over a reply and NEXUS stops mid-word to listen, keeping what you already said.</p>
+                <h3>Full-duplex voice</h3>
+                <p>Say "E.V." once and keep talking. Talk over a reply and it stops mid-word to listen, keeping what you already said. It learns your voice and its own, so it never answers itself on loudspeakers.</p>
               </div>
               <div class="bento-visual mt-auto space-y-3 px-5 pb-5 sm:px-6 sm:pb-6" aria-hidden="true">
                 <div class="duplex">
-                  <div class="duplex-lane"><span class="duplex-label">nexus</span><div class="duplex-bars" data-lane="nexus"></div></div>
+                  <div class="duplex-lane"><span class="duplex-label">E.V.</span><div class="duplex-bars" data-lane="ev"></div></div>
                   <div class="duplex-lane"><span class="duplex-label">you</span><div class="duplex-bars" data-lane="you"></div></div>
-                  <span class="duplex-cut"><span>barge-in 120 ms</span></span>
+                  <span class="duplex-cut"><span>barge-in, echo-relative</span></span>
                 </div>
                 <dl class="grid grid-cols-3 gap-3 border-t border-white/[0.06] pt-4">
-                  <div><dt class="mono-meta">endpointing</dt><dd class="bento-num">600 ms</dd></div>
-                  <div><dt class="mono-meta">first word</dt><dd class="bento-num">0.9 s</dd></div>
-                  <div><dt class="mono-meta">echo gating</dt><dd class="bento-num">adaptive</dd></div>
+                  <div><dt class="mono-meta">end of speech</dt><dd class="bento-num">600 ms</dd></div>
+                  <div><dt class="mono-meta">transcription</dt><dd class="bento-num">0.34 s</dd></div>
+                  <div><dt class="mono-meta">first token</dt><dd class="bento-num">0.57 s</dd></div>
                 </dl>
               </div>
             </article>
 
-            <!-- Vision -->
+            <!-- Any app -->
             <article class="bento sheen sm:col-span-1 lg:col-span-2 lg:row-span-2">
               <div class="bento-copy">
-                <h3>Spatial vision perception</h3>
-                <p>Reads the screen the way you do. Finds controls, reads their labels and clicks by position, then looks again to check it worked.</p>
+                <h3>Eyes and hands for any app</h3>
+                <p>The window list and the accessibility tree first, screenshots only when those cannot do the job. Clicks land on a ruler drawn over the frame, and every step gets a second look.</p>
               </div>
               <div class="bento-visual flex flex-1 flex-col px-5 pb-5 sm:px-6 sm:pb-6" aria-hidden="true">
                 <div class="vision">
@@ -253,26 +253,26 @@
                   <span class="vision-box is-target" style="right:5.5%;bottom:7.5%;width:23%;height:13%"><em>button "Save"</em></span>
                   <span class="vision-scan"></span>
                 </div>
-                <dl class="mt-4 space-y-2 font-mono text-[11px]">
-                  <div class="flex justify-between"><dt class="text-slate-500">elements found</dt><dd class="text-slate-300">412</dd></div>
-                  <div class="flex justify-between"><dt class="text-slate-500">click target</dt><dd class="text-electric">0.861, 0.874</dd></div>
-                  <div class="flex justify-between"><dt class="text-slate-500">verified by</dt><dd class="text-slate-300">second look</dd></div>
-                </dl>
+                <ol class="mt-4 space-y-2 font-mono text-[11px]">
+                  <li class="flex justify-between"><span class="text-slate-500">1  window tier</span><span class="text-slate-300">no model call</span></li>
+                  <li class="flex justify-between"><span class="text-slate-500">2  accessibility tree</span><span class="text-electric">412 elements</span></li>
+                  <li class="flex justify-between"><span class="text-slate-500">3  vision</span><span class="text-slate-300">only if needed</span></li>
+                </ol>
               </div>
             </article>
 
-            <!-- Offline -->
+            <!-- Light -->
             <article class="bento sheen lg:col-span-2">
               <div class="bento-copy">
-                <h3>100% offline runtimes</h3>
-                <p>Language and speech models run on your GPU. No telemetry, no account, nothing leaves the machine.</p>
+                <h3>Runs in about 120 MB</h3>
+                <p>No local model, no vendor SDKs, no audio libraries. The brain, the ears and the voice are plain HTTP calls on one warm connection.</p>
               </div>
               <div class="bento-visual mt-auto px-5 pb-5 sm:px-6 sm:pb-6" aria-hidden="true">
-                <p class="flex items-baseline gap-2"><span class="text-[40px] font-semibold leading-none tracking-[-0.04em] text-white">0 B</span><span class="text-[12.5px] text-slate-500">sent off this machine today</span></p>
+                <p class="flex items-baseline gap-2"><span class="text-[40px] font-semibold leading-none tracking-[-0.04em] text-white">~120</span><span class="text-[12.5px] text-slate-500">MB resident</span></p>
                 <ul class="mt-5 space-y-2.5 font-mono text-[11px]">
-                  <li class="runtime"><span class="text-slate-500">llm</span><span class="text-slate-300">nexus-8b-q4</span><span class="ml-auto text-slate-400">41 tok/s</span></li>
-                  <li class="runtime"><span class="text-slate-500">stt</span><span class="text-slate-300">whisper-large-v3</span><span class="ml-auto text-slate-400">0.2x rt</span></li>
-                  <li class="pt-1"><span class="block h-1 overflow-hidden rounded-full bg-white/[0.06]"><span class="gpu-fill block h-full w-[38%] rounded-full"></span></span><span class="mt-1.5 flex justify-between text-slate-500"><span>cuda:0 vram</span><span>3.1 / 8 GB</span></span></li>
+                  <li class="runtime"><span class="w-8 text-slate-500">llm</span><span class="text-slate-300">Groq, Gemini failover</span></li>
+                  <li class="runtime"><span class="w-8 text-slate-500">stt</span><span class="text-slate-300">Whisper large-v3</span></li>
+                  <li class="runtime"><span class="w-8 text-slate-500">tts</span><span class="text-slate-300">edge-tts neural voices</span></li>
                 </ul>
               </div>
             </article>
@@ -280,51 +280,50 @@
             <!-- Memory -->
             <article class="bento sheen lg:col-span-2">
               <div class="bento-copy">
-                <h3>Persistent event memory</h3>
-                <p>Unfinished errands, preferences and context survive reboots, crashes and workspace switches.</p>
+                <h3>Remembers, and picks up again</h3>
+                <p>Facts, notes, a to-do list and a backlog of unfinished work, written atomically so a power cut cannot corrupt them.</p>
               </div>
               <div class="bento-visual mt-auto px-5 pb-5 sm:px-6 sm:pb-6" aria-hidden="true">
                 <ol class="timeline font-mono text-[11px]">
-                  <li><time>Mon 18:42</time><span>power lost mid-task</span></li>
+                  <li><time>Mon 18:42</time><span>lid closed mid-copy</span></li>
                   <li><time>Tue 09:12</time><span>boot, unclean exit noticed</span></li>
-                  <li class="is-now"><time>09:12</time><span class="text-slate-200">resumed "copy photos to NAS"</span></li>
+                  <li class="is-now"><time>09:12</time><span class="text-slate-200">"One thing left over: the photo copy."</span></li>
                 </ol>
               </div>
             </article>
 
-            <!-- Automation -->
+            <!-- Guardrails -->
             <article class="bento sheen sm:col-span-2 lg:col-span-3">
               <div class="bento-copy">
-                <h3>Native OS and window automation</h3>
-                <p>Listens on Hyprland and window manager IPC, runs shell commands and moves files. Anything destructive asks first.</p>
+                <h3>Guardrails that assume the model is wrong</h3>
+                <p>Anything destructive or that spends money asks "Confirm?" first. "Stop everything" or Ctrl+Alt+Q locks it down, and only your voice can unlock it.</p>
               </div>
               <div class="bento-visual mt-auto px-5 pb-5 sm:px-6 sm:pb-6" aria-hidden="true">
                 <ul class="ipc font-mono text-[11px] leading-[1.9]">
-                  <li><span class="ipc-src">hyprland</span><span>activewindow&gt;&gt;kitty,dev</span></li>
-                  <li><span class="ipc-src">hyprland</span><span>workspace&gt;&gt;3</span></li>
-                  <li><span class="ipc-src text-electric">nexus</span><span>focus kitty</span><span class="ipc-t">4 ms</span></li>
-                  <li><span class="ipc-src">shell</span><span>cargo build --release</span><span class="ipc-t text-pulse">exit 0</span></li>
-                  <li><span class="ipc-src">fs</span><span>moved 14 files to ~/Pictures</span><span class="ipc-t">31 ms</span></li>
-                  <li><span class="ipc-src text-amber-300/80">guard</span><span>rm -rf ~/old-builds</span><span class="ipc-t text-amber-300/80">Confirm?</span></li>
+                  <li><span class="ipc-src text-amber-300/80">confirm</span><span>rm -rf ~/old-builds</span><span class="ipc-t text-amber-300/80">Confirm?</span></li>
+                  <li><span class="ipc-src">blocked</span><span>curl https://x.sh | sh</span><span class="ipc-t text-rose-300/80">never runs</span></li>
+                  <li><span class="ipc-src">files</span><span>/etc/hosts outside FILE_ROOTS</span><span class="ipc-t">refused</span></li>
+                  <li><span class="ipc-src">limiter</span><span>same call three times</span><span class="ipc-t text-rose-300/80">lockdown</span></li>
+                  <li><span class="ipc-src">web</span><span>page text fenced as untrusted</span><span class="ipc-t">2.1 KB</span></li>
+                  <li><span class="ipc-src text-electric">audit</span><span>every action to audit.jsonl</span><span class="ipc-t text-pulse">logged</span></li>
                 </ul>
               </div>
             </article>
 
-            <!-- Plugins -->
+            <!-- Browser -->
             <article class="bento sheen sm:col-span-2 lg:col-span-3">
               <div class="bento-copy">
-                <h3>Custom plugin architecture</h3>
-                <p>Write a tool in Python or JavaScript, save the file, and say its name. Plugins hot-reload without a restart.</p>
+                <h3>Web errands without screenshots</h3>
+                <p>E.V. reads the page, numbers every control and plans in plain text. It remembers what it already clicked, so one mouse means one mouse in the basket.</p>
               </div>
               <div class="bento-visual mt-auto px-5 pb-5 sm:px-6 sm:pb-6" aria-hidden="true">
                 <div class="plugin overflow-hidden rounded-xl border border-white/[0.06] bg-black/40">
-                  <div class="flex items-center justify-between border-b border-white/[0.06] px-3.5 py-2 font-mono text-[10.5px] text-slate-500"><span>plugins/standup.py</span><span class="reloaded"><span class="text-pulse">●</span> reloaded in 38 ms</span></div>
-<pre class="overflow-x-auto px-3.5 py-3 font-mono text-[11.5px] leading-[1.7] text-slate-400"><code><span class="tk-k">from</span> nexus <span class="tk-k">import</span> tool, say
-
-<span class="tk-d">@tool</span>(<span class="tk-s">"standup"</span>, triggers=[<span class="tk-s">"what did I do"</span>])
-<span class="tk-k">def</span> <span class="tk-f">standup</span>(ctx):
-    log = ctx.shell(<span class="tk-s">"git log --since=yesterday --oneline"</span>)
-    say(<span class="tk-s">f"{</span>len(log)<span class="tk-s">} commits since yesterday."</span>)</code></pre>
+                  <div class="flex items-center justify-between border-b border-white/[0.06] px-3.5 py-2 font-mono text-[10.5px] text-slate-500"><span>amazon.in/s?k=gaming+mouse</span><span class="reloaded"><span class="text-pulse">●</span> 3 planner calls, 0 frames</span></div>
+<pre class="overflow-x-auto px-3.5 py-3 font-mono text-[11.5px] leading-[1.7] text-slate-400"><code><span class="tk-d">[12]</span> link   <span class="tk-s">"Logitech G502 X Lightspeed"</span>  ₹4,295
+<span class="tk-d">[13]</span> button <span class="tk-s">"Add to basket"</span>
+<span class="tk-d">[14]</span> select <span class="tk-s">"Sort by"</span> = Price: Low to High
+<span class="tk-k">plan</span>  <span class="tk-f">click</span> 13
+<span class="tk-k">done</span>  clicked 13 <span class="tk-s">"Add to basket"</span> on /dp/B0C8</code></pre>
                 </div>
               </div>
             </article>
@@ -390,17 +389,17 @@
         <div class="shell">
           <div class="flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
             <div class="section-head">
-              <h2 id="download-title">Download NEXUS</h2>
-              <p>Every build is signed and published with its SHA-256 checksum. Pick a channel, grab the file for your system, and verify it before you run it.</p>
+              <h2 id="download-title">Get E.V.</h2>
+              <p>E.V. ships as source. Grab the archive for a channel, run the setup line for your system, add a free Groq or Gemini key, and check it with <code class="font-mono text-[13px] text-slate-300">python ev_core.py --check</code>.</p>
             </div>
             <dl id="dl-stats" class="flex gap-8 sm:gap-10">
               <div>
-                <dt class="text-[12.5px] text-slate-500">Total downloads</dt>
-                <dd data-counter="downloads" class="mt-1 text-[26px] font-semibold tracking-[-0.03em] text-white tabular">0</dd>
+                <dt class="text-[12.5px] text-slate-500">Offline tests</dt>
+                <dd data-counter="tests" class="mt-1 text-[26px] font-semibold tracking-[-0.03em] text-white tabular">0</dd>
               </div>
               <div>
-                <dt class="flex items-center gap-1.5 text-[12.5px] text-slate-500"><span class="size-1.5 rounded-full bg-pulse animate-pulse"></span>Active local nodes</dt>
-                <dd data-counter="nodes" class="mt-1 text-[26px] font-semibold tracking-[-0.03em] text-white tabular">0</dd>
+                <dt class="text-[12.5px] text-slate-500">Commits</dt>
+                <dd data-counter="commits" class="mt-1 text-[26px] font-semibold tracking-[-0.03em] text-white tabular">0</dd>
               </div>
             </dl>
           </div>
@@ -423,7 +422,7 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-[18px]" aria-hidden="true"><path d="M12 3.5 5 6v5.5c0 4.3 3 7.8 7 9 4-1.2 7-4.7 7-9V6z" /><path d="m9 12 2.2 2.2L15.5 10" /></svg>
               </span>
               <div>
-                <p class="text-[14px] font-medium text-white">Verify your download</p>
+                <p class="text-[14px] font-medium text-white">Check which commit you have</p>
                 <p data-verify-os class="text-[12px] text-slate-500"></p>
               </div>
             </div>
@@ -442,18 +441,18 @@
     <footer class="relative border-t border-white/[0.06]">
       <div class="shell grid gap-12 py-16 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,2fr)]">
         <div>
-          <a href="#top" class="inline-flex items-center gap-3 rounded-lg" aria-label="NEXUS, back to top">
-            <svg viewBox="0 0 32 32" fill="none" class="size-7" aria-hidden="true"><rect x=".5" y=".5" width="31" height="31" rx="8.5" fill="#0F1117" stroke="rgba(255,255,255,.1)" /><path d="M10 22V10l12 12V10" stroke="url(#logo-g)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
-            <span class="text-[13px] font-semibold tracking-[0.22em] text-white">NEXUS</span>
+          <a href="#top" class="inline-flex items-center gap-3 rounded-lg" aria-label="E.V., back to top">
+            <svg viewBox="0 0 32 32" fill="none" class="size-7" aria-hidden="true"><rect x=".5" y=".5" width="31" height="31" rx="8.5" fill="#0F1117" stroke="rgba(255,255,255,.1)" /><path d="M8.5 10.5h6M8.5 16h5M8.5 21.5h6M8.5 10.5v11M17.5 10.5l3.25 11 3.25-11" stroke="url(#logo-g)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            <span class="text-[14px] font-semibold tracking-[0.18em] text-white">E.V.</span>
           </a>
-          <p class="mt-4 max-w-xs text-[14px] leading-6 text-slate-500">A voice and desktop assistant that runs on your machine and acts on it.</p>
+          <p class="mt-4 max-w-xs text-[14px] leading-6 text-slate-500">A voice assistant for Windows and Ubuntu that actually does things on your computer.</p>
 
           <div class="mt-6 flex flex-wrap items-center gap-2">
             <p class="status-pill" role="status">
               <span class="relative flex size-2" aria-hidden="true"><span class="absolute inset-0 rounded-full bg-pulse animate-ping"></span><span class="relative size-2 rounded-full bg-pulse"></span></span>
-              All Systems Nominal — <span data-ipc class="tabular">0.4ms</span> Local IPC
+              All Systems Nominal — <span data-tests class="tabular">950</span> tests passing offline
             </p>
-            <a data-repo href="#" class="gh-badge" rel="noopener" aria-label="Star NEXUS on GitHub">
+            <a data-repo href="#" class="gh-badge" rel="noopener" aria-label="Star E.V. on GitHub">
               <span class="flex items-center gap-1.5 px-2.5"><svg viewBox="0 0 24 24" fill="currentColor" class="size-3.5" aria-hidden="true"><path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.2.5-2.3 1.3-3.1-.1-.4-.6-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.8.1 3.2.8.8 1.3 1.9 1.3 3.2 0 4.6-2.8 5.6-5.5 5.9.5.4.9 1.1.9 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3" /></svg>Star</span>
               <span data-stars class="border-l border-white/10 px-2.5 tabular text-slate-300">0</span>
             </a>
@@ -466,25 +465,24 @@
             <ul class="footer-links">
               <li><a href="#features">Features</a></li>
               <li><a href="#demo">Live demo</a></li>
-              <li><a href="#download">Download</a></li>
-              <li><a href="#activity">Changelog</a></li>
+              <li><a href="#download">Get E.V.</a></li>
+              <li><a href="#activity">Commit history</a></li>
             </ul>
           </div>
           <div>
-            <h2 class="footer-head">Developers</h2>
+            <h2 class="footer-head">Read</h2>
             <ul class="footer-links">
-              <li><a href="#">Documentation</a></li>
-              <li><a href="#">Plugin API</a></li>
-              <li><a data-repo href="#">Source code</a></li>
-              <li><a href="#download">Release checksums</a></li>
+              <li><a data-link="docs" href="#">Overview</a></li>
+              <li><a data-link="quickstart" href="#">Quickstart</a></li>
+              <li><a data-link="devlog" href="#">Devlog</a></li>
             </ul>
           </div>
           <div>
-            <h2 class="footer-head">Trust</h2>
+            <h2 class="footer-head">Source</h2>
             <ul class="footer-links">
-              <li><a href="#">Privacy</a></li>
-              <li><a href="#">Security policy</a></li>
-              <li><a href="#">MIT license</a></li>
+              <li><a data-repo href="#">GitHub</a></li>
+              <li><a data-link="issues" href="#">Issues</a></li>
+              <li><a href="#download">Install steps</a></li>
             </ul>
           </div>
         </nav>
@@ -492,8 +490,8 @@
 
       <div class="shell">
        <div class="flex flex-col gap-3 border-t border-white/[0.06] py-6 text-[12.5px] text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-        <p>© <span data-year>2026</span> NEXUS contributors. MIT licensed.</p>
-        <p class="flex items-center gap-2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 text-pulse" aria-hidden="true"><path d="M12 3.5 5 6v5.5c0 4.3 3 7.8 7 9 4-1.2 7-4.7 7-9V6z" /></svg>No telemetry. No account. Your voice never leaves your machine.</p>
+        <p>© <span data-year>2026</span> Alan Betty. Source on GitHub.</p>
+        <p class="flex items-center gap-2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 text-pulse" aria-hidden="true"><path d="M12 3.5 5 6v5.5c0 4.3 3 7.8 7 9 4-1.2 7-4.7 7-9V6z" /></svg>No telemetry. Your keys, your providers. Want speech kept local? Use whisper.cpp.</p>
        </div>
       </div>
     </footer>

@@ -21,6 +21,6 @@ for (const init of sections) {
     init();
   } catch (err) {
     // One broken widget must never take the page down with it.
-    console.error('[nexus] section failed to init', err);
+    console.error('[ev] section failed to init', err);
   }
 }

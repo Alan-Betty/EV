@@ -18,9 +18,7 @@ export function initHeader() {
     const mobile = store.get('mobile');
     badge.querySelector('[data-os-icon]').innerHTML = mobile ? '' : platformIcon(platform, 'size-4');
     badge.querySelector('[data-os-label]').textContent = mobile ? 'Get the desktop app' : `Download for ${PLATFORMS[platform].label}`;
-    const channel = store.get('channel');
-    const core = CHANNELS[channel].version.split('-')[0];
-    badge.querySelector('[data-os-version]').textContent = channel === 'stable' ? `v${core}` : `v${core} ${channel}`;
+    badge.querySelector('[data-os-version]').textContent = CHANNELS[store.get('channel')].tag;
   };
   ['platform', 'mobile', 'channel'].forEach((k) => store.on(k, render));
 

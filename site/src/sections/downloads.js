@@ -1,14 +1,13 @@
-import { CHANNELS, COUNTERS, PLATFORMS, artifactsFor, primaryFor } from '../data/release.js';
+import { CHANNELS, EXTRAS, PLATFORMS, REPO, artifactsFor, primaryFor } from '../data/release.js';
 import { copy, flashCopied } from '../lib/clipboard.js';
 import { icon, platformIcon } from '../lib/icons.js';
 import { store } from '../lib/store.js';
 
 const fmt = new Intl.NumberFormat('en-US');
-const short = (sha) => `${sha.slice(0, 10)}…${sha.slice(-6)}`;
 const escape = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
-function copyButton(value, label, extra = '') {
-  return `<button type="button" class="copy-btn ${extra}" data-copy="${escape(value)}" data-copy-label="${escape(label)}" aria-label="${escape(label)}">
+function copyButton(value, label) {
+  return `<button type="button" class="copy-btn" data-copy="${escape(value)}" data-copy-label="${escape(label)}" aria-label="${escape(label)}">
     <span class="copy-icon">${icon.copy('size-3.5')}</span><span class="check-icon">${icon.check('size-3.5')}</span>
   </button>`;
 }
@@ -16,23 +15,19 @@ function copyButton(value, label, extra = '') {
 function artifactRow(a) {
   if (a.command) {
     return `<li class="artifact">
-      <div class="flex items-start justify-between gap-3">
-        <div><p class="artifact-name">${a.name}</p><p class="artifact-detail">${a.detail}</p></div>
-      </div>
-      <div class="artifact-code"><code><span class="text-slate-600">$</span> ${escape(a.command)}</code>${copyButton(a.command, 'Copy install command')}</div>
+      <p class="artifact-name">${a.name}</p><p class="artifact-detail">${a.detail}</p>
+      <div class="artifact-code"><code class="truncate" title="${escape(a.command)}"><span class="text-slate-600">$</span> ${escape(a.command)}</code>${copyButton(a.command, `Copy ${a.name.toLowerCase()} command`)}</div>
     </li>`;
   }
   return `<li class="artifact">
     <div class="flex items-start justify-between gap-3">
       <div class="min-w-0"><p class="artifact-name">${a.name}</p><p class="artifact-detail">${a.detail}</p></div>
-      <a href="${a.url}" download class="artifact-dl" aria-label="Download ${a.name}, ${a.size} megabytes">
-        ${icon.download('size-4')}<span class="tabular">${a.size} MB</span>
-      </a>
+      <a href="${a.url}" class="artifact-dl" aria-label="Download ${a.file}">${icon.download('size-4')}<span>.zip</span></a>
     </div>
     <div class="artifact-code">
-      <span class="shrink-0 text-slate-600">sha256</span>
-      <code class="truncate" title="${a.sha256}">${short(a.sha256)}</code>
-      ${copyButton(a.sha256, `Copy SHA-256 for ${a.file}`)}
+      <span class="shrink-0 text-slate-600">commit</span>
+      <code class="truncate" title="${a.commit}">${a.commit.slice(0, 12)}…${a.commit.slice(-6)}</code>
+      ${copyButton(a.commit, `Copy commit id ${a.commit.slice(0, 7)}`)}
     </div>
   </li>`;
 }
@@ -69,7 +64,7 @@ export function initDownloads() {
       .join('');
 
     const c = CHANNELS[channel];
-    note.innerHTML = `<span class="font-mono text-slate-200">v${c.version}</span><span class="text-slate-600">released ${c.date}</span><span>${c.note}</span>`;
+    note.innerHTML = `<span class="font-mono text-slate-200">${c.version}</span><span class="text-slate-600">${c.date}</span><span>${c.note}</span>`;
 
     channelGroup.querySelectorAll('[data-channel]').forEach((b) => {
       const on = b.dataset.channel === channel;
@@ -78,15 +73,14 @@ export function initDownloads() {
     });
     channelGroup.style.setProperty('--seg', Object.keys(CHANNELS).indexOf(channel));
 
-    // Verify snippet for the build this visitor would actually download.
+    // How to check which commit you actually got, for this visitor's system.
     const platform = store.get('platform');
-    const build = primaryFor(platform, channel, store.get('arch'));
-    const cmd = PLATFORMS[platform].verify(build);
-    verify.querySelector('[data-verify-os]').textContent = `${PLATFORMS[platform].label}, ${build.name}`;
+    const cmd = PLATFORMS[platform].verify(primaryFor(platform, channel));
+    verify.querySelector('[data-verify-os]').textContent = `${PLATFORMS[platform].label}. Optional extras: ${EXTRAS.split('&&')[0].replace('python -m pip install ', '').trim()}`;
     verify.querySelector('code').textContent = cmd;
     verify.querySelector('[data-copy]').dataset.copy = cmd;
   }
-  ['channel', 'platform', 'arch', 'mobile'].forEach((k) => store.on(k, render));
+  ['channel', 'platform', 'mobile'].forEach((k) => store.on(k, render));
 
   // Channel radiogroup: click, or arrow keys per the ARIA pattern.
   const ids = Object.keys(CHANNELS);
@@ -109,41 +103,23 @@ export function initDownloads() {
     copy(b.dataset.copy, b.dataset.copyLabel?.replace(/^Copy /, 'Copied ') ?? 'Copied').then((ok) => ok && flashCopied(b));
   });
 
-  // Counters: count up once on first view, then tick.
-  const out = { downloads: root.querySelector('[data-counter="downloads"]'), nodes: root.querySelector('[data-counter="nodes"]') };
-  const value = { ...COUNTERS };
-  const show = () => {
-    out.downloads.textContent = fmt.format(value.downloads);
-    out.nodes.textContent = fmt.format(value.nodes);
-  };
-  show();
-  let ticking = 0;
+  // Real numbers from the repo, counted up once on first view.
+  const counters = [
+    [root.querySelector('[data-counter="tests"]'), REPO.tests],
+    [root.querySelector('[data-counter="commits"]'), REPO.commitCount],
+  ];
+  counters.forEach(([el, n]) => (el.textContent = fmt.format(n)));
   const io = new IntersectionObserver(([e]) => {
-    if (!e.isIntersecting) {
-      clearInterval(ticking);
-      ticking = 0;
-      return;
-    }
-    if (!io.counted) {
-      io.counted = true;
-      const start = performance.now();
-      const from = { downloads: value.downloads * 0.96, nodes: value.nodes * 0.9 };
-      const frame = (now) => {
-        const t = Math.min(1, (now - start) / 1200);
-        const ease = 1 - Math.pow(1 - t, 3);
-        out.downloads.textContent = fmt.format(Math.round(from.downloads + (value.downloads - from.downloads) * ease));
-        out.nodes.textContent = fmt.format(Math.round(from.nodes + (value.nodes - from.nodes) * ease));
-        if (t < 1) requestAnimationFrame(frame);
-      };
-      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) requestAnimationFrame(frame);
-    }
-    if (!ticking) {
-      ticking = setInterval(() => {
-        value.downloads += Math.floor(Math.random() * 4);
-        value.nodes += Math.round((Math.random() - 0.4) * 3);
-        show();
-      }, 1400);
-    }
+    if (!e.isIntersecting || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    io.disconnect();
+    const start = performance.now();
+    const frame = (now) => {
+      const t = Math.min(1, (now - start) / 1100);
+      const ease = 1 - Math.pow(1 - t, 3);
+      counters.forEach(([el, n]) => (el.textContent = fmt.format(Math.round(n * ease))));
+      if (t < 1) requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
   });
   io.observe(root.querySelector('#dl-stats'));
 }
