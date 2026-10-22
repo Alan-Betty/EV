@@ -72,14 +72,20 @@ function approach(cur, target, k) {
   return gap;
 }
 
-export function createFace(canvas, { onTick } = {}) {
+export function createFace(canvas, { onTick, boot = false } = {}) {
   const ctx = canvas.getContext('2d');
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
-  let base = resolve('idle');
+  // Booting starts in standby with the eyes shut and wakes up a moment later,
+  // the same sleepy -> idle hand-over E.V. does when it hears its name.
+  let base = resolve(boot ? 'sleepy' : 'idle');
   let target = base;
   let emoteUntil = 0;
   const cur = clone(base);
+  if (boot) {
+    cur.left.open = cur.right.open = 0.02;
+    setTimeout(() => setBase('idle'), reduceMotion.matches ? 0 : 650);
+  }
 
   const look = { x: 0, y: 0, tx: 0, ty: 0, next: 0 };
   const pointer = { x: 0, y: 0, at: -1e9 };

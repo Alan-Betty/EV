@@ -1,4 +1,4 @@
-import { CHANNELS, PLATFORMS } from '../data/release.js';
+import { PLATFORMS } from '../data/release.js';
 import { platformIcon } from '../lib/icons.js';
 import { store } from '../lib/store.js';
 
@@ -17,10 +17,9 @@ export function initHeader() {
     const platform = store.get('platform');
     const mobile = store.get('mobile');
     badge.querySelector('[data-os-icon]').innerHTML = mobile ? '' : platformIcon(platform, 'size-4');
-    badge.querySelector('[data-os-label]').textContent = mobile ? 'Get the desktop app' : `Download for ${PLATFORMS[platform].label}`;
-    badge.querySelector('[data-os-version]').textContent = CHANNELS[store.get('channel')].tag;
+    badge.querySelector('[data-os-label]').textContent = mobile ? 'Get E.V.' : `Download for ${PLATFORMS[platform].label}`;
   };
-  ['platform', 'mobile', 'channel'].forEach((k) => store.on(k, render));
+  ['platform', 'mobile'].forEach((k) => store.on(k, render));
 
   // Mobile disclosure
   const toggle = document.getElementById('menu-toggle');
@@ -35,7 +34,19 @@ export function initHeader() {
   window.addEventListener('keydown', (e) => e.key === 'Escape' && !panel.hidden && setOpen(false));
   matchMedia('(min-width: 768px)').addEventListener('change', (e) => e.matches && setOpen(false));
 
-  // Current-section highlight: the section crossing the band under the header wins.
+  // Current-section highlight: the section crossing the band under the header
+  // wins, and a pill slides to it rather than jumping.
+  const indicator = document.getElementById('nav-indicator');
+  const moveIndicator = (link) => {
+    if (!indicator) return;
+    if (!link || !link.offsetParent) {
+      indicator.style.opacity = '0';
+      return;
+    }
+    indicator.style.opacity = '1';
+    indicator.style.width = `${link.offsetWidth}px`;
+    indicator.style.transform = `translateX(${link.offsetLeft}px)`;
+  };
   const links = [...document.querySelectorAll('[data-nav]')];
   const targets = links.map((a) => document.querySelector(a.getAttribute('href'))).filter(Boolean);
   if (!targets.length) return;
@@ -45,9 +56,16 @@ export function initHeader() {
         if (!entry.isIntersecting) continue;
         const id = `#${entry.target.id}`;
         links.forEach((a) => a.toggleAttribute('aria-current', a.getAttribute('href') === id));
+        moveIndicator(document.querySelector(`#nav-list a[href="${id}"]`));
       }
     },
     { rootMargin: '-45% 0px -50% 0px' },
   );
   targets.forEach((t) => io.observe(t));
+  // Back in the hero, nothing is current.
+  new IntersectionObserver(([e]) => {
+    if (!e.isIntersecting) return;
+    links.forEach((a) => a.removeAttribute('aria-current'));
+    moveIndicator(null);
+  }, { rootMargin: '-45% 0px -50% 0px' }).observe(document.getElementById('top'));
 }

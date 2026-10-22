@@ -24,7 +24,6 @@ export function initActivity() {
   const chips = root.querySelector('#log-filters');
   const search = root.querySelector('#log-search');
   const pauseBtn = root.querySelector('#log-pause');
-  const counter = root.querySelector('#log-count');
   const empty = root.querySelector('#log-empty');
 
   const counts = Object.fromEntries(TYPES.map((t) => [t, 0]));
@@ -74,7 +73,6 @@ export function initActivity() {
       b.querySelector('[data-n]').textContent = n;
     });
     const shown = [...list.children].filter((li) => !li.hidden).length;
-    counter.textContent = `${shown} shown`;
     empty.hidden = shown > 0;
   }
 
@@ -111,9 +109,9 @@ export function initActivity() {
   function setPaused(value) {
     paused = value;
     pauseBtn.setAttribute('aria-pressed', String(paused));
-    pauseBtn.querySelector('[data-label]').textContent = paused ? 'Resume' : 'Pause';
-    pauseBtn.querySelector('[data-icon]').innerHTML = paused ? icon.play('size-3.5') : icon.pause('size-3.5');
-    root.querySelector('#log-live').dataset.live = String(!paused);
+    pauseBtn.querySelector('[data-label]').textContent = paused ? 'Paused' : 'Live';
+    pauseBtn.dataset.live = String(!paused);
+    pauseBtn.setAttribute('aria-label', paused ? 'Resume the live log' : 'Pause the live log');
     schedule();
   }
   pauseBtn.addEventListener('click', () => setPaused(!paused));
@@ -147,7 +145,8 @@ export function initActivity() {
   const done = READINESS.milestones.filter((m) => m.state === 'done').length;
   const partial = READINESS.milestones.reduce((n, m) => n + (m.state === 'active' ? m.progress / 100 : 0), 0);
   const percent = Math.round(((done + partial) / READINESS.milestones.length) * 100);
-  panel.querySelector('[data-percent]').textContent = `${percent}%`;
+  const percentEl = panel.querySelector('[data-percent]');
+  percentEl.textContent = `${percent}%`;
   panel.querySelector('[data-closed]').textContent = `${done} of ${READINESS.milestones.length} shipped`;
   panel.querySelector('#readiness-bar').setAttribute('aria-valuenow', percent);
   panel.querySelector('#milestones').innerHTML = READINESS.milestones
@@ -164,6 +163,15 @@ export function initActivity() {
     if (!e.isIntersecting) return;
     io.disconnect();
     panel.style.setProperty('--fill', `${percent}%`);
+    // Count up alongside the bar's own 1.4s ease.
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const start = performance.now();
+    const frame = (now) => {
+      const k = Math.min(1, (now - start) / 1400);
+      percentEl.textContent = `${Math.round(percent * (1 - Math.pow(1 - k, 4)))}%`;
+      if (k < 1) requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
   }, { threshold: 0.3 });
   io.observe(panel);
 }

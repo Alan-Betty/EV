@@ -7,6 +7,8 @@
     <meta name="description" content="E.V. is a voice assistant for Windows and Ubuntu that opens apps, moves files, runs commands, drives the browser and takes the mouse when it has to. About 120 MB of RAM, guarded by Confirm? on anything risky." />
     <meta name="theme-color" content="#090A0F" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <!-- Entrance and reveal styles only hide content once we know JS will show it again. -->
+    <script>document.documentElement.classList.add('js');</script>
   </head>
   <body>
     <a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-lg focus:bg-ink-900 focus:px-4 focus:py-2 focus:text-white">Skip to content</a>
@@ -30,23 +32,22 @@
         </a>
 
         <nav aria-label="Primary" class="hidden md:block">
-          <ul class="flex items-center gap-0.5 text-[13.5px]">
-            <li><a data-nav href="#features" class="nav-link">Features</a></li>
+          <ul id="nav-list" class="relative flex items-center gap-0.5 text-[13.5px]">
+            <li aria-hidden="true" id="nav-indicator" class="nav-indicator"></li>
             <li><a data-nav href="#demo" class="nav-link">Live demo</a></li>
+            <li><a data-nav href="#features" class="nav-link">Features</a></li>
             <li><a data-nav href="#activity" class="nav-link">System logs</a></li>
-            <li><a data-nav href="#download" class="nav-link">Download specs</a></li>
+            <li><a data-nav href="#download" class="nav-link">Download</a></li>
           </ul>
         </nav>
 
         <div class="ml-auto flex items-center gap-2">
-          <button id="cmdk-trigger" type="button" data-open-cmdk class="glass glass-hover hidden h-9 items-center gap-2 rounded-lg pl-3 pr-2 text-[12.5px] text-slate-400 hover:text-slate-100 lg:inline-flex" aria-label="Open command menu">
-            Jump to
-            <span class="flex gap-0.5"><kbd class="kbd" data-mod-key>Ctrl</kbd><kbd class="kbd">K</kbd></span>
+          <button id="cmdk-trigger" type="button" data-open-cmdk class="glass glass-hover hidden h-9 items-center gap-0.5 rounded-lg px-2 text-slate-400 hover:text-slate-100 lg:inline-flex" aria-label="Open command menu">
+            <kbd class="kbd border-0 bg-transparent" data-mod-key>Ctrl</kbd><kbd class="kbd border-0 bg-transparent">K</kbd>
           </button>
-          <a id="os-badge" href="#download" class="group inline-flex h-9 items-center gap-2 rounded-lg bg-white pl-3 pr-3 text-[13px] font-medium text-ink-950 shadow-[0_0_0_1px_rgba(255,255,255,.2),0_6px_24px_-8px_rgba(0,242,254,.6)] transition-[background-color,transform] duration-200 hover:bg-cyan-50 active:scale-[0.98]">
+          <a id="os-badge" href="#download" class="inline-flex h-9 items-center gap-2 rounded-lg bg-white px-3 text-[13px] font-medium text-ink-950 shadow-[0_0_0_1px_rgba(255,255,255,.2),0_6px_24px_-8px_rgba(0,242,254,.6)] transition-[background-color,transform] duration-200 hover:bg-cyan-50 active:scale-[0.98]">
             <span data-os-icon class="grid size-4 place-items-center"></span>
             <span data-os-label>Download</span>
-            <span data-os-version class="hidden font-mono text-[10.5px] text-slate-500 sm:inline"></span>
           </a>
           <button id="menu-toggle" type="button" class="glass grid size-9 place-items-center rounded-lg text-slate-300 md:hidden" aria-label="Menu" aria-expanded="false" aria-controls="mobile-nav">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" class="size-5" aria-hidden="true"><path class="menu-top" d="M4 8h16" /><path class="menu-bottom" d="M4 16h16" /></svg>
@@ -56,41 +57,37 @@
 
       <nav id="mobile-nav" aria-label="Mobile" class="border-t border-white/[0.06] md:hidden" hidden>
         <ul class="shell grid gap-1 py-3 text-[15px]">
-          <li><a data-nav href="#features" class="nav-link block py-3">Features</a></li>
           <li><a data-nav href="#demo" class="nav-link block py-3">Live demo</a></li>
+          <li><a data-nav href="#features" class="nav-link block py-3">Features</a></li>
           <li><a data-nav href="#activity" class="nav-link block py-3">System logs</a></li>
-          <li><a data-nav href="#download" class="nav-link block py-3">Download specs</a></li>
+          <li><a data-nav href="#download" class="nav-link block py-3">Download</a></li>
         </ul>
       </nav>
     </header>
 
     <main id="main">
-      <section id="top" aria-labelledby="hero-title" class="relative isolate overflow-hidden pb-20 pt-28 sm:pt-36 lg:pb-28 lg:pt-40">
+      <!-- Hero -->
+      <section id="top" aria-labelledby="hero-title" class="relative isolate overflow-hidden pb-24 pt-32 sm:pt-40 lg:pb-32">
         <div aria-hidden="true" class="hero-grid absolute inset-0 -z-10"></div>
         <div aria-hidden="true" class="hero-glow absolute -z-10"></div>
 
-        <div class="shell grid items-center gap-14 lg:grid-cols-[minmax(0,1.08fr)_minmax(0,1fr)] lg:gap-6">
+        <div class="shell grid items-center gap-16 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] lg:gap-8">
           <div class="relative z-10">
-            <p class="glass inline-flex max-w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-full px-3.5 py-1.5 font-mono text-[10.5px] tracking-[0.02em] text-slate-400 sm:text-[11px]">
-              <span class="relative mr-0.5 flex size-1.5" aria-hidden="true">
+            <a id="hero-tag" href="#features" data-enter style="--i: 0" class="tag-pill">
+              <span class="relative flex size-1.5" aria-hidden="true">
                 <span class="absolute inset-0 rounded-full bg-pulse animate-ping"></span>
                 <span class="relative size-1.5 rounded-full bg-pulse"></span>
               </span>
               <span class="text-slate-200" data-iteration-tag>[ BUILD: ITERATION 14 ]</span>
               <span class="text-slate-600" aria-hidden="true">::</span>
-              <span>WINDOWS + UBUNTU WAYLAND OPERATIONAL</span>
-            </p>
+              <span data-content="hero.status">WINDOWS + UBUNTU WAYLAND OPERATIONAL</span>
+            </a>
 
-            <h1 id="hero-title" class="hero-title mt-8 text-balance text-display-sm font-semibold sm:text-display-md xl:text-display-lg">
-              Intelligence at the Velocity of Thought.
-            </h1>
+            <h1 id="hero-title" data-split class="hero-title mt-8 text-balance text-display-sm font-semibold sm:text-display-md xl:text-display-lg" data-content="hero.headline">Intelligence at the Velocity of Thought.</h1>
 
-            <p class="mt-6 max-w-[33rem] text-pretty text-[17px] leading-8 text-slate-400">
-              E.V. is a voice assistant that does things on your computer. It opens apps, moves files, runs commands,
-              drives the browser, and takes the mouse when it has to. Say its name once and keep talking.
-            </p>
+            <p data-enter style="--i: 4" class="mt-6 max-w-[32rem] text-pretty text-[17px] leading-8 text-slate-400" data-content="hero.sub">E.V. is a voice assistant that does things on your computer. It opens apps, moves files, runs commands, drives the browser, and takes the mouse when it has to. Say its name once and keep talking.</p>
 
-            <div class="mt-10 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+            <div data-enter style="--i: 5" class="mt-10 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
               <div class="group/cta relative">
                 <a id="hero-download" href="#download" class="btn-primary h-[52px] w-full pl-4 pr-3 font-semibold sm:w-auto" aria-describedby="hero-sha">
                   <span data-icon class="grid size-[18px] place-items-center"></span>
@@ -98,13 +95,7 @@
                   <span data-version class="ml-1 rounded-md bg-ink-950/15 px-1.5 py-0.5 font-mono text-[11px] font-medium"></span>
                 </a>
                 <div id="hero-sha" role="tooltip" class="sha-tip">
-                  <div class="flex items-center justify-between gap-4">
-                    <span class="flex items-center gap-1.5 text-[11px] font-medium text-slate-300">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" class="size-3.5 text-pulse" aria-hidden="true"><path d="M12 3.5 5 6v5.5c0 4.3 3 7.8 7 9 4-1.2 7-4.7 7-9V6z" /><path d="m9 12 2.2 2.2L15.5 10" /></svg>
-                      Source archive
-                    </span>
-                    <span class="mono-meta">commit</span>
-                  </div>
+                  <p class="flex items-center justify-between gap-4 text-[11px] font-medium text-slate-300"><span data-tip-kind>Source archive</span><span data-tip-label class="mono-meta">commit</span></p>
                   <code data-commit class="mt-2 block break-all font-mono text-[11px] leading-[1.55] text-electric/90"></code>
                   <span data-file class="mt-2 block truncate font-mono text-[10.5px] text-slate-500"></span>
                 </div>
@@ -115,43 +106,27 @@
               </a>
             </div>
 
-            <p id="hero-alt" class="mt-6 text-[13px] text-slate-500"></p>
+            <p id="hero-alt" data-enter style="--i: 6" class="mt-6 text-[13px] text-slate-500"></p>
           </div>
 
-          <div class="relative mx-auto w-full max-w-[460px] sm:max-w-[560px] lg:-mr-6 lg:max-w-none">
-            <div class="face-stage relative aspect-[5/4] w-full">
-              <canvas id="face" class="absolute inset-0 size-full cursor-pointer" role="img" aria-label="E.V.'s face. Two glowing eyes that follow your pointer and change mood."></canvas>
-              <div aria-hidden="true" class="orb-frame pointer-events-none absolute inset-[3%]">
-                <span class="corner left-0 top-0 border-l border-t"></span>
-                <span class="corner right-0 top-0 border-r border-t"></span>
-                <span class="corner bottom-0 left-0 border-b border-l"></span>
-                <span class="corner bottom-0 right-0 border-b border-r"></span>
-                <dl class="absolute inset-x-3 -top-6 flex justify-between font-mono text-[10.5px]">
-                  <div class="flex gap-2"><dt class="text-slate-600">mood</dt><dd data-hud="mood" class="text-electric">idle</dd></div>
-                  <div class="flex gap-2"><dt class="text-slate-600">event</dt><dd data-hud="event" class="text-slate-300">idle</dd></div>
-                </dl>
-                <dl class="absolute inset-x-3 -bottom-6 flex justify-between font-mono text-[10.5px]">
-                  <div class="flex gap-2"><dt class="text-slate-600">ram</dt><dd class="tabular text-slate-300">~120 MB</dd></div>
-                  <div class="flex gap-2"><dt class="text-slate-600">render</dt><dd data-hud="fps" class="tabular text-slate-300">60 fps</dd></div>
-                </dl>
-              </div>
+          <div class="face-wrap relative mx-auto w-full max-w-[440px] sm:max-w-[540px] lg:-mr-6 lg:max-w-none">
+            <div id="face-stage" class="face-stage relative aspect-[5/4] w-full">
+              <canvas id="face" class="absolute inset-0 size-full cursor-pointer" role="img" aria-label="E.V.'s face. Two glowing eyes that follow your pointer and change mood. Click it to poke it."></canvas>
             </div>
-            <div class="mt-12 flex flex-wrap items-center justify-center gap-1.5" role="group" aria-label="Try a mood">
-              <span class="mr-1 text-[12px] text-slate-500">Try a mood</span>
-              <div id="face-moods" class="contents"></div>
-            </div>
-          </div>
+            <div id="face-moods" data-enter style="--i: 7" class="mt-6 flex flex-wrap justify-center gap-1.5" role="group" aria-label="Try one of E.V.'s moods"></div>
           </div>
         </div>
       </section>
-      <section id="demo" aria-labelledby="demo-title" class="relative py-24 sm:py-32">
+
+      <!-- Demo -->
+      <section id="demo" aria-labelledby="demo-title" class="section">
         <div class="shell">
-          <div class="section-head">
-            <h2 id="demo-title">Watch it hear, plan and act</h2>
-            <p>Pick an errand. Each one replays a run through E.V.'s real tools: speech in, a plan, tool calls, a spoken answer. Pick another mid-run to interrupt it, the way you would by talking over it.</p>
+          <div class="section-head" data-reveal>
+            <h2 id="demo-title" data-content="demo.title">Watch it hear, plan and act</h2>
+            <p data-content="demo.body">Pick an errand. Each one replays a run through E.V.'s real tools. Pick another mid-run to cut in, the way you would by talking over it.</p>
           </div>
 
-          <div class="sim-window relative mt-12">
+          <div class="sim-window relative mt-12" data-reveal>
             <div aria-hidden="true" class="sim-glow"></div>
             <div class="surface relative overflow-hidden rounded-2xl border border-white/[0.08] shadow-lift backdrop-blur-xl">
               <div class="flex h-11 items-center gap-3 border-b border-white/[0.06] px-4">
@@ -164,86 +139,53 @@
                 <span id="sim-state" class="state-pill" data-state="idle">[IDLE]</span>
               </div>
 
-              <div class="grid lg:grid-cols-[minmax(0,1.12fr)_minmax(0,1fr)]">
+              <div class="grid lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
                 <div class="flex min-w-0 flex-col border-b border-white/[0.06] lg:border-b-0 lg:border-r">
-                  <div class="px-5 pt-5">
-                    <canvas id="sim-wave" class="h-16 w-full" aria-hidden="true"></canvas>
-                    <ol id="sim-steps" class="mt-4 grid grid-cols-5 gap-1.5" aria-label="Pipeline stage">
-                      <li data-step="idle"><span class="sim-step-bar"></span><span class="sim-step-label">Idle</span></li>
-                      <li data-step="listening"><span class="sim-step-bar"></span><span class="sim-step-label">Listen</span></li>
-                      <li data-step="thinking"><span class="sim-step-bar"></span><span class="sim-step-label">Think</span></li>
-                      <li data-step="executing"><span class="sim-step-bar"></span><span class="sim-step-label">Execute</span></li>
-                      <li data-step="done"><span class="sim-step-bar"></span><span class="sim-step-label">Done</span></li>
-                    </ol>
-                  </div>
-
-                  <div id="sim-transcript" class="h-[260px] space-y-3.5 overflow-y-auto px-5 py-5 sm:h-[280px]" aria-live="off">
-                    <p id="sim-empty" class="pt-16 text-center text-[13.5px] text-slate-500">Pick an errand below, or type one.</p>
+                  <canvas id="sim-wave" class="mx-5 mt-5 h-14 w-[calc(100%-2.5rem)]" aria-hidden="true"></canvas>
+                  <div id="sim-transcript" class="h-[250px] space-y-3.5 overflow-y-auto px-5 py-5 sm:h-[270px]" aria-live="off">
+                    <p id="sim-empty" class="pt-16 text-center text-[13.5px] text-slate-500">Pick an errand below.</p>
                   </div>
                   <p id="sim-status" class="sr-only" aria-live="polite"></p>
-
-                  <div class="border-t border-white/[0.06] p-4">
-                    <div id="sim-prompts" class="flex flex-wrap gap-2" aria-label="Example errands"></div>
-                    <form id="sim-form" class="mt-3 flex gap-2">
-                      <label for="sim-input" class="sr-only">Type an errand</label>
-                      <input id="sim-input" type="text" autocomplete="off" spellcheck="false" maxlength="120" placeholder="Or type your own errand" class="sim-input" />
-                      <button type="submit" class="sim-run">Run <kbd class="kbd border-0 bg-ink-950/10 text-ink-950/60">↵</kbd></button>
-                    </form>
-                  </div>
+                  <div id="sim-prompts" class="flex flex-wrap gap-2 border-t border-white/[0.06] p-4" aria-label="Example errands"></div>
                 </div>
 
                 <div class="flex min-w-0 flex-col bg-black/30">
-                  <div class="flex h-10 items-center justify-between border-b border-white/[0.06] px-4">
-                    <span class="mono-meta">~/EV</span>
-                    <span class="mono-meta tabular">step <span id="sim-progress">0/0</span></span>
-                  </div>
-                  <ol id="sim-term" class="h-[300px] overflow-y-auto px-4 py-3 font-mono text-[12px] leading-[1.75] sm:text-[12.5px] lg:h-auto lg:flex-1" aria-label="Commands run"></ol>
+                  <p class="flex h-10 items-center border-b border-white/[0.06] px-4 font-mono text-[11px] text-slate-500">~/EV</p>
+                  <ol id="sim-term" class="h-[280px] overflow-y-auto px-4 py-3 font-mono text-[12px] leading-[1.75] sm:text-[12.5px] lg:h-auto lg:flex-1" aria-label="Tool calls"></ol>
                 </div>
-              </div>
-
-              <div class="flex h-9 items-center gap-5 overflow-hidden border-t border-white/[0.06] px-4 font-mono text-[10.5px] text-slate-500">
-                <span class="flex items-center gap-1.5"><span class="size-1.5 rounded-full bg-pulse"></span>brain gpt-oss-20b</span>
-                <span class="hidden sm:inline">voice en-US-GuyNeural</span>
-                <span class="hidden sm:inline">stt whisper-large-v3</span>
-                <span class="ml-auto">ram ~120 MB</span>
               </div>
             </div>
           </div>
         </div>
       </section>
-      <section id="features" aria-labelledby="features-title" class="relative py-24 sm:py-32">
+
+      <!-- Features -->
+      <section id="features" aria-labelledby="features-title" class="section">
         <div class="shell">
-          <div class="section-head">
-            <h2 id="features-title">Built to act, not only answer</h2>
-            <p>One loop owns everything: listen, transcribe, decide, act, speak. Every part of it exists to close the gap between saying something and it being done, without handing the model the keys.</p>
+          <div class="section-head" data-reveal>
+            <h2 id="features-title" data-content="features.title">Built to act, not only answer</h2>
+            <p data-content="features.body">One loop owns everything: listen, transcribe, decide, act, speak. Every part of it closes the gap between saying something and it being done, without handing the model the keys.</p>
           </div>
 
-          <div class="mt-14 grid gap-3 sm:grid-cols-2 lg:grid-cols-6 lg:gap-4">
-            <!-- Voice -->
+          <div class="mt-14 grid gap-3 sm:grid-cols-2 lg:grid-cols-6 lg:gap-4" data-reveal-group>
             <article class="bento sheen sm:col-span-2 lg:col-span-4">
               <div class="bento-copy">
-                <h3>Full-duplex voice</h3>
-                <p>Say "E.V." once and keep talking. Talk over a reply and it stops mid-word to listen, keeping what you already said. It learns your voice and its own, so it never answers itself on loudspeakers.</p>
+                <h3 data-content="features.voice.title">Full-duplex voice</h3>
+                <p data-content="features.voice.body">Say "E.V." once and keep talking. Talk over a reply and it stops mid-word to listen. It learns your voice and its own, so it never answers itself on loudspeakers.</p>
               </div>
-              <div class="bento-visual mt-auto space-y-3 px-5 pb-5 sm:px-6 sm:pb-6" aria-hidden="true">
+              <div class="bento-visual mt-auto px-5 pb-6 sm:px-6" aria-hidden="true">
                 <div class="duplex">
                   <div class="duplex-lane"><span class="duplex-label">E.V.</span><div class="duplex-bars" data-lane="ev"></div></div>
                   <div class="duplex-lane"><span class="duplex-label">you</span><div class="duplex-bars" data-lane="you"></div></div>
-                  <span class="duplex-cut"><span>barge-in, echo-relative</span></span>
+                  <span class="duplex-cut"><span>barge-in</span></span>
                 </div>
-                <dl class="grid grid-cols-3 gap-3 border-t border-white/[0.06] pt-4">
-                  <div><dt class="mono-meta">end of speech</dt><dd class="bento-num">600 ms</dd></div>
-                  <div><dt class="mono-meta">transcription</dt><dd class="bento-num">0.34 s</dd></div>
-                  <div><dt class="mono-meta">first token</dt><dd class="bento-num">0.57 s</dd></div>
-                </dl>
               </div>
             </article>
 
-            <!-- Any app -->
             <article class="bento sheen sm:col-span-1 lg:col-span-2 lg:row-span-2">
               <div class="bento-copy">
-                <h3>Eyes and hands for any app</h3>
-                <p>The window list and the accessibility tree first, screenshots only when those cannot do the job. Clicks land on a ruler drawn over the frame, and every step gets a second look.</p>
+                <h3 data-content="features.apps.title">Eyes and hands for any app</h3>
+                <p data-content="features.apps.body">The window list and the accessibility tree first, screenshots only when those cannot do the job. Every click gets a second look.</p>
               </div>
               <div class="bento-visual flex flex-1 flex-col px-5 pb-5 sm:px-6 sm:pb-6" aria-hidden="true">
                 <div class="vision">
@@ -255,95 +197,69 @@
                   <b style="right:31%;bottom:9%;width:18%;height:10%"></b>
                   <b class="is-primary" style="right:7%;bottom:9%;width:20%;height:10%"></b>
                   <span class="vision-box" style="left:5%;top:20%;width:23%;height:33%"><em>list "Files"</em></span>
-                  <span class="vision-box" style="left:34%;top:20%;width:60%;height:38%"><em>image 0.64, 0.39</em></span>
                   <span class="vision-box is-target" style="right:5.5%;bottom:7.5%;width:23%;height:13%"><em>button "Save"</em></span>
                   <span class="vision-scan"></span>
                 </div>
-                <ol class="mt-4 space-y-2 font-mono text-[11px]">
-                  <li class="flex justify-between"><span class="text-slate-500">1  window tier</span><span class="text-slate-300">no model call</span></li>
-                  <li class="flex justify-between"><span class="text-slate-500">2  accessibility tree</span><span class="text-electric">412 elements</span></li>
-                  <li class="flex justify-between"><span class="text-slate-500">3  vision</span><span class="text-slate-300">only if needed</span></li>
-                </ol>
               </div>
             </article>
 
-            <!-- Light -->
             <article class="bento sheen lg:col-span-2">
               <div class="bento-copy">
-                <h3>Runs in about 120 MB</h3>
-                <p>No local model, no vendor SDKs, no audio libraries. The brain, the ears and the voice are plain HTTP calls on one warm connection.</p>
+                <h3 data-content="features.light.title">Runs in about 120 MB</h3>
+                <p data-content="features.light.body">No local model, no vendor SDKs, no audio libraries. The brain, the ears and the voice are plain HTTP calls on one warm connection.</p>
               </div>
-              <div class="bento-visual mt-auto px-5 pb-5 sm:px-6 sm:pb-6" aria-hidden="true">
-                <p class="flex items-baseline gap-2"><span class="text-[40px] font-semibold leading-none tracking-[-0.04em] text-white">~120</span><span class="text-[12.5px] text-slate-500">MB resident</span></p>
-                <ul class="mt-5 space-y-2.5 font-mono text-[11px]">
-                  <li class="runtime"><span class="w-8 text-slate-500">llm</span><span class="text-slate-300">Groq, Gemini failover</span></li>
-                  <li class="runtime"><span class="w-8 text-slate-500">stt</span><span class="text-slate-300">Whisper large-v3</span></li>
-                  <li class="runtime"><span class="w-8 text-slate-500">tts</span><span class="text-slate-300">edge-tts neural voices</span></li>
-                </ul>
-              </div>
+              <p class="bento-visual mt-auto flex items-baseline gap-2 px-5 pb-6 sm:px-6" aria-hidden="true"><span class="text-[44px] font-semibold leading-none tracking-[-0.04em] text-white">~120</span><span class="text-[13px] text-slate-500">MB resident</span></p>
             </article>
 
-            <!-- Memory -->
             <article class="bento sheen lg:col-span-2">
               <div class="bento-copy">
-                <h3>Remembers, and picks up again</h3>
-                <p>Facts, notes, a to-do list and a backlog of unfinished work, written atomically so a power cut cannot corrupt them.</p>
+                <h3 data-content="features.memory.title">Remembers, and picks up again</h3>
+                <p data-content="features.memory.body">Facts, notes, a to-do list and a backlog of unfinished work, written so a power cut cannot corrupt them.</p>
               </div>
-              <div class="bento-visual mt-auto px-5 pb-5 sm:px-6 sm:pb-6" aria-hidden="true">
-                <ol class="timeline font-mono text-[11px]">
-                  <li><time>Mon 18:42</time><span>lid closed mid-copy</span></li>
-                  <li><time>Tue 09:12</time><span>boot, unclean exit noticed</span></li>
-                  <li class="is-now"><time>09:12</time><span class="text-slate-200">"One thing left over: the photo copy."</span></li>
-                </ol>
-              </div>
+              <ol class="bento-visual timeline mt-auto px-5 pb-6 font-mono text-[11px] sm:px-6" aria-hidden="true">
+                <li><time>Mon 18:42</time><span>lid closed mid-copy</span></li>
+                <li class="is-now"><time>Tue 09:12</time><span class="text-slate-200">"One thing left over: the photo copy."</span></li>
+              </ol>
             </article>
 
-            <!-- Guardrails -->
             <article class="bento sheen sm:col-span-2 lg:col-span-3">
               <div class="bento-copy">
-                <h3>Guardrails that assume the model is wrong</h3>
-                <p>Anything destructive or that spends money asks "Confirm?" first. "Stop everything" or Ctrl+Alt+Q locks it down, and only your voice can unlock it.</p>
+                <h3 data-content="features.guard.title">Guardrails that assume the model is wrong</h3>
+                <p data-content="features.guard.body">Anything destructive or that spends money asks "Confirm?" first. "Stop everything" or Ctrl+Alt+Q locks it down, and only your voice can unlock it.</p>
               </div>
-              <div class="bento-visual mt-auto px-5 pb-5 sm:px-6 sm:pb-6" aria-hidden="true">
-                <ul class="ipc font-mono text-[11px] leading-[1.9]">
-                  <li><span class="ipc-src text-amber-300/80">confirm</span><span>rm -rf ~/old-builds</span><span class="ipc-t text-amber-300/80">Confirm?</span></li>
-                  <li><span class="ipc-src">blocked</span><span>curl https://x.sh | sh</span><span class="ipc-t text-rose-300/80">never runs</span></li>
-                  <li><span class="ipc-src">files</span><span>/etc/hosts outside FILE_ROOTS</span><span class="ipc-t">refused</span></li>
-                  <li><span class="ipc-src">limiter</span><span>same call three times</span><span class="ipc-t text-rose-300/80">lockdown</span></li>
-                  <li><span class="ipc-src">web</span><span>page text fenced as untrusted</span><span class="ipc-t">2.1 KB</span></li>
-                  <li><span class="ipc-src text-electric">audit</span><span>every action to audit.jsonl</span><span class="ipc-t text-pulse">logged</span></li>
-                </ul>
-              </div>
+              <ul class="bento-visual ipc mt-auto px-5 pb-6 font-mono text-[11px] leading-[1.95] sm:px-6" aria-hidden="true">
+                <li><span class="ipc-src text-amber-300/80">confirm</span><span>rm -rf ~/old-builds</span><span class="ipc-t text-amber-300/80">Confirm?</span></li>
+                <li><span class="ipc-src">blocked</span><span>curl https://x.sh | sh</span><span class="ipc-t text-rose-300/80">never runs</span></li>
+                <li><span class="ipc-src">files</span><span>/etc/hosts outside FILE_ROOTS</span><span class="ipc-t">refused</span></li>
+                <li><span class="ipc-src">limiter</span><span>same call three times</span><span class="ipc-t text-rose-300/80">lockdown</span></li>
+              </ul>
             </article>
 
-            <!-- Browser -->
             <article class="bento sheen sm:col-span-2 lg:col-span-3">
               <div class="bento-copy">
-                <h3>Web errands without screenshots</h3>
-                <p>E.V. reads the page, numbers every control and plans in plain text. It remembers what it already clicked, so one mouse means one mouse in the basket.</p>
+                <h3 data-content="features.web.title">Web errands without screenshots</h3>
+                <p data-content="features.web.body">E.V. reads the page, numbers every control and plans in plain text. It remembers what it already clicked, so one mouse means one mouse in the basket.</p>
               </div>
-              <div class="bento-visual mt-auto px-5 pb-5 sm:px-6 sm:pb-6" aria-hidden="true">
-                <div class="plugin overflow-hidden rounded-xl border border-white/[0.06] bg-black/40">
-                  <div class="flex items-center justify-between border-b border-white/[0.06] px-3.5 py-2 font-mono text-[10.5px] text-slate-500"><span>amazon.in/s?k=gaming+mouse</span><span class="reloaded"><span class="text-pulse">●</span> 3 planner calls, 0 frames</span></div>
-<pre class="overflow-x-auto px-3.5 py-3 font-mono text-[11.5px] leading-[1.7] text-slate-400"><code><span class="tk-d">[12]</span> link   <span class="tk-s">"Logitech G502 X Lightspeed"</span>  ₹4,295
+              <div class="bento-visual mt-auto px-5 pb-6 sm:px-6" aria-hidden="true">
+<pre class="overflow-x-auto rounded-xl border border-white/[0.06] bg-black/40 px-3.5 py-3 font-mono text-[11.5px] leading-[1.75] text-slate-400"><code><span class="tk-d">[12]</span> link   <span class="tk-s">"Logitech G502 X"</span>  ₹4,295
 <span class="tk-d">[13]</span> button <span class="tk-s">"Add to basket"</span>
-<span class="tk-d">[14]</span> select <span class="tk-s">"Sort by"</span> = Price: Low to High
 <span class="tk-k">plan</span>  <span class="tk-f">click</span> 13
-<span class="tk-k">done</span>  clicked 13 <span class="tk-s">"Add to basket"</span> on /dp/B0C8</code></pre>
-                </div>
+<span class="tk-k">done</span>  clicked 13 <span class="tk-s">"Add to basket"</span></code></pre>
               </div>
             </article>
           </div>
         </div>
       </section>
-      <section id="activity" aria-labelledby="activity-title" class="relative py-24 sm:py-32">
+
+      <!-- Activity -->
+      <section id="activity" aria-labelledby="activity-title" class="section">
         <div class="shell">
-          <div class="section-head">
-            <h2 id="activity-title">Fourteen iterations, in the open</h2>
-            <p>E.V.'s real commit history, then a replay of what one session writes as it runs: tool calls, voice checks, the guard and test results. Filter by kind, search, and copy any commit hash.</p>
+          <div class="section-head" data-reveal>
+            <h2 id="activity-title" data-content="activity.title">Fourteen iterations, in the open</h2>
+            <p data-content="activity.body">Every commit so far, then a replay of what a session writes as it runs. Filter it, search it, copy any hash.</p>
           </div>
 
-          <div class="mt-12 grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <div class="mt-12 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]" data-reveal>
             <div class="surface flex min-w-0 flex-col overflow-hidden rounded-2xl border border-white/[0.08] backdrop-blur-xl">
               <div class="flex flex-wrap items-center gap-2 border-b border-white/[0.06] p-3">
                 <div id="log-filters" class="flex flex-wrap gap-1" role="group" aria-label="Filter by kind">
@@ -354,152 +270,98 @@
                   <button type="button" class="log-chip" data-filter="guard" aria-pressed="false">guard <span data-n></span></button>
                   <button type="button" class="log-chip" data-filter="test" aria-pressed="false">test <span data-n></span></button>
                 </div>
-                <label class="log-search ml-auto">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" class="size-3.5 shrink-0 text-slate-500" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="m20 20-4.2-4.2" /></svg>
-                  <span class="sr-only">Search logs</span>
-                  <input id="log-search" type="search" placeholder="Search logs" autocomplete="off" spellcheck="false" />
-                  <kbd class="kbd hidden sm:inline-flex" aria-hidden="true">/</kbd>
-                </label>
+                <div class="ml-auto flex w-full items-center gap-2 sm:w-auto">
+                  <label class="log-search">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" class="size-3.5 shrink-0 text-slate-500" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="m20 20-4.2-4.2" /></svg>
+                    <span class="sr-only">Search logs</span>
+                    <input id="log-search" type="search" placeholder="Search" autocomplete="off" spellcheck="false" />
+                    <kbd class="kbd hidden sm:inline-flex" aria-hidden="true">/</kbd>
+                  </label>
+                  <button id="log-pause" type="button" class="log-pause" aria-pressed="false" data-live="true">
+                    <span class="log-live-dot" aria-hidden="true"></span><span data-label>Live</span>
+                  </button>
+                </div>
               </div>
-
-              <ol id="log-list" class="h-[420px] overflow-y-auto lg:h-0 lg:min-h-[420px] lg:flex-1 overscroll-contain py-2 font-mono text-[11.5px] sm:text-[12px]" aria-label="Activity log"></ol>
-              <p id="log-empty" class="py-10 text-center text-[13px] text-slate-500" hidden>No entries match. Clear the search or pick another kind.</p>
-
-              <div class="flex h-10 items-center gap-3 border-t border-white/[0.06] px-3 font-mono text-[10.5px] text-slate-500">
-                <span id="log-live" class="log-live flex items-center gap-1.5" data-live="true"><span class="log-live-dot"></span><span class="log-live-on">streaming</span><span class="log-live-off">paused</span></span>
-                <span id="log-count" class="tabular"></span>
-                <button id="log-pause" type="button" class="ml-auto inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-slate-400 transition-colors hover:bg-white/[0.05] hover:text-white" aria-pressed="false">
-                  <span data-icon class="grid place-items-center"></span><span data-label>Pause</span>
-                </button>
-              </div>
+              <ol id="log-list" class="h-[380px] overflow-y-auto overscroll-contain py-2 font-mono text-[11.5px] sm:text-[12px] lg:h-0 lg:min-h-[380px] lg:flex-1" aria-label="Activity log"></ol>
+              <p id="log-empty" class="py-10 text-center text-[13px] text-slate-500" hidden>Nothing matches. Clear the search or pick another kind.</p>
             </div>
 
-            <aside id="readiness" class="glass relative flex flex-col overflow-hidden rounded-2xl p-6" aria-labelledby="readiness-title" style="--fill: 0%">
-              <h3 id="readiness-title" class="text-[15px] font-semibold text-white">Release readiness</h3>
-              <p class="mt-1 text-[13px] text-slate-500">Toward 1.0, from the devlog</p>
-
-              <p class="mt-7 flex items-baseline justify-between">
+            <aside id="readiness" class="glass relative flex flex-col rounded-2xl p-6" aria-labelledby="readiness-title" style="--fill: 0%">
+              <h3 id="readiness-title" class="text-[15px] font-semibold text-white">Road to 1.0</h3>
+              <p class="mt-6 flex items-baseline justify-between">
                 <span data-percent class="text-[44px] font-semibold leading-none tracking-[-0.04em] text-white tabular">0%</span>
-                <span data-closed class="text-right font-mono text-[11px] text-slate-500"></span>
+                <span data-closed class="font-mono text-[11px] text-slate-500"></span>
               </p>
               <div id="readiness-bar" class="readiness-track mt-4" role="progressbar" aria-labelledby="readiness-title" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                 <span class="readiness-fill"></span>
               </div>
-
-              <ol id="milestones" class="mt-7 space-y-1"></ol>
+              <ol id="milestones" class="mt-6 space-y-0.5"></ol>
             </aside>
           </div>
         </div>
       </section>
-      <section id="download" aria-labelledby="download-title" class="relative py-24 sm:py-32">
+
+      <!-- Download -->
+      <section id="download" aria-labelledby="download-title" class="section">
         <div aria-hidden="true" class="download-glow absolute inset-x-0 top-0 -z-10 h-[520px]"></div>
         <div class="shell">
-          <div class="flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
-            <div class="section-head">
-              <h2 id="download-title">Get E.V.</h2>
-              <p>E.V. ships as source. Grab the archive for a channel, run the setup line for your system, add a free Groq or Gemini key, and check it with <code class="font-mono text-[13px] text-slate-300">python ev_core.py --check</code>.</p>
-            </div>
-            <dl id="dl-stats" class="flex gap-8 sm:gap-10">
-              <div>
-                <dt class="text-[12.5px] text-slate-500">Offline tests</dt>
-                <dd data-counter="tests" class="mt-1 text-[26px] font-semibold tracking-[-0.03em] text-white tabular">0</dd>
-              </div>
-              <div>
-                <dt class="text-[12.5px] text-slate-500">Commits</dt>
-                <dd data-counter="commits" class="mt-1 text-[26px] font-semibold tracking-[-0.03em] text-white tabular">0</dd>
-              </div>
-            </dl>
+          <div class="section-head" data-reveal>
+            <h2 id="download-title" data-content="download.title">Get E.V.</h2>
+            <p data-content="download.body">Grab it for your system, run the setup line, add a free Groq or Gemini key, then check everything with python ev_core.py --check.</p>
           </div>
 
-          <div class="mt-12 flex flex-col gap-4 sm:flex-row sm:items-center">
+          <div class="mt-10 flex flex-col gap-4 sm:flex-row sm:items-center" data-reveal>
             <div id="dl-channels" class="segmented" role="radiogroup" aria-label="Release channel" style="--seg: 0">
               <span class="segmented-thumb" aria-hidden="true"></span>
               <button type="button" role="radio" data-channel="stable" aria-checked="true">Stable</button>
               <button type="button" role="radio" data-channel="nightly" aria-checked="false" tabindex="-1">Nightly</button>
               <button type="button" role="radio" data-channel="canary" aria-checked="false" tabindex="-1">Canary</button>
             </div>
-            <p id="dl-note" class="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[13px] text-slate-400" aria-live="polite"></p>
+            <p id="dl-note" class="text-[13px] text-slate-400" aria-live="polite"></p>
           </div>
 
-          <div id="dl-grid" class="mt-6 grid gap-4 lg:grid-cols-3"></div>
+          <div id="dl-grid" class="mt-6 grid gap-4 lg:grid-cols-3" data-reveal-group></div>
 
-          <div id="dl-verify" class="surface mt-4 flex flex-col gap-3 rounded-2xl border border-white/[0.08] p-4 sm:flex-row sm:items-center sm:gap-5 sm:p-5">
-            <div class="flex shrink-0 items-center gap-3">
-              <span class="grid size-9 place-items-center rounded-lg border border-emerald-400/20 bg-emerald-400/10 text-pulse">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-[18px]" aria-hidden="true"><path d="M12 3.5 5 6v5.5c0 4.3 3 7.8 7 9 4-1.2 7-4.7 7-9V6z" /><path d="m9 12 2.2 2.2L15.5 10" /></svg>
-              </span>
-              <div>
-                <p class="text-[14px] font-medium text-white">Check which commit you have</p>
-                <p data-verify-os class="text-[12px] text-slate-500"></p>
-              </div>
-            </div>
-            <div class="artifact-code min-w-0 flex-1 !mt-0">
-              <code class="truncate"></code>
-              <button type="button" class="copy-btn" data-copy="" data-copy-label="Copy verify command" aria-label="Copy verify command">
-                <span class="copy-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-3.5" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2.5" /><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8" /></svg></span>
-                <span class="check-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-3.5" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg></span>
-              </button>
-            </div>
-          </div>
+          <p id="dl-verify" class="mt-5 flex min-w-0 items-center gap-3 text-[12.5px] text-slate-500" data-reveal>
+            <span class="shrink-0" data-verify-label>Check what you got:</span>
+            <code class="min-w-0 truncate font-mono text-[11.5px] text-slate-300"></code>
+            <button type="button" class="copy-btn" data-copy="" data-copy-label="Copy verify command" aria-label="Copy verify command">
+              <span class="copy-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-3.5" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2.5" /><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8" /></svg></span>
+              <span class="check-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-3.5" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg></span>
+            </button>
+          </p>
         </div>
       </section>
     </main>
 
-    <footer class="relative border-t border-white/[0.06]">
-      <div class="shell grid gap-12 py-16 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,2fr)]">
-        <div>
+    <footer class="border-t border-white/[0.06]">
+      <div class="shell flex flex-col gap-8 py-12 lg:flex-row lg:items-center lg:justify-between">
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
           <a href="#top" class="inline-flex items-center gap-3 rounded-lg" aria-label="E.V., back to top">
             <svg viewBox="0 0 32 32" fill="none" class="size-7" aria-hidden="true"><rect x=".5" y=".5" width="31" height="31" rx="8.5" fill="#0F1117" stroke="rgba(255,255,255,.1)" /><path d="M8.5 10.5h6M8.5 16h5M8.5 21.5h6M8.5 10.5v11M17.5 10.5l3.25 11 3.25-11" stroke="url(#logo-g)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
             <span class="text-[14px] font-semibold tracking-[0.18em] text-white">E.V.</span>
           </a>
-          <p class="mt-4 max-w-xs text-[14px] leading-6 text-slate-500">A voice assistant for Windows and Ubuntu that actually does things on your computer.</p>
-
-          <div class="mt-6 flex flex-wrap items-center gap-2">
-            <p class="status-pill" role="status">
-              <span class="relative flex size-2" aria-hidden="true"><span class="absolute inset-0 rounded-full bg-pulse animate-ping"></span><span class="relative size-2 rounded-full bg-pulse"></span></span>
-              All Systems Nominal — <span data-tests class="tabular">950</span> tests passing offline
-            </p>
-            <a data-repo href="#" class="gh-badge" rel="noopener" aria-label="Star E.V. on GitHub">
-              <span class="flex items-center gap-1.5 px-2.5"><svg viewBox="0 0 24 24" fill="currentColor" class="size-3.5" aria-hidden="true"><path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.2.5-2.3 1.3-3.1-.1-.4-.6-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.8.1 3.2.8.8 1.3 1.9 1.3 3.2 0 4.6-2.8 5.6-5.5 5.9.5.4.9 1.1.9 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3" /></svg>Star</span>
-              <span data-stars class="border-l border-white/10 px-2.5 tabular text-slate-300">0</span>
-            </a>
-          </div>
+          <p class="status-pill" role="status">
+            <span class="relative flex size-2" aria-hidden="true"><span class="absolute inset-0 rounded-full bg-pulse animate-ping"></span><span class="relative size-2 rounded-full bg-pulse"></span></span>
+            All Systems Nominal — <span data-tests class="tabular">950</span> tests passing offline
+          </p>
         </div>
 
-        <nav aria-label="Footer" class="grid grid-cols-2 gap-8 sm:grid-cols-3">
-          <div>
-            <h2 class="footer-head">Product</h2>
-            <ul class="footer-links">
-              <li><a href="#features">Features</a></li>
-              <li><a href="#demo">Live demo</a></li>
-              <li><a href="#download">Get E.V.</a></li>
-              <li><a href="#activity">Commit history</a></li>
-            </ul>
-          </div>
-          <div>
-            <h2 class="footer-head">Read</h2>
-            <ul class="footer-links">
-              <li><a data-link="docs" href="#">Overview</a></li>
-              <li><a data-link="quickstart" href="#">Quickstart</a></li>
-              <li><a data-link="devlog" href="#">Devlog</a></li>
-            </ul>
-          </div>
-          <div>
-            <h2 class="footer-head">Source</h2>
-            <ul class="footer-links">
-              <li><a data-repo href="#">GitHub</a></li>
-              <li><a data-link="issues" href="#">Issues</a></li>
-              <li><a href="#download">Install steps</a></li>
-            </ul>
-          </div>
+        <nav aria-label="Footer" class="flex flex-wrap items-center gap-x-6 gap-y-3 text-[13.5px]">
+          <a class="footer-link" data-link="docs" href="#">Overview</a>
+          <a class="footer-link" data-link="quickstart" href="#">Quickstart</a>
+          <a class="footer-link" data-link="devlog" href="#">Devlog</a>
+          <a data-repo href="#" class="gh-badge" rel="noopener" aria-label="E.V. on GitHub">
+            <span class="flex items-center gap-1.5 px-2.5"><svg viewBox="0 0 24 24" fill="currentColor" class="size-3.5" aria-hidden="true"><path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.2.5-2.3 1.3-3.1-.1-.4-.6-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.8.1 3.2.8.8 1.3 1.9 1.3 3.2 0 4.6-2.8 5.6-5.5 5.9.5.4.9 1.1.9 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3" /></svg>GitHub</span>
+            <span data-stars class="border-l border-white/10 px-2.5 tabular text-slate-300"></span>
+          </a>
         </nav>
       </div>
-
       <div class="shell">
-       <div class="flex flex-col gap-3 border-t border-white/[0.06] py-6 text-[12.5px] text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-        <p>© <span data-year>2026</span> Alan Betty. Source on GitHub.</p>
-        <p class="flex items-center gap-2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 text-pulse" aria-hidden="true"><path d="M12 3.5 5 6v5.5c0 4.3 3 7.8 7 9 4-1.2 7-4.7 7-9V6z" /></svg>No telemetry. Your keys, your providers. Want speech kept local? Use whisper.cpp.</p>
-       </div>
+        <div class="flex flex-col gap-2 border-t border-white/[0.06] py-6 text-[12.5px] text-slate-500 sm:flex-row sm:justify-between">
+          <p>© <span data-year>2026</span> Alan Betty</p>
+          <p data-content="footer.privacy">No telemetry. Your keys, your providers. Want speech kept local? Use whisper.cpp.</p>
+        </div>
       </div>
     </footer>
 

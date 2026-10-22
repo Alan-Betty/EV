@@ -1,4 +1,4 @@
-import { SCRIPTS, freeform } from '../data/scripts.js';
+import { SCRIPTS } from '../data/scripts.js';
 import { createWave } from '../lib/wave.js';
 
 const STATES = {
@@ -8,7 +8,6 @@ const STATES = {
   executing: { pill: 'EXECUTING LOGIC', title: 'Executing...' },
   done: { pill: 'DONE', title: 'Done' },
 };
-const ORDER = Object.keys(STATES);
 const ABORT = Symbol('abort');
 
 const escape = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -21,14 +20,10 @@ export function initSimulator() {
   const el = {
     title: root.querySelector('#sim-title'),
     pill: root.querySelector('#sim-state'),
-    steps: [...root.querySelectorAll('#sim-steps [data-step]')],
     transcript: root.querySelector('#sim-transcript'),
     empty: root.querySelector('#sim-empty'),
     term: root.querySelector('#sim-term'),
-    progress: root.querySelector('#sim-progress'),
     prompts: root.querySelector('#sim-prompts'),
-    form: root.querySelector('#sim-form'),
-    input: root.querySelector('#sim-input'),
     status: root.querySelector('#sim-status'),
   };
   const wave = createWave(root.querySelector('#sim-wave'));
@@ -46,11 +41,6 @@ export function initSimulator() {
     el.pill.dataset.state = name;
     el.pill.textContent = `[${s.pill}]`;
     el.title.textContent = `E.V. - ${s.title}`;
-    const at = ORDER.indexOf(name);
-    el.steps.forEach((li, i) => {
-      li.dataset.reached = String(i <= at);
-      li.toggleAttribute('aria-current', i === at);
-    });
     wave.setMode(name);
   }
 
@@ -103,7 +93,6 @@ export function initSimulator() {
     el.prompts.querySelectorAll('[data-script]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.script === script.id)));
     el.transcript.querySelectorAll('.sim-msg').forEach((n) => n.remove());
     el.term.replaceChildren();
-    el.progress.textContent = `0/${script.steps.length}`;
     el.status.textContent = `Running: ${script.heard}`;
 
     try {
@@ -133,7 +122,7 @@ export function initSimulator() {
       }
 
       setState('executing');
-      for (const [i, step] of script.steps.entries()) {
+      for (const step of script.steps) {
         const line = termLine(
           'term-cmd',
           `<span class="text-electric" aria-hidden="true">❯</span><span class="term-text"></span><span class="term-meta is-running">running</span>`,
@@ -147,7 +136,6 @@ export function initSimulator() {
         const meta = line.querySelector('.term-meta');
         meta.classList.remove('is-running');
         meta.innerHTML = `<span class="text-pulse">✓</span> ${fmtMs(step.ms)}`;
-        el.progress.textContent = `${i + 1}/${script.steps.length}`;
         await wait(140);
       }
 
@@ -170,16 +158,6 @@ export function initSimulator() {
     const id = e.target.closest('[data-script]')?.dataset.script;
     const script = SCRIPTS.find((s) => s.id === id);
     if (script) play(script);
-  });
-
-  el.form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const text = el.input.value.trim();
-    if (!text) return;
-    el.input.value = '';
-    const q = text.toLowerCase();
-    const match = SCRIPTS.find((s) => s.label.toLowerCase() === q || s.heard.toLowerCase() === q);
-    play(match ?? freeform(text));
   });
 
   // The command palette asks for a run without knowing about this module.
