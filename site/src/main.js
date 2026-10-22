@@ -1,4 +1,5 @@
 import './styles.css';
+import { initContent } from './lib/content.js';
 import { initMotion } from './lib/motion.js';
 import { initSheen } from './lib/sheen.js';
 import { detectPlatform } from './lib/os.js';
@@ -15,7 +16,7 @@ detectPlatform();
 
 // Each section owns its DOM and exports one init(). Order matters only where a
 // section reads state another publishes (OS detection feeds header, hero, downloads).
-const sections = [initMotion, initHeader, initHero, initSimulator, initFeatures, initActivity, initDownloads, initFooter, initPalette, initSheen];
+const sections = [initContent, initMotion, initHeader, initHero, initSimulator, initFeatures, initActivity, initDownloads, initFooter, initPalette, initSheen];
 
 for (const init of sections) {
   try {

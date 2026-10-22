@@ -34,17 +34,3 @@ export const POOLS = {
   ],
   test: REPO.testFiles.slice(0, 18).map((t) => [`${t.file}  ${t.tests} passed`, 'ok']),
 };
-
-// "Still janky" and "next up" from devlog.md, as a checklist toward 1.0.
-export const READINESS = {
-  target: '1.0',
-  milestones: [
-    { label: 'Voice loop with barge-in', state: 'done' },
-    { label: 'Browser errands through the DOM', state: 'done' },
-    { label: 'Desktop apps on Windows and Ubuntu', state: 'done' },
-    { label: 'Long-term memory', state: 'done' },
-    { label: 'Wayland without the GNOME extension', state: 'active', progress: 40 },
-    { label: 'Accessibility for snapped apps', state: 'todo' },
-    { label: 'Desktop control on macOS', state: 'todo' },
-  ],
-};

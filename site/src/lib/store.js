@@ -5,6 +5,7 @@ const state = {
   mobile: false,
   arch: null,
   channel: 'stable',
+  content: null,
 };
 const subscribers = new Map();
 

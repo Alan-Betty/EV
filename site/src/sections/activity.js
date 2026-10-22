@@ -1,4 +1,5 @@
-import { POOLS, READINESS } from '../data/activity.js';
+import { POOLS } from '../data/activity.js';
+import { store } from '../lib/store.js';
 import REPO from '../data/repo.json';
 import { copy, flashCopied } from '../lib/clipboard.js';
 import { icon } from '../lib/icons.js';
@@ -140,31 +141,47 @@ export function initActivity() {
     copy(btn.dataset.hash, `Copied ${btn.dataset.hash.slice(0, 7)}`).then((ok) => ok && flashCopied(btn));
   });
 
-  // Readiness: fill the bars once, when the panel first comes into view.
+  // Road to 1.0, from the roadmap in content/site.json. The bar and the number
+  // fill once on first view; later edits (from the manager) update in place.
   const panel = root.querySelector('#readiness');
-  const done = READINESS.milestones.filter((m) => m.state === 'done').length;
-  const partial = READINESS.milestones.reduce((n, m) => n + (m.state === 'active' ? m.progress / 100 : 0), 0);
-  const percent = Math.round(((done + partial) / READINESS.milestones.length) * 100);
   const percentEl = panel.querySelector('[data-percent]');
-  percentEl.textContent = `${percent}%`;
-  panel.querySelector('[data-closed]').textContent = `${done} of ${READINESS.milestones.length} shipped`;
-  panel.querySelector('#readiness-bar').setAttribute('aria-valuenow', percent);
-  panel.querySelector('#milestones').innerHTML = READINESS.milestones
-    .map(
-      (m) => `<li class="milestone" data-state="${m.state}">
-        <span class="milestone-mark" aria-hidden="true">${m.state === 'done' ? icon.check('size-3') : ''}</span>
-        <span class="flex-1">${escape(m.label)}</span>
-        <span class="mono-meta">${m.state === 'done' ? 'shipped' : m.state === 'active' ? `${m.progress}%` : 'next'}</span>
-        <span class="sr-only">${m.state === 'done' ? 'shipped' : m.state === 'active' ? 'in progress' : 'not started'}</span>
-      </li>`,
-    )
-    .join('');
+  let shown = false;
+  let percent = 0;
+
+  function renderRoadmap(content) {
+    const items = content?.roadmap ?? [];
+    const done = items.filter((m) => m.state === 'done').length;
+    const partial = items.reduce((n, m) => n + (m.state === 'active' ? (Number(m.progress) || 0) / 100 : 0), 0);
+    percent = items.length ? Math.round(((done + partial) / items.length) * 100) : 0;
+    panel.querySelector('[data-closed]').textContent = `${done} of ${items.length} shipped`;
+    panel.querySelector('#readiness-bar').setAttribute('aria-valuenow', percent);
+    panel.querySelector('#milestones').innerHTML = items
+      .map(
+        (m) => `<li class="milestone" data-state="${m.state}">
+          <span class="milestone-mark" aria-hidden="true">${m.state === 'done' ? icon.check('size-3') : ''}</span>
+          <span class="flex-1">${escape(m.label)}</span>
+          <span class="mono-meta">${m.state === 'done' ? 'shipped' : m.state === 'active' ? `${m.progress ?? 0}%` : 'next'}</span>
+          <span class="sr-only">${m.state === 'done' ? 'shipped' : m.state === 'active' ? 'in progress' : 'not started'}</span>
+        </li>`,
+      )
+      .join('');
+    if (shown) {
+      panel.style.setProperty('--fill', `${percent}%`);
+      percentEl.textContent = `${percent}%`;
+    }
+  }
+  store.on('content', renderRoadmap);
+
   const io = new IntersectionObserver(([e]) => {
     if (!e.isIntersecting) return;
     io.disconnect();
+    shown = true;
     panel.style.setProperty('--fill', `${percent}%`);
     // Count up alongside the bar's own 1.4s ease.
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      percentEl.textContent = `${percent}%`;
+      return;
+    }
     const start = performance.now();
     const frame = (now) => {
       const k = Math.min(1, (now - start) / 1400);
