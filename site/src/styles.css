@@ -394,3 +394,56 @@
 .toast[data-show='true'] { opacity: 1; transform: translate(-50%, 0); }
 .toast-dot { @apply size-1.5 rounded-full bg-pulse; }
 .toast[data-tone='error'] .toast-dot { @apply bg-rose-400; }
+
+/* Downloads ------------------------------------------------------------- */
+@layer components {
+  .download-glow {
+    background: radial-gradient(ellipse 50% 60% at 50% 0%, rgba(0, 242, 254, 0.07), rgba(127, 0, 255, 0.05) 50%, transparent 80%);
+  }
+
+  .segmented {
+    @apply relative grid w-full shrink-0 grid-cols-3 rounded-xl border border-white/[0.08] bg-black/30 p-1 sm:w-auto;
+  }
+  .segmented button {
+    @apply relative z-10 h-9 rounded-lg px-4 text-[13px] font-medium text-slate-400 transition-colors hover:text-white;
+  }
+  .segmented button[aria-checked='true'] { @apply text-white; }
+  .segmented-thumb {
+    @apply absolute bottom-1 left-1 top-1 rounded-lg border border-white/10 bg-white/[0.08];
+    width: calc((100% - 0.5rem) / 3);
+    transform: translateX(calc(var(--seg) * 100%));
+    transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset;
+  }
+
+  .dl-card { @apply glass glass-hover relative flex flex-col rounded-2xl p-5 sm:p-6; }
+  .dl-card.is-detected {
+    @apply border-cyan-400/30;
+    box-shadow: 0 0 0 1px rgba(0, 242, 254, 0.12), 0 20px 50px -24px rgba(0, 242, 254, 0.45);
+  }
+  .dl-icon { @apply grid size-10 shrink-0 place-items-center rounded-xl border border-white/[0.08] bg-white/[0.04] text-slate-200; }
+  .is-detected .dl-icon { @apply border-cyan-400/30 text-white; }
+  .dl-detected {
+    @apply inline-flex shrink-0 items-center gap-1.5 rounded-full border border-emerald-400/25 bg-emerald-400/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300;
+  }
+
+  .artifact { @apply rounded-xl border border-white/[0.06] bg-black/20 p-3.5 transition-colors hover:border-white/[0.12]; }
+  .artifact-name { @apply text-[14px] font-medium text-slate-100; }
+  .artifact-detail { @apply text-[12px] text-slate-500; }
+  .artifact-dl {
+    @apply inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-white px-2.5 font-mono text-[11.5px] font-medium text-ink-950
+      transition-[background-color,transform] hover:bg-cyan-50 active:scale-[0.97];
+  }
+  .is-detected .artifact:first-child .artifact-dl { box-shadow: 0 6px 20px -6px rgba(0, 242, 254, 0.7); }
+  .artifact-code {
+    @apply mt-3 flex items-center gap-2 rounded-lg border border-white/[0.05] bg-black/30 py-1 pl-2.5 pr-1 font-mono text-[11px] text-slate-400;
+  }
+  .artifact-code code { @apply min-w-0 flex-1; }
+
+  .copy-btn {
+    @apply grid size-7 shrink-0 place-items-center rounded-md text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-electric;
+  }
+  .copy-btn .check-icon { display: none; }
+  .copy-btn[data-copied] .copy-icon { display: none; }
+  .copy-btn[data-copied] .check-icon { display: grid; @apply text-pulse; }
+}

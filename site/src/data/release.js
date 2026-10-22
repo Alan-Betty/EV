@@ -17,10 +17,28 @@ export const CHANNELS = {
 };
 
 export const PLATFORMS = {
-  linux: { label: 'Linux', long: 'Linux and Arch' },
-  macos: { label: 'macOS', long: 'macOS 13 or later' },
-  windows: { label: 'Windows', long: 'Windows 11' },
+  linux: {
+    label: 'Linux',
+    long: 'Linux and Arch',
+    requires: 'glibc 2.35+, Wayland or X11. Hyprland IPC detected automatically.',
+    verify: (a) => `echo "${a.sha256}  ${a.file}" | sha256sum -c`,
+  },
+  macos: {
+    label: 'macOS',
+    long: 'macOS 13 or later',
+    requires: 'Apple silicon recommended. Screen Recording and Accessibility permissions.',
+    verify: (a) => `shasum -a 256 -c <<< "${a.sha256}  ${a.file}"`,
+  },
+  windows: {
+    label: 'Windows',
+    long: 'Windows 11',
+    requires: 'Windows 11 22H2 or later. GPU with 6 GB VRAM recommended.',
+    verify: (a) => `(Get-FileHash .\\${a.file} -Algorithm SHA256).Hash -eq '${a.sha256.toUpperCase()}'`,
+  },
 };
+
+// Seed values for the live counters. Replace with a real stats endpoint.
+export const COUNTERS = { downloads: 1_284_302, nodes: 48_117 };
 
 // Per platform, in display order. `file` and `command` take the channel's version.
 const ARTIFACTS = {
