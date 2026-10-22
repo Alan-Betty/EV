@@ -138,7 +138,73 @@
           </div>
         </div>
       </section>
-      <!-- @demo -->
+      <section id="demo" aria-labelledby="demo-title" class="relative py-24 sm:py-32">
+        <div class="shell">
+          <div class="section-head">
+            <h2 id="demo-title">Watch it hear, plan and act</h2>
+            <p>Pick an errand. Each one is a recorded run of the real pipeline: speech in, a plan, commands against the system, a spoken answer. Pick another mid-run to interrupt it, the way you would by talking over it.</p>
+          </div>
+
+          <div class="sim-window relative mt-12">
+            <div aria-hidden="true" class="sim-glow"></div>
+            <div class="surface relative overflow-hidden rounded-2xl border border-white/[0.08] shadow-lift backdrop-blur-xl">
+              <div class="flex h-11 items-center gap-3 border-b border-white/[0.06] px-4">
+                <div class="flex gap-1.5" aria-hidden="true">
+                  <span class="size-2.5 rounded-full bg-white/[0.12]"></span>
+                  <span class="size-2.5 rounded-full bg-white/[0.12]"></span>
+                  <span class="size-2.5 rounded-full bg-white/[0.12]"></span>
+                </div>
+                <p id="sim-title" class="min-w-0 flex-1 truncate text-center font-mono text-[11.5px] text-slate-400 sm:text-[12px]">Nexus Assistant v0.9.4 - Idle</p>
+                <span id="sim-state" class="state-pill" data-state="idle">[IDLE]</span>
+              </div>
+
+              <div class="grid lg:grid-cols-[minmax(0,1.12fr)_minmax(0,1fr)]">
+                <div class="flex min-w-0 flex-col border-b border-white/[0.06] lg:border-b-0 lg:border-r">
+                  <div class="px-5 pt-5">
+                    <canvas id="sim-wave" class="h-16 w-full" aria-hidden="true"></canvas>
+                    <ol id="sim-steps" class="mt-4 grid grid-cols-5 gap-1.5" aria-label="Pipeline stage">
+                      <li data-step="idle"><span class="sim-step-bar"></span><span class="sim-step-label">Idle</span></li>
+                      <li data-step="listening"><span class="sim-step-bar"></span><span class="sim-step-label">Listen</span></li>
+                      <li data-step="thinking"><span class="sim-step-bar"></span><span class="sim-step-label">Think</span></li>
+                      <li data-step="executing"><span class="sim-step-bar"></span><span class="sim-step-label">Execute</span></li>
+                      <li data-step="done"><span class="sim-step-bar"></span><span class="sim-step-label">Done</span></li>
+                    </ol>
+                  </div>
+
+                  <div id="sim-transcript" class="h-[260px] space-y-3.5 overflow-y-auto px-5 py-5 sm:h-[280px]" aria-live="off">
+                    <p id="sim-empty" class="pt-16 text-center text-[13.5px] text-slate-500">Pick an errand below, or type one.</p>
+                  </div>
+                  <p id="sim-status" class="sr-only" aria-live="polite"></p>
+
+                  <div class="border-t border-white/[0.06] p-4">
+                    <div id="sim-prompts" class="flex flex-wrap gap-2" aria-label="Example errands"></div>
+                    <form id="sim-form" class="mt-3 flex gap-2">
+                      <label for="sim-input" class="sr-only">Type an errand</label>
+                      <input id="sim-input" type="text" autocomplete="off" spellcheck="false" maxlength="120" placeholder="Or type your own errand" class="sim-input" />
+                      <button type="submit" class="sim-run">Run <kbd class="kbd border-0 bg-ink-950/10 text-ink-950/60">↵</kbd></button>
+                    </form>
+                  </div>
+                </div>
+
+                <div class="flex min-w-0 flex-col bg-black/30">
+                  <div class="flex h-10 items-center justify-between border-b border-white/[0.06] px-4">
+                    <span class="mono-meta">~/src/nexus</span>
+                    <span class="mono-meta tabular">step <span id="sim-progress">0/0</span></span>
+                  </div>
+                  <ol id="sim-term" class="h-[300px] overflow-y-auto px-4 py-3 font-mono text-[12px] leading-[1.75] sm:text-[12.5px] lg:h-auto lg:flex-1" aria-label="Commands run"></ol>
+                </div>
+              </div>
+
+              <div class="flex h-9 items-center gap-5 overflow-hidden border-t border-white/[0.06] px-4 font-mono text-[10.5px] text-slate-500">
+                <span class="flex items-center gap-1.5"><span class="size-1.5 rounded-full bg-pulse"></span>runtime local</span>
+                <span class="hidden sm:inline">gpu cuda:0</span>
+                <span class="hidden sm:inline">stt whisper-large-v3</span>
+                <span class="ml-auto">egress 0 B</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
       <!-- @features -->
       <!-- @activity -->
       <!-- @download -->

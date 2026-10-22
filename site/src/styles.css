@@ -171,3 +171,74 @@
     @apply absolute size-5 border-white/20;
   }
 }
+
+/* Simulator ------------------------------------------------------------- */
+@layer components {
+  .sim-glow {
+    @apply pointer-events-none absolute -inset-px rounded-2xl;
+    background: linear-gradient(140deg, rgba(0, 242, 254, 0.35), transparent 30%, transparent 70%, rgba(127, 0, 255, 0.4));
+    filter: blur(28px);
+    opacity: 0.35;
+  }
+
+  .state-pill {
+    @apply shrink-0 rounded-md border px-2 py-1 font-mono text-[10.5px] font-medium tracking-wide transition-colors duration-300;
+    @apply border-white/10 bg-white/[0.04] text-slate-400;
+  }
+  .state-pill[data-state='listening'] { @apply border-cyan-400/30 bg-cyan-400/10 text-electric; }
+  .state-pill[data-state='thinking'] { @apply border-violet-400/30 bg-violet-500/10 text-violet-300; }
+  .state-pill[data-state='executing'] {
+    @apply border-cyan-300/50 bg-cyan-300/15 text-cyan-100;
+    box-shadow: 0 0 18px -4px rgba(0, 242, 254, 0.6);
+  }
+  .state-pill[data-state='done'] { @apply border-emerald-400/30 bg-emerald-400/10 text-emerald-300; }
+
+  #sim-steps li { @apply flex flex-col gap-1.5; }
+  .sim-step-bar { @apply h-[3px] rounded-full bg-white/[0.07] transition-colors duration-500; }
+  .sim-step-label { @apply font-mono text-[10px] text-slate-600 transition-colors duration-300; }
+  #sim-steps li[data-reached='true'] .sim-step-bar { background: linear-gradient(90deg, #00f2fe, #7f00ff); }
+  #sim-steps li[data-reached='true'] .sim-step-label { @apply text-slate-400; }
+  #sim-steps li[aria-current] .sim-step-label { @apply text-white; }
+
+  .sim-msg { @apply grid grid-cols-[3.25rem_minmax(0,1fr)] items-baseline gap-3; }
+  .sim-who { @apply text-right font-mono text-[10.5px] text-slate-600; }
+  .sim-text { @apply text-[14.5px] leading-7 text-slate-300; }
+  .sim-msg[data-who='nexus'] .sim-who { @apply text-electric; }
+  .sim-msg[data-who='nexus'] .sim-text { @apply text-white; }
+  .sim-plan .sim-text { @apply font-mono text-[12px] leading-6 text-violet-300/80; }
+  .sim-text.is-typing::after {
+    content: '';
+    @apply ml-0.5 inline-block h-[1.05em] w-[2px] translate-y-[3px] bg-electric animate-blink;
+  }
+  .shimmer {
+    background: linear-gradient(90deg, rgba(196, 181, 253, 0.45) 0%, #fff 50%, rgba(196, 181, 253, 0.45) 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: shimmer 1.4s linear infinite;
+  }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+
+  .prompt-pill {
+    @apply rounded-full border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-left text-[12.5px] text-slate-300
+      transition-[border-color,background-color,color,transform] duration-200 hover:border-cyan-500/30 hover:bg-white/[0.06] hover:text-white active:scale-[0.98];
+  }
+  .prompt-pill[aria-pressed='true'] { @apply border-cyan-400/40 bg-cyan-400/10 text-white; }
+
+  .sim-input {
+    @apply h-10 min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-black/30 px-3 font-mono text-[12.5px] text-slate-200
+      placeholder:text-slate-600 transition-colors focus:border-cyan-400/50 focus:outline-none;
+  }
+  .sim-run {
+    @apply inline-flex h-10 shrink-0 items-center gap-2 rounded-lg bg-white px-3.5 text-[13px] font-medium text-ink-950 transition-colors hover:bg-cyan-50 active:scale-[0.98];
+  }
+
+  .term-cmd { @apply flex items-baseline gap-2 text-slate-200; }
+  .term-cmd + .term-cmd, .term-out + .term-cmd { @apply mt-2.5; }
+  .term-text { @apply min-w-0 flex-1 break-all; }
+  .term-meta { @apply shrink-0 text-[10.5px] text-slate-500 tabular; }
+  .term-meta.is-running { @apply text-electric animate-pulse; }
+  .term-out { @apply whitespace-pre-wrap break-all pl-4 text-slate-500; }
+  .term-out.is-ok { @apply text-emerald-300/90; }
+}
