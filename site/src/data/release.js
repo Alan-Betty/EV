@@ -1,80 +1,107 @@
-import { CHECKSUMS } from './checksums.js';
+// Everything the page says about getting E.V. E.V. ships as source: there are
+// no binaries, so a "build" is a GitHub source archive pinned to a commit, and
+// the thing to verify is that commit id. Repo facts come from repo.json, which
+// scripts/sync-repo.mjs regenerates from git before every dev and build run.
+import REPO from './repo.json';
 
-// Single source of truth for everything the page states about a release.
-// Placeholder values: CI should generate this file (or a JSON manifest it
-// replaces) from the real build artifacts before the site is published.
+export { REPO };
 
 export const PRODUCT = {
-  name: 'NEXUS',
-  repo: 'https://github.com/nexus-assistant/nexus',
-  docs: '#',
-  stars: 18_432,
+  name: 'E.V.',
+  repo: REPO.repo,
+  docs: `${REPO.repo}/blob/main/OVERVIEW.md`,
+  quickstart: `${REPO.repo}/blob/main/quickstart.md`,
+  devlog: `${REPO.repo}/blob/main/devlog.md`,
 };
 
+const short = (sha) => sha.slice(0, 7);
+
 export const CHANNELS = {
-  stable: { label: 'Stable', version: '0.9.4-beta', date: '2026-10-20', note: 'Recommended. Tested across every supported desktop.' },
-  nightly: { label: 'Nightly', version: '0.9.5-nightly.20261022', date: '2026-10-22', note: 'Built from main every night. Passing tests, rough edges.' },
-  canary: { label: 'Canary', version: '0.10.0-canary.7', date: '2026-10-22', note: 'Every merged commit. Expect breakage. For contributors.' },
+  stable: {
+    label: 'Stable',
+    version: `iteration ${REPO.iteration.number}`,
+    tag: `iter ${REPO.iteration.number}`,
+    ref: REPO.iteration.hash,
+    date: REPO.iteration.date,
+    note: `Pinned to the iteration ${REPO.iteration.number} commit. What the devlog describes.`,
+  },
+  nightly: {
+    label: 'Nightly',
+    version: 'main',
+    tag: 'main',
+    ref: 'main',
+    date: REPO.head.date,
+    note: 'Whatever is on main right now. Usually fine, sometimes mid-change.',
+  },
+  canary: {
+    label: 'Canary',
+    version: 'main + dev tools',
+    tag: 'dev',
+    ref: 'main',
+    date: REPO.head.date,
+    note: `For contributors: a clone with the ${REPO.tests} offline tests and the live browser suite.`,
+  },
 };
 
 export const PLATFORMS = {
   linux: {
     label: 'Linux',
-    long: 'Linux and Arch',
-    requires: 'glibc 2.35+, Wayland or X11. Hyprland IPC detected automatically.',
-    verify: (a) => `echo "${a.sha256}  ${a.file}" | sha256sum -c`,
+    long: 'Ubuntu first-class, other distros work',
+    requires: 'Python 3.11+. On GNOME Wayland, install the window extension and log in again.',
+    setup: 'sudo apt install libportaudio2 && python3 -m pip install -r requirements.txt && cp .env.example .env',
+    extra: { name: 'Wayland window support', detail: 'GNOME Shell extension for exact windows and focus', command: 'python3 ev_core.py --install-gnome-extension' },
+    verify: () => 'unzip -z EV-*.zip | tail -1   # prints the commit the archive was made from',
   },
   macos: {
     label: 'macOS',
-    long: 'macOS 13 or later',
-    requires: 'Apple silicon recommended. Screen Recording and Accessibility permissions.',
-    verify: (a) => `shasum -a 256 -c <<< "${a.sha256}  ${a.file}"`,
+    long: 'Experimental',
+    requires: 'The voice loop, browser errands and files work. Desktop control is partial, through System Events.',
+    setup: 'python3 -m pip install -r requirements.txt && cp .env.example .env',
+    extra: null,
+    verify: () => 'unzip -z EV-*.zip | tail -1   # prints the commit the archive was made from',
   },
   windows: {
     label: 'Windows',
-    long: 'Windows 11',
-    requires: 'Windows 11 22H2 or later. GPU with 6 GB VRAM recommended.',
-    verify: (a) => `(Get-FileHash .\\${a.file} -Algorithm SHA256).Hash -eq '${a.sha256.toUpperCase()}'`,
+    long: 'Windows 10 and 11, the primary target',
+    requires: 'Python 3.11+. Audio plays through winmm and needs no extra package.',
+    setup: 'py -m pip install -r requirements.txt; copy .env.example .env',
+    extra: null,
+    verify: () => 'git rev-parse HEAD   # in a clone; or open the zip and read its comment',
   },
 };
 
-// Seed values for the live counters. Replace with a real stats endpoint.
-export const COUNTERS = { downloads: 1_284_302, nodes: 48_117 };
+export const EXTRAS = 'python -m pip install playwright PySide6-Essentials send2trash && python -m playwright install chromium';
 
-// Per platform, in display order. `file` and `command` take the channel's version.
-const ARTIFACTS = {
-  linux: [
-    { id: 'appimage', name: 'AppImage', detail: 'Any distro, no install', arch: 'x86_64', size: 48.2, primary: true, file: (v) => `nexus-${v}-x86_64.AppImage` },
-    { id: 'aur', name: 'AUR package', detail: 'Arch, Manjaro, EndeavourOS', arch: 'x86_64', command: (_, channel) => `yay -S ${{ stable: 'nexus-bin', nightly: 'nexus-nightly-bin', canary: 'nexus-git' }[channel]}` },
-    { id: 'tarball', name: 'Tarball', detail: 'Portable, unpack anywhere', arch: 'x86_64', size: 41.7, file: (v) => `nexus-${v}-linux-x86_64.tar.gz` },
-  ],
-  macos: [
-    { id: 'arm64', name: 'Apple silicon', detail: 'M1 and later', arch: 'arm64', size: 52.9, primary: true, file: (v) => `NEXUS-${v}-arm64.dmg` },
-    { id: 'x86_64', name: 'Intel', detail: 'macOS 13 or later', arch: 'x86_64', size: 55.4, file: (v) => `NEXUS-${v}-x86_64.dmg` },
-  ],
-  windows: [
-    { id: 'msi', name: 'Installer', detail: 'Per-user .msi, no admin', arch: 'x64', size: 46.1, primary: true, file: (v) => `NEXUS-${v}-x64.msi` },
-    { id: 'portable', name: 'Portable package', detail: 'Zip, runs from a folder', arch: 'x64', size: 44.8, file: (v) => `NEXUS-${v}-x64-portable.zip` },
-  ],
-};
-
+// Rows for one platform card, in display order.
 export function artifactsFor(platform, channel) {
-  const { version } = CHANNELS[channel];
-  return ARTIFACTS[platform].map((a) => {
-    const file = a.file?.(version) ?? null;
-    return {
-      ...a,
-      version,
-      file,
-      command: a.command?.(version, channel) ?? null,
-      sha256: file ? CHECKSUMS[file] : null,
-      url: file ? `${PRODUCT.repo}/releases/download/v${version}/${file}` : null,
-    };
+  const c = CHANNELS[channel];
+  const p = PLATFORMS[platform];
+  const commit = c.ref === 'main' ? REPO.head.hash : c.ref;
+  const zip = c.ref === 'main' ? `${REPO.repo}/archive/refs/heads/main.zip` : `${REPO.repo}/archive/${c.ref}.zip`;
+  const rows = [];
+
+  if (channel === 'canary') {
+    rows.push({ id: 'clone', name: 'Clone', detail: 'Full history, ready for branches', command: `git clone ${REPO.repo}.git && cd EV` });
+    rows.push({ id: 'tests', name: 'Run the tests', detail: `${REPO.tests} tests, offline, no API key`, command: 'python -m pip install pytest && python -m pytest tests/ -q' });
+    rows.push({ id: 'live', name: 'Live browser suite', detail: 'Real Chromium against real sites', command: 'EV_LIVE_BROWSER=1 python -m pytest tests/test_web_agent_live.py -q' });
+    return rows;
+  }
+
+  rows.push({
+    id: 'archive',
+    name: 'Source archive',
+    detail: `${c.ref === 'main' ? 'main' : `iteration ${REPO.iteration.number}`}, zip from GitHub`,
+    primary: true,
+    url: zip,
+    file: `EV-${c.ref === 'main' ? 'main' : short(c.ref)}.zip`,
+    commit,
   });
+  rows.push({ id: 'setup', name: 'Set up', detail: 'Then add a free Groq or Gemini key to .env', command: p.setup });
+  if (p.extra) rows.push({ id: 'extra', ...p.extra });
+  return rows;
 }
 
-// The build a "Download for X" button should hand over, honouring a sniffed CPU arch.
-export function primaryFor(platform, channel, arch) {
-  const list = artifactsFor(platform, channel).filter((a) => a.file);
-  return list.find((a) => arch && a.arch === arch) ?? list.find((a) => a.primary) ?? list[0];
+// What a "Download for X" button hands over.
+export function primaryFor(platform, channel) {
+  return artifactsFor(platform, channel === 'canary' ? 'nightly' : channel).find((a) => a.primary);
 }

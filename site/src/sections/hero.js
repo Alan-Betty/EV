@@ -1,4 +1,4 @@
-import { CHANNELS, PLATFORMS, primaryFor } from '../data/release.js';
+import { CHANNELS, PLATFORMS, REPO, primaryFor } from '../data/release.js';
 import { platformIcon } from '../lib/icons.js';
 import { createOrb } from '../lib/orb.js';
 import { store } from '../lib/store.js';
@@ -11,30 +11,29 @@ export function initHero() {
   const render = () => {
     const platform = store.get('platform');
     const channel = store.get('channel');
-    const build = primaryFor(platform, channel, store.get('arch'));
+    const build = primaryFor(platform, channel);
 
     cta.href = build.url;
-    cta.setAttribute('download', '');
     cta.querySelector('[data-icon]').innerHTML = platformIcon(platform, 'size-[18px]');
     cta.querySelector('[data-label]').textContent = `Download for ${PLATFORMS[platform].label}`;
-    cta.querySelector('[data-version]').textContent = CHANNELS[channel].version.replace(/-.*/, '');
+    cta.querySelector('[data-version]').textContent = CHANNELS[channel].tag;
 
     tip.querySelector('[data-file]').textContent = build.file;
-    tip.querySelector('[data-size]').textContent = `${build.size} MB`;
-    tip.querySelector('[data-sha]').textContent = build.sha256;
+    tip.querySelector('[data-commit]').textContent = build.commit;
 
     const others = Object.keys(PLATFORMS).filter((p) => p !== platform);
     alt.innerHTML = `Also for ${others
       .map((p) => `<a href="#download" data-pick="${p}" class="text-slate-300 underline decoration-white/20 underline-offset-4 transition-colors hover:text-white hover:decoration-cyan-400/60">${PLATFORMS[p].label}</a>`)
-      .join(' and ')}. Release ${CHANNELS[channel].date}.`;
+      .join(' and ')}. Iteration ${REPO.iteration.number}, ${REPO.iteration.date}.`;
   };
   ['platform', 'channel', 'arch'].forEach((k) => store.on(k, render));
+
+  document.querySelectorAll('[data-iteration-tag]').forEach((el) => (el.textContent = `[ BUILD: ITERATION ${REPO.iteration.number} ]`));
 
   // Phones get the matrix instead of a desktop binary they cannot run.
   store.on('mobile', (mobile) => {
     if (!mobile) return;
     cta.href = '#download';
-    cta.removeAttribute('download');
   });
 
   alt.addEventListener('click', (e) => {

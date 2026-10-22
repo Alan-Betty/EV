@@ -253,7 +253,7 @@
   .bento-copy p { @apply mt-2 max-w-[46ch] text-[14px] leading-6 text-slate-400 text-pretty; }
   .bento-num { @apply mt-1.5 text-[15px] font-medium tabular text-slate-100; }
 
-  /* Voice: two lanes, NEXUS yields when the user cuts in */
+  /* Voice: two lanes, E.V. yields when the user cuts in */
   .duplex { @apply relative space-y-2; }
   .duplex-lane { @apply grid grid-cols-[2.75rem_1fr] items-center gap-3; }
   .duplex-label { @apply font-mono text-[10.5px] text-slate-500; }

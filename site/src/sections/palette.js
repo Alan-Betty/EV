@@ -19,24 +19,24 @@ function jump(selector) {
 function commands() {
   const platform = store.get('platform');
   const channel = store.get('channel');
-  const build = primaryFor(platform, channel, store.get('arch'));
+  const build = primaryFor(platform, channel);
   return [
     { group: 'Go to', label: 'Features', hint: 'Capabilities grid', run: () => jump('#features') },
     { group: 'Go to', label: 'Live demo', hint: 'Assistant simulator', run: () => jump('#demo') },
-    { group: 'Go to', label: 'System logs', hint: 'Build and commit stream', run: () => jump('#activity') },
-    { group: 'Go to', label: 'Download specs', hint: 'Every platform and channel', run: () => jump('#download') },
+    { group: 'Go to', label: 'System logs', hint: 'Commit history and session log', run: () => jump('#activity') },
+    { group: 'Go to', label: 'Download specs', hint: 'Install steps for every platform', run: () => jump('#download') },
     {
       group: 'Go to', label: 'Search system logs', keys: ['/'],
       run: () => { jump('#activity'); setTimeout(() => document.getElementById('log-search')?.focus({ preventScroll: true }), 350); },
     },
     ...SCRIPTS.map((s) => ({
       group: 'Run in demo', label: s.label,
-      run: () => { jump('#demo'); document.dispatchEvent(new CustomEvent('nexus:demo', { detail: s.id })); },
+      run: () => { jump('#demo'); document.dispatchEvent(new CustomEvent('ev:demo', { detail: s.id })); },
     })),
     { group: 'Download', label: `Download for ${PLATFORMS[platform].label}`, hint: build.file, run: () => { location.href = build.url; } },
-    { group: 'Download', label: 'Copy SHA-256 of your build', hint: `${build.sha256.slice(0, 16)}…`, run: () => copy(build.sha256, 'Copied SHA-256') },
+    { group: 'Download', label: 'Copy the commit id', hint: build.commit.slice(0, 12), run: () => copy(build.commit, `Copied ${build.commit.slice(0, 7)}`) },
     ...Object.entries(CHANNELS).map(([id, c]) => ({
-      group: 'Download', label: `Switch to ${c.label} channel`, hint: id === channel ? 'current' : `v${c.version}`,
+      group: 'Download', label: `Switch to ${c.label} channel`, hint: id === channel ? 'current' : c.version,
       run: () => { store.set('channel', id); jump('#download'); },
     })),
   ];

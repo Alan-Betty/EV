@@ -183,7 +183,7 @@ export function initSimulator() {
   });
 
   // The command palette asks for a run without knowing about this module.
-  document.addEventListener('nexus:demo', (e) => {
+  document.addEventListener('ev:demo', (e) => {
     const script = SCRIPTS.find((s) => s.id === e.detail);
     if (script) play(script);
   });
