@@ -1,0 +1,21 @@
+// Placeholder digests (sha256 of the file name, not of a build). CI replaces these.
+export const CHECKSUMS = {
+  'nexus-0.9.4-beta-x86_64.AppImage': '79861513439d6d7ca815f6fc8695b51b27e73c0d3befc7bfe32dfde69791ae44',
+  'nexus-0.9.4-beta-linux-x86_64.tar.gz': 'a5fbb46c7f0b5f02d27671d0a70a36e783cb12d1f55875d42a7ccc87ae3a37ef',
+  'NEXUS-0.9.4-beta-arm64.dmg': 'ceeb27ce62051477ead92c0f464f573fc13e169733d279e5c59ab4b01349873b',
+  'NEXUS-0.9.4-beta-x86_64.dmg': 'c5320414f8a04f42f345c39e2829fa10b55af59cc4a3ccf0e06d532f015ca2e7',
+  'NEXUS-0.9.4-beta-x64.msi': '18115b27997311cb3ee40f673a3dee165920961aca90568a99eab885dd4d598f',
+  'NEXUS-0.9.4-beta-x64-portable.zip': 'b4bf8ed61c5201bdd9315055bb852e5279c543dce42ef669a50dd179740f7f95',
+  'nexus-0.9.5-nightly.20261022-x86_64.AppImage': '3b1723c050f5a422244d24f9fc2114646baf5610f872898838f615a58b856280',
+  'nexus-0.9.5-nightly.20261022-linux-x86_64.tar.gz': '7ec67e3bbd53db9f7d12f2246b079cf0694cf42c5f9c0486b2c26fa54c981cd3',
+  'NEXUS-0.9.5-nightly.20261022-arm64.dmg': 'a0af6755739076b69977ff69f9dae88fe19f59d928d9a16e142af225a1b7f46f',
+  'NEXUS-0.9.5-nightly.20261022-x86_64.dmg': 'a5ad383bba0b3e9f88319cf179e86b5c2d4cca9ffb0b55fd1ee712cd2e355d87',
+  'NEXUS-0.9.5-nightly.20261022-x64.msi': 'e52491db63506b160b8e1c544ed16d9fd63b39cd1773f593e77b50c659400262',
+  'NEXUS-0.9.5-nightly.20261022-x64-portable.zip': 'ae48aa0249fc3d20e7481b99000abdad3dd10b7ddb07d25a6801c5c6a3743a4f',
+  'nexus-0.10.0-canary.7-x86_64.AppImage': 'a966db403d9d4a87f3b6a53e17a02cafff92976dd0da061320d2e9940384b343',
+  'nexus-0.10.0-canary.7-linux-x86_64.tar.gz': 'da16957ce6fd01f5a5f75115e48b9ffadaf9169e9d77dc7cf817ea7b0fbb2f2a',
+  'NEXUS-0.10.0-canary.7-arm64.dmg': '8dd4871945f82f211be8ad76ca8ef4d3a164eb920b97acb3c20d9c453250382e',
+  'NEXUS-0.10.0-canary.7-x86_64.dmg': '0766959f8d84ea294a25e1ae44c2a38e6e1ebb9ad1982baed3df2a6b04f1872e',
+  'NEXUS-0.10.0-canary.7-x64.msi': '97992123163f5bb63e1ae3497a9f289713a1e8c954bd6727980a5c9b89b9c9a3',
+  'NEXUS-0.10.0-canary.7-x64-portable.zip': '3549542da9132068ad0771f11c7aa5e0af1c37ed1603718341ecb191b3ea67d1',
+};
