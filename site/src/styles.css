@@ -242,3 +242,80 @@
   .term-out { @apply whitespace-pre-wrap break-all pl-4 text-slate-500; }
   .term-out.is-ok { @apply text-emerald-300/90; }
 }
+
+/* Bento ----------------------------------------------------------------- */
+@layer components {
+  .bento {
+    @apply glass glass-hover relative isolate flex min-h-[300px] flex-col overflow-hidden rounded-2xl;
+  }
+  .bento-copy { @apply p-5 pb-6 sm:p-6 sm:pb-7; }
+  .bento-copy h3 { @apply text-[17px] font-semibold tracking-[-0.015em] text-white; }
+  .bento-copy p { @apply mt-2 max-w-[46ch] text-[14px] leading-6 text-slate-400 text-pretty; }
+  .bento-num { @apply mt-1.5 text-[15px] font-medium tabular text-slate-100; }
+
+  /* Voice: two lanes, NEXUS yields when the user cuts in */
+  .duplex { @apply relative space-y-2; }
+  .duplex-lane { @apply grid grid-cols-[2.75rem_1fr] items-center gap-3; }
+  .duplex-label { @apply font-mono text-[10.5px] text-slate-500; }
+  .duplex-bars { @apply flex h-10 items-center gap-[2px]; }
+  .duplex-bars span {
+    @apply block flex-1 rounded-full;
+    height: calc(var(--h) * 100%);
+    background: linear-gradient(180deg, #00f2fe, #7f00ff);
+    transform-origin: center;
+    animation: duplex 1.8s ease-in-out infinite;
+    animation-delay: calc(var(--i) * -47ms);
+  }
+  .duplex-bars[data-lane='you'] span { background: linear-gradient(180deg, #e2e8f0, #64748b); }
+  .duplex-bars span.is-off { @apply bg-white/10; background-image: none; animation: none; }
+  @keyframes duplex { 50% { transform: scaleY(0.55); } }
+  .duplex-cut {
+    @apply pointer-events-none absolute -bottom-1 -top-1 w-px;
+    left: calc(2.75rem + 0.75rem + (100% - 3.5rem) * 0.6);
+    background: linear-gradient(180deg, transparent, rgba(0, 242, 254, 0.9), transparent);
+  }
+  .duplex-cut span {
+    @apply absolute -top-5 left-2 whitespace-nowrap font-mono text-[10px] text-electric;
+  }
+
+  /* Vision: wireframe window with detections */
+  .vision { @apply relative min-h-[230px] flex-1 overflow-hidden rounded-xl border border-white/[0.07] bg-black/40; }
+  .vision-bar { @apply flex gap-1 border-b border-white/[0.06] px-2.5 py-2; }
+  .vision-bar span { @apply size-1.5 rounded-full bg-white/15; }
+  .vision i { @apply absolute h-1.5 rounded-full bg-white/[0.08]; }
+  .vision i.is-block { @apply rounded-lg bg-white/[0.05]; }
+  .vision b { @apply absolute rounded-md bg-white/[0.08]; }
+  .vision b.is-primary { @apply bg-white/[0.16]; }
+  .vision-box { @apply absolute rounded-[4px] border border-cyan-400/50; background: rgba(0, 242, 254, 0.04); }
+  .vision-box em {
+    @apply absolute -top-[17px] left-[-1px] whitespace-nowrap rounded-t-[3px] bg-cyan-400/80 px-1 font-mono text-[9px] not-italic leading-[16px] text-ink-950;
+  }
+  .vision-box.is-target { @apply border-electric; box-shadow: 0 0 0 3px rgba(0, 242, 254, 0.15), 0 0 24px rgba(0, 242, 254, 0.35); }
+  .vision-box.is-target em { @apply bg-electric; }
+  .vision-scan {
+    @apply pointer-events-none absolute inset-x-0 h-16;
+    background: linear-gradient(180deg, transparent, rgba(0, 242, 254, 0.12) 85%, rgba(0, 242, 254, 0.5));
+    animation: scan 3.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
+  @keyframes scan { from { top: -4rem; } to { top: 100%; } }
+
+  .runtime { @apply flex gap-3; }
+  .gpu-fill { background: linear-gradient(90deg, #00f2fe, #7f00ff); }
+
+  .timeline { @apply relative space-y-3 pl-4; }
+  .timeline::before { content: ''; @apply absolute bottom-1.5 left-[3px] top-1.5 w-px bg-white/10; }
+  .timeline li { @apply relative grid grid-cols-[4.75rem_1fr] gap-2 text-slate-500; }
+  .timeline li::before { content: ''; @apply absolute -left-4 top-[5px] size-[7px] rounded-full border border-white/20 bg-ink-900; }
+  .timeline li.is-now::before { @apply border-pulse bg-pulse; box-shadow: 0 0 10px rgba(16, 185, 129, 0.7); }
+  .timeline time { @apply text-slate-600; }
+
+  .ipc li { @apply flex gap-3 border-b border-white/[0.04] text-slate-400 last:border-0; }
+  .ipc-src { @apply w-16 shrink-0 text-slate-600; }
+  .ipc-t { @apply ml-auto shrink-0 pl-3 text-slate-500; }
+  .ipc li > span:nth-child(2) { @apply min-w-0 truncate; }
+
+  .tk-k { @apply text-violet-300; }
+  .tk-s { @apply text-emerald-300/90; }
+  .tk-f { @apply text-electric; }
+  .tk-d { @apply text-amber-200/80; }
+}

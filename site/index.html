@@ -205,7 +205,132 @@
           </div>
         </div>
       </section>
-      <!-- @features -->
+      <section id="features" aria-labelledby="features-title" class="relative py-24 sm:py-32">
+        <div class="shell">
+          <div class="section-head">
+            <h2 id="features-title">Built to act, not only answer</h2>
+            <p>Six systems share one loop: listen, look, decide, act, speak. Each was built to shorten the gap between saying something and it being done.</p>
+          </div>
+
+          <div class="mt-14 grid gap-3 sm:grid-cols-2 lg:grid-cols-6 lg:gap-4">
+            <!-- Voice -->
+            <article class="bento sm:col-span-2 lg:col-span-4">
+              <div class="bento-copy">
+                <h3>Full-duplex voice engine</h3>
+                <p>A direct audio stream with no push-to-talk. Speak over a reply and NEXUS stops mid-word to listen, keeping what you already said.</p>
+              </div>
+              <div class="bento-visual mt-auto space-y-3 px-5 pb-5 sm:px-6 sm:pb-6" aria-hidden="true">
+                <div class="duplex">
+                  <div class="duplex-lane"><span class="duplex-label">nexus</span><div class="duplex-bars" data-lane="nexus"></div></div>
+                  <div class="duplex-lane"><span class="duplex-label">you</span><div class="duplex-bars" data-lane="you"></div></div>
+                  <span class="duplex-cut"><span>barge-in 120 ms</span></span>
+                </div>
+                <dl class="grid grid-cols-3 gap-3 border-t border-white/[0.06] pt-4">
+                  <div><dt class="mono-meta">endpointing</dt><dd class="bento-num">600 ms</dd></div>
+                  <div><dt class="mono-meta">first word</dt><dd class="bento-num">0.9 s</dd></div>
+                  <div><dt class="mono-meta">echo gating</dt><dd class="bento-num">adaptive</dd></div>
+                </dl>
+              </div>
+            </article>
+
+            <!-- Vision -->
+            <article class="bento sm:col-span-1 lg:col-span-2 lg:row-span-2">
+              <div class="bento-copy">
+                <h3>Spatial vision perception</h3>
+                <p>Reads the screen the way you do. Finds controls, reads their labels and clicks by position, then looks again to check it worked.</p>
+              </div>
+              <div class="bento-visual flex flex-1 flex-col px-5 pb-5 sm:px-6 sm:pb-6" aria-hidden="true">
+                <div class="vision">
+                  <div class="vision-bar"><span></span><span></span><span></span></div>
+                  <!-- wireframe and detections share one percentage grid so boxes sit on what they label -->
+                  <i style="left:7%;top:24%;width:18%"></i><i style="left:7%;top:32%;width:14%"></i><i style="left:7%;top:40%;width:16%"></i><i style="left:7%;top:48%;width:12%"></i>
+                  <i class="is-block" style="left:35%;top:22%;width:58%;height:34%"></i>
+                  <i style="left:35%;top:63%;width:50%"></i><i style="left:35%;top:70%;width:38%"></i>
+                  <b style="right:31%;bottom:9%;width:18%;height:10%"></b>
+                  <b class="is-primary" style="right:7%;bottom:9%;width:20%;height:10%"></b>
+                  <span class="vision-box" style="left:5%;top:20%;width:23%;height:33%"><em>list "Files"</em></span>
+                  <span class="vision-box" style="left:34%;top:20%;width:60%;height:38%"><em>image 0.64, 0.39</em></span>
+                  <span class="vision-box is-target" style="right:5.5%;bottom:7.5%;width:23%;height:13%"><em>button "Save"</em></span>
+                  <span class="vision-scan"></span>
+                </div>
+                <dl class="mt-4 space-y-2 font-mono text-[11px]">
+                  <div class="flex justify-between"><dt class="text-slate-500">elements found</dt><dd class="text-slate-300">412</dd></div>
+                  <div class="flex justify-between"><dt class="text-slate-500">click target</dt><dd class="text-electric">0.861, 0.874</dd></div>
+                  <div class="flex justify-between"><dt class="text-slate-500">verified by</dt><dd class="text-slate-300">second look</dd></div>
+                </dl>
+              </div>
+            </article>
+
+            <!-- Offline -->
+            <article class="bento lg:col-span-2">
+              <div class="bento-copy">
+                <h3>100% offline runtimes</h3>
+                <p>Language and speech models run on your GPU. No telemetry, no account, nothing leaves the machine.</p>
+              </div>
+              <div class="bento-visual mt-auto px-5 pb-5 sm:px-6 sm:pb-6" aria-hidden="true">
+                <p class="flex items-baseline gap-2"><span class="text-[40px] font-semibold leading-none tracking-[-0.04em] text-white">0 B</span><span class="text-[12.5px] text-slate-500">sent off this machine today</span></p>
+                <ul class="mt-5 space-y-2.5 font-mono text-[11px]">
+                  <li class="runtime"><span class="text-slate-500">llm</span><span class="text-slate-300">nexus-8b-q4</span><span class="ml-auto text-slate-400">41 tok/s</span></li>
+                  <li class="runtime"><span class="text-slate-500">stt</span><span class="text-slate-300">whisper-large-v3</span><span class="ml-auto text-slate-400">0.2x rt</span></li>
+                  <li class="pt-1"><span class="block h-1 overflow-hidden rounded-full bg-white/[0.06]"><span class="gpu-fill block h-full w-[38%] rounded-full"></span></span><span class="mt-1.5 flex justify-between text-slate-500"><span>cuda:0 vram</span><span>3.1 / 8 GB</span></span></li>
+                </ul>
+              </div>
+            </article>
+
+            <!-- Memory -->
+            <article class="bento lg:col-span-2">
+              <div class="bento-copy">
+                <h3>Persistent event memory</h3>
+                <p>Unfinished errands, preferences and context survive reboots, crashes and workspace switches.</p>
+              </div>
+              <div class="bento-visual mt-auto px-5 pb-5 sm:px-6 sm:pb-6" aria-hidden="true">
+                <ol class="timeline font-mono text-[11px]">
+                  <li><time>Mon 18:42</time><span>power lost mid-task</span></li>
+                  <li><time>Tue 09:12</time><span>boot, unclean exit noticed</span></li>
+                  <li class="is-now"><time>09:12</time><span class="text-slate-200">resumed "copy photos to NAS"</span></li>
+                </ol>
+              </div>
+            </article>
+
+            <!-- Automation -->
+            <article class="bento sm:col-span-2 lg:col-span-3">
+              <div class="bento-copy">
+                <h3>Native OS and window automation</h3>
+                <p>Listens on Hyprland and window manager IPC, runs shell commands and moves files. Anything destructive asks first.</p>
+              </div>
+              <div class="bento-visual mt-auto px-5 pb-5 sm:px-6 sm:pb-6" aria-hidden="true">
+                <ul class="ipc font-mono text-[11px] leading-[1.9]">
+                  <li><span class="ipc-src">hyprland</span><span>activewindow&gt;&gt;kitty,dev</span></li>
+                  <li><span class="ipc-src">hyprland</span><span>workspace&gt;&gt;3</span></li>
+                  <li><span class="ipc-src text-electric">nexus</span><span>focus kitty</span><span class="ipc-t">4 ms</span></li>
+                  <li><span class="ipc-src">shell</span><span>cargo build --release</span><span class="ipc-t text-pulse">exit 0</span></li>
+                  <li><span class="ipc-src">fs</span><span>moved 14 files to ~/Pictures</span><span class="ipc-t">31 ms</span></li>
+                  <li><span class="ipc-src text-amber-300/80">guard</span><span>rm -rf ~/old-builds</span><span class="ipc-t text-amber-300/80">Confirm?</span></li>
+                </ul>
+              </div>
+            </article>
+
+            <!-- Plugins -->
+            <article class="bento sm:col-span-2 lg:col-span-3">
+              <div class="bento-copy">
+                <h3>Custom plugin architecture</h3>
+                <p>Write a tool in Python or JavaScript, save the file, and say its name. Plugins hot-reload without a restart.</p>
+              </div>
+              <div class="bento-visual mt-auto px-5 pb-5 sm:px-6 sm:pb-6" aria-hidden="true">
+                <div class="plugin overflow-hidden rounded-xl border border-white/[0.06] bg-black/40">
+                  <div class="flex items-center justify-between border-b border-white/[0.06] px-3.5 py-2 font-mono text-[10.5px] text-slate-500"><span>plugins/standup.py</span><span class="reloaded"><span class="text-pulse">●</span> reloaded in 38 ms</span></div>
+<pre class="overflow-x-auto px-3.5 py-3 font-mono text-[11.5px] leading-[1.7] text-slate-400"><code><span class="tk-k">from</span> nexus <span class="tk-k">import</span> tool, say
+
+<span class="tk-d">@tool</span>(<span class="tk-s">"standup"</span>, triggers=[<span class="tk-s">"what did I do"</span>])
+<span class="tk-k">def</span> <span class="tk-f">standup</span>(ctx):
+    log = ctx.shell(<span class="tk-s">"git log --since=yesterday --oneline"</span>)
+    say(<span class="tk-s">f"{</span>len(log)<span class="tk-s">} commits since yesterday."</span>)</code></pre>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
       <!-- @activity -->
       <!-- @download -->
     </main>
