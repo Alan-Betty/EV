@@ -339,7 +339,7 @@ export function createFace(canvas, { onTick, boot = false } = {}) {
   }
 
   function draw() {
-    if (!W || !H) return;
+    if (W < 8 || H < 8) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
 
@@ -350,6 +350,7 @@ export function createFace(canvas, { onTick, boot = false } = {}) {
     }
     const inset = SCREEN_INSET * Math.min(rw, rh);
     const rect = { x: (W - rw) / 2 + inset, y: (H - rh) / 2 + inset, w: rw - 2 * inset, h: rh - 2 * inset };
+    if (rect.w < 8 || rect.h < 8) return; // hidden or collapsed: nothing sensible to draw
     const scale = rw / REFERENCE_W;
     const f = cur.face;
     const pulse = 0.5 + 0.5 * Math.sin(TAU * f.pulse_hz * t);

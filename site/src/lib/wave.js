@@ -47,6 +47,7 @@ export function createWave(canvas, { bars = 64 } = {}) {
     ctx.fillStyle = grad;
     const gap = 3 * dpr;
     const bw = (w - gap * (bars - 1)) / bars;
+    if (bw <= 0.5) return; // canvas collapsed (hidden iframe, zero-width layout)
     const mid = h / 2;
     for (let i = 0; i < bars; i++) {
       const bh = Math.max(2 * dpr, level[i] * h * 0.92);
