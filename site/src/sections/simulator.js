@@ -45,7 +45,7 @@ export function initSimulator() {
     const s = STATES[name];
     el.pill.dataset.state = name;
     el.pill.textContent = `[${s.pill}]`;
-    el.title.textContent = `Nexus Assistant v0.9.4 - ${s.title}`;
+    el.title.textContent = `E.V. - ${s.title}`;
     const at = ORDER.indexOf(name);
     el.steps.forEach((li, i) => {
       li.dataset.reached = String(i <= at);
@@ -121,7 +121,7 @@ export function initSimulator() {
       plan.textContent = script.plan;
 
       if (script.confirm) {
-        const ask = message('nexus');
+        const ask = message('E.V.');
         setState('executing');
         wave.setMode('speaking');
         await type(ask, script.confirm, 22, (c) => wave.kick(c));
@@ -152,14 +152,14 @@ export function initSimulator() {
       }
 
       wave.setMode('speaking');
-      el.title.textContent = 'Nexus Assistant v0.9.4 - Speaking...';
-      const reply = message('nexus');
+      el.title.textContent = 'E.V. - Speaking...';
+      const reply = message('E.V.');
       reply.classList.add('is-typing');
       await type(reply, script.reply, 17, (c) => wave.kick(c));
       reply.classList.remove('is-typing');
 
       setState('done');
-      el.status.textContent = `NEXUS: ${script.reply}`;
+      el.status.textContent = `E.V.: ${script.reply}`;
       idleTimer = setTimeout(() => id === runId && setState('idle'), 7000);
     } catch (err) {
       if (err !== ABORT) throw err;
