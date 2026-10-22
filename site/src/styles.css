@@ -1,0 +1,96 @@
+@import '@fontsource-variable/plus-jakarta-sans';
+@import '@fontsource-variable/jetbrains-mono';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --obsidian: #090a0f;
+    --slate-dark: #0f1117;
+    --surface: #161922;
+    --cyan: #00f2fe;
+    --violet: #7f00ff;
+    --emerald: #10b981;
+    --hairline: rgba(255, 255, 255, 0.08);
+    color-scheme: dark;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 5.5rem;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-ink-950 text-slate-300 font-sans antialiased;
+    font-feature-settings: 'ss01', 'cv11';
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: rgba(0, 242, 254, 0.25);
+    color: #fff;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--cyan);
+    outline-offset: 3px;
+    border-radius: 6px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  .shell { @apply mx-auto w-full max-w-[1240px] px-4 sm:px-6 lg:px-8; }
+
+  /* Brief's glass recipe, verbatim, plus the surface tint underneath. */
+  .glass {
+    @apply backdrop-blur-md bg-white/[0.03] border border-white/[0.08] transition-all duration-300;
+  }
+  .glass-hover { @apply hover:border-cyan-500/30; }
+  .surface { background: rgb(22 25 34 / 0.6); }
+
+  .mono-meta { @apply font-mono text-[11px] leading-none text-slate-500; }
+
+  .section-head { @apply max-w-2xl; }
+  .section-head h2 { @apply text-3xl sm:text-4xl font-semibold tracking-[-0.03em] text-white text-balance; }
+  .section-head p { @apply mt-4 text-[15px] leading-7 text-slate-400 text-pretty; }
+
+  .kbd {
+    @apply inline-flex h-5 min-w-5 items-center justify-center rounded border border-white/10 bg-white/[0.04] px-1 font-mono text-[10px] text-slate-400;
+  }
+
+  .btn {
+    @apply relative inline-flex items-center justify-center gap-2 rounded-xl px-5 h-12 text-[15px] font-medium
+      transition-[transform,box-shadow,border-color,background-color] duration-200 ease-out
+      active:scale-[0.98] select-none;
+  }
+  .btn-primary {
+    @apply btn text-ink-950;
+    background: linear-gradient(120deg, #00f2fe 0%, #4fc3ff 38%, #9d4dff 78%, #7f00ff 100%);
+    background-size: 160% 100%;
+    background-position: 0% 0%;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.18) inset, 0 10px 30px -10px rgba(0,242,254,0.55);
+  }
+  .btn-primary:hover {
+    background-position: 100% 0%;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.28) inset, 0 14px 40px -10px rgba(0,242,254,0.7), 0 6px 30px -8px rgba(127,0,255,0.65);
+  }
+  .btn-ghost { @apply btn glass glass-hover text-slate-200 hover:bg-white/[0.05]; }
+}
+
+@layer utilities {
+  .text-balance { text-wrap: balance; }
+  .text-pretty { text-wrap: pretty; }
+  .tabular { font-variant-numeric: tabular-nums; }
+}
