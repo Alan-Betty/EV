@@ -1,9 +1,8 @@
-import { CHANNELS, EXTRAS, PLATFORMS, REPO, artifactsFor, primaryFor } from '../data/release.js';
+import { CHANNELS, PLATFORMS, artifactsFor, primaryFor } from '../data/release.js';
 import { copy, flashCopied } from '../lib/clipboard.js';
 import { icon, platformIcon } from '../lib/icons.js';
 import { store } from '../lib/store.js';
 
-const fmt = new Intl.NumberFormat('en-US');
 const escape = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
 function copyButton(value, label) {
@@ -64,7 +63,7 @@ export function initDownloads() {
       .join('');
 
     const c = CHANNELS[channel];
-    note.innerHTML = `<span class="font-mono text-slate-200">${c.version}</span><span class="text-slate-600">${c.date}</span><span>${c.note}</span>`;
+    note.textContent = c.note;
 
     channelGroup.querySelectorAll('[data-channel]').forEach((b) => {
       const on = b.dataset.channel === channel;
@@ -76,11 +75,17 @@ export function initDownloads() {
     // How to check which commit you actually got, for this visitor's system.
     const platform = store.get('platform');
     const cmd = PLATFORMS[platform].verify(primaryFor(platform, channel));
-    verify.querySelector('[data-verify-os]').textContent = `${PLATFORMS[platform].label}. Optional extras: ${EXTRAS.split('&&')[0].replace('python -m pip install ', '').trim()}`;
     verify.querySelector('code').textContent = cmd;
     verify.querySelector('[data-copy]').dataset.copy = cmd;
   }
-  ['channel', 'platform', 'mobile'].forEach((k) => store.on(k, render));
+  // Channel switches cross-fade the cards where the browser supports it.
+  let ready = false;
+  const update = () => {
+    if (!ready || !document.startViewTransition || matchMedia('(prefers-reduced-motion: reduce)').matches) render();
+    else document.startViewTransition(render);
+  };
+  ['channel', 'platform', 'mobile', 'content'].forEach((k) => store.on(k, update));
+  ready = true;
 
   // Channel radiogroup: click, or arrow keys per the ARIA pattern.
   const ids = Object.keys(CHANNELS);
@@ -102,24 +107,4 @@ export function initDownloads() {
     if (!b) return;
     copy(b.dataset.copy, b.dataset.copyLabel?.replace(/^Copy /, 'Copied ') ?? 'Copied').then((ok) => ok && flashCopied(b));
   });
-
-  // Real numbers from the repo, counted up once on first view.
-  const counters = [
-    [root.querySelector('[data-counter="tests"]'), REPO.tests],
-    [root.querySelector('[data-counter="commits"]'), REPO.commitCount],
-  ];
-  counters.forEach(([el, n]) => (el.textContent = fmt.format(n)));
-  const io = new IntersectionObserver(([e]) => {
-    if (!e.isIntersecting || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    io.disconnect();
-    const start = performance.now();
-    const frame = (now) => {
-      const t = Math.min(1, (now - start) / 1100);
-      const ease = 1 - Math.pow(1 - t, 3);
-      counters.forEach(([el, n]) => (el.textContent = fmt.format(Math.round(n * ease))));
-      if (t < 1) requestAnimationFrame(frame);
-    };
-    requestAnimationFrame(frame);
-  });
-  io.observe(root.querySelector('#dl-stats'));
 }

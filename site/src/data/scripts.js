@@ -54,15 +54,3 @@ export const SCRIPTS = [
   },
 ];
 
-// Anything typed into the demo that is not one of the errands above.
-export function freeform(text) {
-  return {
-    id: 'freeform',
-    heard: text,
-    plan: 'select_tools: offer only the tools this sentence could need',
-    steps: [
-      { cmd: `select_tools ${JSON.stringify(text.slice(0, 48))}`, ms: 4, out: ['offered chat, open_app, web_search (always on) plus matches'] },
-    ],
-    reply: 'In the real thing I would act on that. This demo only replays the four errands above, so pick one of those to watch a whole run.',
-  };
-}

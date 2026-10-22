@@ -14,6 +14,8 @@
     --violet: #7f00ff;
     --emerald: #10b981;
     --hairline: rgba(255, 255, 255, 0.08);
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --spring: cubic-bezier(0.34, 1.3, 0.5, 1);
     color-scheme: dark;
   }
 
@@ -112,13 +114,14 @@
   a:hover .logo-aura { animation-duration: 1.4s; }
 
   .nav-link {
-    @apply relative rounded-lg px-3 py-2 text-slate-400 transition-colors duration-150 hover:text-white;
+    @apply relative z-10 rounded-lg px-3 py-2 text-slate-400 transition-colors duration-200 hover:text-white;
   }
   .nav-link[aria-current] { @apply text-white; }
-  .nav-link[aria-current]::after {
-    content: '';
-    @apply absolute inset-x-3 -bottom-[13px] hidden h-px md:block;
-    background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  .nav-indicator {
+    @apply pointer-events-none absolute left-0 top-0 h-full rounded-lg border border-white/[0.06] bg-white/[0.05];
+    width: 0;
+    opacity: 0;
+    transition: transform 0.45s var(--spring), width 0.45s var(--spring), opacity 0.25s ease;
   }
 
   #menu-toggle path { transition: transform 0.2s ease; transform-origin: center; }
@@ -155,6 +158,30 @@
     -webkit-text-fill-color: transparent;
   }
 
+  .hero-title.is-split { background: none; -webkit-text-fill-color: currentColor; }
+  .hero-title .word {
+    display: inline-block;
+    overflow: hidden;
+    vertical-align: top;
+    /* room for descenders inside the mask: g, y, p */
+    padding-bottom: 0.22em;
+    margin-bottom: -0.22em;
+  }
+  .hero-title .word > span {
+    display: inline-block;
+    /* background-clip:text only paints inside the box, so the box has to reach the descender */
+    padding-bottom: 0.2em;
+    margin-bottom: -0.2em;
+    background: linear-gradient(180deg, #ffffff 40%, #b9c2d6 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .tag-pill {
+    @apply glass glass-hover inline-flex max-w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-full px-3.5 py-1.5 font-mono text-[10.5px] tracking-[0.02em] text-slate-400 hover:text-slate-200 sm:text-[11px];
+  }
+
   .sha-tip {
     @apply surface pointer-events-none absolute left-0 top-[calc(100%+10px)] z-20 w-[min(340px,calc(100vw-2rem))] rounded-xl border border-white/10 p-3.5 opacity-0 shadow-lift backdrop-blur-xl;
     transform: translateY(-4px);
@@ -167,14 +194,17 @@
     transition-delay: 0.25s;
   }
 
-  .orb-frame .corner {
-    @apply absolute size-5 border-white/20;
+  .face-stage {
+    transform: perspective(1100px) rotateX(var(--tx, 0deg)) rotateY(var(--ty, 0deg));
+    transition: transform 0.6s var(--ease-out);
+    will-change: transform;
   }
 
   .mood-chip {
     @apply h-7 rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 font-mono text-[11px] text-slate-400
-      transition-[border-color,color,background-color,transform] duration-150 hover:border-cyan-500/30 hover:text-white active:scale-[0.96];
+      transition-[border-color,color,background-color,transform] duration-150 hover:border-cyan-500/30 hover:text-white active:scale-[0.94];
   }
+  .mood-chip[aria-pressed='true'] { @apply border-cyan-400/40 bg-cyan-400/10 text-white; }
 }
 
 /* Simulator ------------------------------------------------------------- */
@@ -198,14 +228,9 @@
   }
   .state-pill[data-state='done'] { @apply border-emerald-400/30 bg-emerald-400/10 text-emerald-300; }
 
-  #sim-steps li { @apply flex flex-col gap-1.5; }
-  .sim-step-bar { @apply h-[3px] rounded-full bg-white/[0.07] transition-colors duration-500; }
-  .sim-step-label { @apply font-mono text-[10px] text-slate-600 transition-colors duration-300; }
-  #sim-steps li[data-reached='true'] .sim-step-bar { background: linear-gradient(90deg, #00f2fe, #7f00ff); }
-  #sim-steps li[data-reached='true'] .sim-step-label { @apply text-slate-400; }
-  #sim-steps li[aria-current] .sim-step-label { @apply text-white; }
-
-  .sim-msg { @apply grid grid-cols-[3.25rem_minmax(0,1fr)] items-baseline gap-3; }
+  .sim-msg { @apply grid grid-cols-[3.25rem_minmax(0,1fr)] items-baseline gap-3; animation: line-in 0.35s var(--ease-out) both; }
+  .term-cmd, .term-out { animation: line-in 0.28s var(--ease-out) both; }
+  @keyframes line-in { from { opacity: 0; transform: translateY(6px); } }
   .sim-who { @apply text-right font-mono text-[10.5px] text-slate-600; }
   .sim-text { @apply text-[14.5px] leading-7 text-slate-300; }
   .sim-msg[data-who='E.V.'] .sim-who { @apply text-electric; }
@@ -231,13 +256,6 @@
   }
   .prompt-pill[aria-pressed='true'] { @apply border-cyan-400/40 bg-cyan-400/10 text-white; }
 
-  .sim-input {
-    @apply h-10 min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-black/30 px-3 font-mono text-[12.5px] text-slate-200
-      placeholder:text-slate-600 transition-colors focus:border-cyan-400/50 focus:outline-none;
-  }
-  .sim-run {
-    @apply inline-flex h-10 shrink-0 items-center gap-2 rounded-lg bg-white px-3.5 text-[13px] font-medium text-ink-950 transition-colors hover:bg-cyan-50 active:scale-[0.98];
-  }
 
   .term-cmd { @apply flex items-baseline gap-2 text-slate-200; }
   .term-cmd + .term-cmd, .term-out + .term-cmd { @apply mt-2.5; }
@@ -304,8 +322,6 @@
   }
   @keyframes scan { from { top: -4rem; } to { top: 100%; } }
 
-  .runtime { @apply flex gap-3; }
-  .gpu-fill { background: linear-gradient(90deg, #00f2fe, #7f00ff); }
 
   .timeline { @apply relative space-y-3 pl-4; }
   .timeline::before { content: ''; @apply absolute bottom-1.5 left-[3px] top-1.5 w-px bg-white/10; }
@@ -335,7 +351,7 @@
   .log-chip[aria-pressed='true'] [data-n] { @apply text-electric; }
 
   .log-search {
-    @apply flex h-8 w-full items-center gap-2 rounded-lg border border-white/[0.08] bg-black/30 px-2.5 transition-colors focus-within:border-cyan-400/50 sm:w-56;
+    @apply flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg border border-white/[0.08] bg-black/30 px-2.5 transition-colors focus-within:border-cyan-400/50 sm:w-48 sm:flex-none;
   }
   .log-search input {
     @apply min-w-0 flex-1 bg-transparent font-mono text-[12px] text-slate-200 placeholder:text-slate-600 focus:outline-none;
@@ -367,10 +383,11 @@
   .log-hash .check-icon, [data-copied] .copy-icon { display: none; }
   [data-copied] .check-icon { display: inline; @apply text-pulse; }
 
-  .log-live-dot { @apply size-1.5 rounded-full bg-slate-600; }
-  .log-live[data-live='true'] .log-live-dot { @apply bg-pulse animate-pulse; }
-  .log-live[data-live='true'] .log-live-off,
-  .log-live[data-live='false'] .log-live-on { display: none; }
+  .log-pause {
+    @apply inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-white/[0.08] px-2.5 font-mono text-[11px] text-slate-400 transition-colors hover:text-white;
+  }
+  .log-live-dot { @apply size-1.5 rounded-full bg-slate-600 transition-colors; }
+  .log-pause[data-live='true'] .log-live-dot { @apply bg-pulse animate-pulse; }
 
   .readiness-track { @apply relative h-2 overflow-hidden rounded-full bg-white/[0.06]; }
   .readiness-fill {
@@ -499,9 +516,7 @@
     @apply inline-flex h-8 items-center overflow-hidden rounded-full border border-white/10 bg-white/[0.03] font-mono text-[11px] text-slate-400
       transition-colors hover:border-white/20 hover:text-white;
   }
-  .footer-head { @apply text-[12.5px] font-medium text-slate-200; }
-  .footer-links { @apply mt-4 space-y-2.5 text-[13.5px]; }
-  .footer-links a { @apply text-slate-500 transition-colors hover:text-white; }
+  .footer-link { @apply text-slate-500 transition-colors hover:text-white; }
 
   .cmdk {
     @apply m-0 h-full max-h-none w-full max-w-none bg-transparent p-4 pt-[12vh] text-slate-200;
@@ -525,4 +540,57 @@
   }
   .cmdk-item[aria-selected='true'] { @apply bg-white/[0.06] text-white; box-shadow: inset 2px 0 0 #00f2fe; }
   .cmdk-hint { @apply max-w-[45%] truncate font-mono text-[11px] text-slate-500; }
+}
+
+/* Motion ---------------------------------------------------------------- */
+/* Everything starts hidden only under .js, so a page whose script failed still
+   shows its content. Reduced motion collapses all of it via the base layer. */
+@layer components {
+  .section { @apply relative py-24 sm:py-32; }
+
+  .js [data-enter] { opacity: 0; transform: translateY(14px); filter: blur(6px); }
+  .js.is-loaded [data-enter] {
+    opacity: 1;
+    transform: none;
+    filter: none;
+    transition: opacity 0.7s var(--ease-out), transform 0.9s var(--ease-out), filter 0.7s var(--ease-out);
+    transition-delay: calc(var(--i, 0) * 90ms + 100ms);
+  }
+
+  .js .hero-title .word > span { transform: translateY(105%); }
+  .js.is-loaded .hero-title .word > span {
+    transform: none;
+    transition: transform 0.9s var(--ease-out);
+    transition-delay: calc(var(--w) * 55ms + 160ms);
+  }
+
+  /* The face powers on: fades up from a slightly smaller screen. */
+  .js #face { opacity: 0; transform: scale(0.94); }
+  .js.is-loaded #face {
+    opacity: 1;
+    transform: none;
+    transition: opacity 1s ease 0.25s, transform 1.1s var(--ease-out) 0.25s;
+  }
+
+  .js [data-reveal] { opacity: 0; transform: translateY(20px); }
+  .js [data-reveal].is-in {
+    opacity: 1;
+    transform: none;
+    transition: opacity 0.8s var(--ease-out), transform 0.9s var(--ease-out);
+  }
+
+  .js [data-reveal-group]:not(.is-in) > * { opacity: 0; }
+  .js [data-reveal-group].is-in:not(.is-done) > * { animation: rise 0.8s var(--ease-out) both; }
+  [data-reveal-group] > :nth-child(2) { animation-delay: 70ms; }
+  [data-reveal-group] > :nth-child(3) { animation-delay: 140ms; }
+  [data-reveal-group] > :nth-child(4) { animation-delay: 210ms; }
+  [data-reveal-group] > :nth-child(5) { animation-delay: 280ms; }
+  [data-reveal-group] > :nth-child(6) { animation-delay: 350ms; }
+  @keyframes rise { from { opacity: 0; transform: translateY(22px) scale(0.985); } }
+
+  /* Tile visuals only start moving once they are on screen. */
+  .js [data-reveal-group]:not(.is-in) .bento-visual * { animation-play-state: paused; }
+
+  ::view-transition-old(root),
+  ::view-transition-new(root) { animation-duration: 0.28s; }
 }
