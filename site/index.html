@@ -65,7 +65,79 @@
     </header>
 
     <main id="main">
-      <!-- @hero -->
+      <section id="top" aria-labelledby="hero-title" class="relative isolate overflow-hidden pb-20 pt-28 sm:pt-36 lg:pb-28 lg:pt-40">
+        <div aria-hidden="true" class="hero-grid absolute inset-0 -z-10"></div>
+        <div aria-hidden="true" class="hero-glow absolute -z-10"></div>
+
+        <div class="shell grid items-center gap-14 lg:grid-cols-[minmax(0,1.08fr)_minmax(0,1fr)] lg:gap-6">
+          <div class="relative z-10">
+            <p class="glass inline-flex max-w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-full px-3.5 py-1.5 font-mono text-[10.5px] tracking-[0.02em] text-slate-400 sm:text-[11px]">
+              <span class="relative mr-0.5 flex size-1.5" aria-hidden="true">
+                <span class="absolute inset-0 rounded-full bg-pulse animate-ping"></span>
+                <span class="relative size-1.5 rounded-full bg-pulse"></span>
+              </span>
+              <span class="text-slate-200">[ SYS_VER: 0.9.4-BETA ]</span>
+              <span class="text-slate-600" aria-hidden="true">::</span>
+              <span>LOCAL HYPRLAND / TERMINAL INTEGRATION OPERATIONAL</span>
+            </p>
+
+            <h1 id="hero-title" class="hero-title mt-8 text-balance text-display-sm font-semibold sm:text-display-md xl:text-display-lg">
+              Intelligence at the Velocity of Thought.
+            </h1>
+
+            <p class="mt-6 max-w-[33rem] text-pretty text-[17px] leading-8 text-slate-400">
+              NEXUS hears you over its own voice, reads what is on your screen, and drives your windows, shell and files.
+              Talk over it, interrupt it, hand it an errand. It answers before you finish the sentence.
+            </p>
+
+            <div class="mt-10 flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div class="group/cta relative">
+                <a id="hero-download" href="#download" class="btn-primary h-[52px] w-full pl-4 pr-3 font-semibold sm:w-auto" aria-describedby="hero-sha">
+                  <span data-icon class="grid size-[18px] place-items-center"></span>
+                  <span data-label>Download</span>
+                  <span data-version class="ml-1 rounded-md bg-ink-950/15 px-1.5 py-0.5 font-mono text-[11px] font-medium"></span>
+                </a>
+                <div id="hero-sha" role="tooltip" class="sha-tip">
+                  <div class="flex items-center justify-between gap-4">
+                    <span class="flex items-center gap-1.5 text-[11px] font-medium text-slate-300">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" class="size-3.5 text-pulse" aria-hidden="true"><path d="M12 3.5 5 6v5.5c0 4.3 3 7.8 7 9 4-1.2 7-4.7 7-9V6z" /><path d="m9 12 2.2 2.2L15.5 10" /></svg>
+                      SHA-256
+                    </span>
+                    <span data-size class="mono-meta"></span>
+                  </div>
+                  <code data-sha class="mt-2 block break-all font-mono text-[11px] leading-[1.55] text-electric/90"></code>
+                  <span data-file class="mt-2 block truncate font-mono text-[10.5px] text-slate-500"></span>
+                </div>
+              </div>
+              <a href="#demo" class="btn-ghost h-[52px]">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-[18px] text-electric" aria-hidden="true"><path d="m5 7 5 5-5 5" /><path d="M12.5 17H19" /></svg>
+                Launch interactive terminal demo
+              </a>
+            </div>
+
+            <p id="hero-alt" class="mt-6 text-[13px] text-slate-500"></p>
+          </div>
+
+          <div class="orb-stage relative mx-auto aspect-square w-full max-w-[440px] sm:max-w-[540px] lg:-mr-8 lg:max-w-none">
+            <canvas id="orb" class="absolute inset-0 size-full" aria-hidden="true"></canvas>
+            <div aria-hidden="true" class="orb-frame pointer-events-none absolute inset-[9%]">
+              <span class="corner left-0 top-0 border-l border-t"></span>
+              <span class="corner right-0 top-0 border-r border-t"></span>
+              <span class="corner bottom-0 left-0 border-b border-l"></span>
+              <span class="corner bottom-0 right-0 border-b border-r"></span>
+              <dl class="absolute inset-x-3 top-3 flex justify-between font-mono text-[10.5px]">
+                <div class="flex gap-2"><dt class="text-slate-600">mic.in</dt><dd data-hud="level" class="tabular text-slate-300">-50.0 dB</dd></div>
+                <div class="flex gap-2"><dt class="text-slate-600">state</dt><dd data-hud="state" class="text-electric">idle</dd></div>
+              </dl>
+              <dl class="absolute inset-x-3 bottom-3 flex justify-between font-mono text-[10.5px]">
+                <div class="flex gap-2"><dt class="text-slate-600">ipc</dt><dd class="tabular text-slate-300">0.4 ms</dd></div>
+                <div class="flex gap-2"><dt class="text-slate-600">render</dt><dd data-hud="fps" class="tabular text-slate-300">60 fps</dd></div>
+              </dl>
+            </div>
+            <p class="sr-only">Animated particle sphere that reacts to how fast you move the pointer, standing in for the assistant's voice level.</p>
+          </div>
+        </div>
+      </section>
       <!-- @demo -->
       <!-- @features -->
       <!-- @activity -->

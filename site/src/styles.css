@@ -125,3 +125,49 @@
   #menu-toggle[aria-expanded='true'] .menu-top { transform: translateY(4px) rotate(45deg); }
   #menu-toggle[aria-expanded='true'] .menu-bottom { transform: translateY(-4px) rotate(-45deg); }
 }
+
+/* Hero ------------------------------------------------------------------ */
+@layer components {
+  .hero-grid {
+    background-image:
+      linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+    background-size: 56px 56px;
+    background-position: center top;
+    mask-image: radial-gradient(ellipse 70% 60% at 62% 38%, #000 10%, transparent 75%);
+  }
+  .hero-glow {
+    right: -10%;
+    top: -12%;
+    width: min(900px, 90vw);
+    aspect-ratio: 1;
+    background: radial-gradient(closest-side, rgba(0, 242, 254, 0.1), rgba(127, 0, 255, 0.08) 45%, transparent 72%);
+  }
+
+  .hero-title {
+    color: #fff;
+    background: linear-gradient(180deg, #ffffff 40%, #b9c2d6 100%);
+    /* background-clip:text clips at the box; leave room for descenders. */
+    padding-bottom: 0.1em;
+    margin-bottom: -0.1em;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .sha-tip {
+    @apply surface pointer-events-none absolute left-0 top-[calc(100%+10px)] z-20 w-[min(340px,calc(100vw-2rem))] rounded-xl border border-white/10 p-3.5 opacity-0 shadow-lift backdrop-blur-xl;
+    transform: translateY(-4px);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+  }
+  .group\/cta:hover .sha-tip,
+  .group\/cta:focus-within .sha-tip {
+    opacity: 1;
+    transform: none;
+    transition-delay: 0.25s;
+  }
+
+  .orb-frame .corner {
+    @apply absolute size-5 border-white/20;
+  }
+}
