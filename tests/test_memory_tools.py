@@ -22,16 +22,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 
 import config  # noqa: E402
-import ev.memory as memory_module  # noqa: E402
-from ev.memory import Memory, get_memory  # noqa: E402
-from ev.tts import clean_for_speech  # noqa: E402
+import leo.memory as memory_module  # noqa: E402
+from leo.memory import Memory, get_memory  # noqa: E402
+from leo.tts import clean_for_speech  # noqa: E402
 from tools import _ALLOWED_ARGS, REGISTRY, dispatch  # noqa: E402
-from tools.schemas import TOOL_NAMES, TOOL_SPECS  # noqa: E402
+from tools.schemas import TOOL_NAMES, TOOL_SPECS, base_specs  # noqa: E402
 
 
 @pytest.fixture
@@ -80,14 +80,14 @@ def test_the_schema_budget_still_leaves_room_for_two_turns():
     ceiling still matters because the full schema is what the tool-failure
     ladder puts back on - so a turn that stumbles costs this much, and two of
     those in a minute is the worst case that must still fit. It is also the
-    cost of running with `EV_TOOL_SUBSET_ENABLED=false`.
+    cost of running with `LEO_TOOL_SUBSET_ENABLED=false`.
     """
     schema = len(json.dumps([
         {"type": "function", "function": {
             "name": s["name"],
             "description": s["description"],
             "parameters": s["parameters"],
-        }} for s in TOOL_SPECS
+        }} for s in base_specs()
     ])) // 4
     prompt = len(config.SYSTEM_PROMPT) // 4
     assert 2 * (schema + prompt) < 8000, (
@@ -243,13 +243,13 @@ def test_forgetting_the_facts_leaves_the_to_do_list_alone(state):
 
 
 def test_the_to_do_list_is_not_the_backlog(state, tmp_path, monkeypatch):
-    """Clearing E.V.'s own backlog must not touch the user's list.
+    """Clearing Leo's own backlog must not touch the user's list.
 
     They are different stores in different files on purpose. Merged, "clear
     the backlog" would delete the dentist appointment.
     """
-    import ev.backlog as backlog_module
-    from ev.backlog import Backlog
+    import leo.backlog as backlog_module
+    from leo.backlog import Backlog
 
     monkeypatch.setattr(config, "BACKLOG_FILE", tmp_path / "backlog.json")
     monkeypatch.setattr(backlog_module, "_backlog", None)

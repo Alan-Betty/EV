@@ -30,11 +30,11 @@ from typing import Any
 
 from tools.desktop import keys
 
-log = logging.getLogger("ev.tools.desktop.uinput")
+log = logging.getLogger("leo.tools.desktop.uinput")
 
 DEVICE = "/dev/uinput"
 
-EV_SYN, EV_KEY, EV_REL, EV_ABS = 0x00, 0x01, 0x02, 0x03
+LEO_SYN, LEO_KEY, LEO_REL, LEO_ABS = 0x00, 0x01, 0x02, 0x03
 SYN_REPORT = 0
 REL_HWHEEL, REL_WHEEL = 0x06, 0x08
 ABS_X, ABS_Y = 0x00, 0x01
@@ -113,24 +113,24 @@ class UinputDevices:
                 return
 
             def pointer(fd: int) -> None:
-                self._ioctl(fd, UI_SET_EVBIT, EV_KEY)
+                self._ioctl(fd, UI_SET_EVBIT, LEO_KEY)
                 for button in (BTN_LEFT, BTN_RIGHT, BTN_MIDDLE):
                     self._ioctl(fd, UI_SET_KEYBIT, button)
-                self._ioctl(fd, UI_SET_EVBIT, EV_REL)
+                self._ioctl(fd, UI_SET_EVBIT, LEO_REL)
                 self._ioctl(fd, UI_SET_RELBIT, REL_WHEEL)
                 self._ioctl(fd, UI_SET_RELBIT, REL_HWHEEL)
-                self._ioctl(fd, UI_SET_EVBIT, EV_ABS)
+                self._ioctl(fd, UI_SET_EVBIT, LEO_ABS)
                 for axis in (ABS_X, ABS_Y):
                     self._ioctl(fd, UI_SET_ABSBIT, axis)
                     self._ioctl(fd, UI_ABS_SETUP, _abs_blob(axis, ABS_MAX))
 
             def keyboard(fd: int) -> None:
-                self._ioctl(fd, UI_SET_EVBIT, EV_KEY)
+                self._ioctl(fd, UI_SET_EVBIT, LEO_KEY)
                 for code in sorted(set(keys.KEY.values())):
                     self._ioctl(fd, UI_SET_KEYBIT, code)
 
-            self.pointer_fd = self._create("E.V. virtual tablet", 0x0001, pointer)
-            self.keyboard_fd = self._create("E.V. virtual keyboard", 0x0002, keyboard)
+            self.pointer_fd = self._create("LEO virtual tablet", 0x0001, pointer)
+            self.keyboard_fd = self._create("LEO virtual keyboard", 0x0002, keyboard)
             # The compositor needs a moment to notice a new device; events
             # sent before it has are dropped without a word.
             if self.settle_s:
@@ -155,7 +155,7 @@ class UinputDevices:
         if fd is None:
             raise UinputUnavailable("the uinput device is not open")
         payload = b"".join(_EVENT.pack(0, 0, kind, code, value) for kind, code, value in events)
-        payload += _EVENT.pack(0, 0, EV_SYN, SYN_REPORT, 0)
+        payload += _EVENT.pack(0, 0, LEO_SYN, SYN_REPORT, 0)
         self._write(fd, payload)
 
 
@@ -189,8 +189,8 @@ class UinputHands:
         width, height = self._size
         self.devices.emit(
             self.devices.pointer_fd,
-            (EV_ABS, ABS_X, self._abs(x, width)),
-            (EV_ABS, ABS_Y, self._abs(y, height)),
+            (LEO_ABS, ABS_X, self._abs(x, width)),
+            (LEO_ABS, ABS_Y, self._abs(y, height)),
         )
         self._pos = (float(x), float(y))
         if duration:
@@ -198,7 +198,7 @@ class UinputHands:
 
     def _button(self, name: str, pressed: bool) -> None:
         self.devices.ensure()
-        self.devices.emit(self.devices.pointer_fd, (EV_KEY, _BUTTONS.get(name, BTN_LEFT), int(pressed)))
+        self.devices.emit(self.devices.pointer_fd, (LEO_KEY, _BUTTONS.get(name, BTN_LEFT), int(pressed)))
 
     def click(self, x: Any = None, y: Any = None, clicks: int = 1, button: str = "left", **_: Any) -> None:
         if x is not None and y is not None:
@@ -225,11 +225,11 @@ class UinputHands:
             self.moveTo(x, y)
         self.devices.ensure()
         # REL_WHEEL: positive is up, the same as pyautogui.
-        self.devices.emit(self.devices.pointer_fd, (EV_REL, REL_WHEEL, int(clicks)))
+        self.devices.emit(self.devices.pointer_fd, (LEO_REL, REL_WHEEL, int(clicks)))
 
     def _key(self, code: int, pressed: bool) -> None:
         self.devices.ensure()
-        self.devices.emit(self.devices.keyboard_fd, (EV_KEY, code, int(pressed)))
+        self.devices.emit(self.devices.keyboard_fd, (LEO_KEY, code, int(pressed)))
 
     def _code(self, name: str) -> int:
         code = keys.evdev_key(name)

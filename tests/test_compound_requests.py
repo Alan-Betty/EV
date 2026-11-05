@@ -2,7 +2,7 @@
 
 "Open my mail and give me a summary of the important things" is two jobs in
 one sentence. The model answers it with a single tool call - it opens the
-mail, and the summary never becomes a call at all. E.V. said "Opening your
+mail, and the summary never becomes a call at all. Leo said "Opening your
 mail.", fell silent on the only part the user was waiting for, and went back
 to listening. From where they were standing that reads as being ignored.
 
@@ -25,14 +25,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 
 import config  # noqa: E402
-import ev_core  # noqa: E402
-from ev.brain import ToolCall  # noqa: E402
-from ev.session import split_followup  # noqa: E402
+import leo_core  # noqa: E402
+from leo.brain import ToolCall  # noqa: E402
+from leo.session import split_followup  # noqa: E402
 from tools.base import ToolResult  # noqa: E402
 
 
@@ -107,7 +107,7 @@ class FakeSpeaker:
 
 
 class SilentUI:
-    """Every `ev.ui` call is a `-> None` draw, so a no-op stands in for all.
+    """Every `leo.ui` call is a `-> None` draw, so a no-op stands in for all.
 
     `status` is the one exception: it is used as a context manager, so it
     needs to be one.
@@ -154,8 +154,8 @@ class ScriptedBrain:
 
 
 def _assistant(monkeypatch, brain: ScriptedBrain, results: list[ToolResult]):
-    """An `EV` with no network, no microphone and no audio device."""
-    assistant = ev_core.EV.__new__(ev_core.EV)
+    """An `Leo` with no network, no microphone and no audio device."""
+    assistant = leo_core.Leo.__new__(leo_core.Leo)
     assistant.ui = SilentUI()
     assistant.speaker = FakeSpeaker()
     assistant.brain = brain
@@ -165,7 +165,7 @@ def _assistant(monkeypatch, brain: ScriptedBrain, results: list[ToolResult]):
     assistant._queued_utterance = None
     assistant._cancel_refused = None
     assistant._pending_followup = ""
-    assistant.session = ev_core.Session()
+    assistant.session = leo_core.Session()
     # `say` touches the persisted session clock. A stub keeps the suite off
     # the developer's real state file.
     assistant.memory = _NullMemory()

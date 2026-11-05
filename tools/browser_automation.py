@@ -10,7 +10,7 @@ operations and zero screenshots.
 Three constraints shape this module.
 
 **Playwright is imported lazily and torn down eagerly.** It is by far the
-heaviest thing E.V. can reach for, so the browser is launched when a task
+heaviest thing Leo can reach for, so the browser is launched when a task
 starts and closed in a `finally` when it ends. Between tasks the resident
 cost is one unused import path. A session that never runs a web task never
 loads it at all, and a machine without it gets a spoken install hint instead
@@ -41,7 +41,7 @@ import config
 from tools.base import CancelToken, ToolResult, was_cancelled
 from tools.safety import classify_gui
 
-log = logging.getLogger("ev.tools.browser_automation")
+log = logging.getLogger("leo.tools.browser_automation")
 
 
 @dataclass
@@ -305,7 +305,7 @@ def _open_browser(playwright: Any, headless: bool) -> tuple[Any, Any]:
     logged in to; `launch_persistent_context` keeps a profile directory, so
     they sign in once, in a window they can watch, and it holds after that.
 
-    The profile is E.V.'s own rather than the user's real Chrome one. Chrome
+    The profile is Leo's own rather than the user's real Chrome one. Chrome
     locks its profile while it is running, so borrowing it would fail
     whenever the user had a browser open - which is always - and automating
     a live signed-in profile is a much bigger thing to hand a voice command
@@ -341,7 +341,7 @@ def _open_browser(playwright: Any, headless: bool) -> tuple[Any, Any]:
 def _announce(label: str, cancel: CancelToken, headless: bool) -> Any:
     """The overlay for a visible run; nothing at all for a headless one.
 
-    A browser clicking and typing on its own is E.V. in control of the
+    A browser clicking and typing on its own is Leo in control of the
     screen as much as a moving pointer is, so it gets the same frame and the
     same kill switch. A headless run has nothing on screen to explain.
     """
@@ -476,7 +476,7 @@ def browser_task(
     if not config.BROWSER_AUTOMATION_ENABLED:
         return ToolResult.failure(
             "Browser automation is switched off.",
-            "EV_BROWSER_AUTOMATION_ENABLED is false; no browser was launched.",
+            "LEO_BROWSER_AUTOMATION_ENABLED is false; no browser was launched.",
         )
 
     want_headless = bool(headless) or config.BROWSER_HEADLESS

@@ -1,6 +1,6 @@
 """`backlog` - read back, tick off, or retry what was left unfinished.
 
-The store itself lives in [ev/backlog.py](../ev/backlog.py); this is only the
+The store itself lives in [leo/backlog.py](../leo/backlog.py); this is only the
 face it shows the model. Two rules keep it honest:
 
 * **Speech stays short, detail carries the list.** "Three things open" is what
@@ -18,10 +18,10 @@ from __future__ import annotations
 import logging
 
 import config
-from ev.backlog import get_backlog
+from leo.backlog import get_backlog
 from tools.base import ToolResult
 
-log = logging.getLogger("ev.tools.backlog")
+log = logging.getLogger("leo.tools.backlog")
 
 
 def _summarise(store) -> ToolResult:
@@ -71,7 +71,7 @@ def backlog(
     if not store.enabled:
         return ToolResult.failure(
             "My backlog's switched off.",
-            "Backlog disabled; set EV_BACKLOG_ENABLED=true to use it.",
+            "Backlog disabled; set LEO_BACKLOG_ENABLED=true to use it.",
         )
 
     if verb == "list":

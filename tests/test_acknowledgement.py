@@ -1,4 +1,4 @@
-"""The "stand by" acknowledgement, and the state E.V. carries across restarts.
+"""The "stand by" acknowledgement, and the state Leo carries across restarts.
 
 Two properties are worth pinning down here, because breaking either one is
 exactly the sort of regression that only shows up on a slow machine:
@@ -9,7 +9,7 @@ exactly the sort of regression that only shows up on a slow machine:
   an implementation that awaited the speech first and made every command a
   second slower.
 * **It is retired before the real answer.** A cancelled acknowledgement must
-  not leave the speaker lock held, or E.V. goes silent for the rest of the run.
+  not leave the speaker lock held, or Leo goes silent for the rest of the run.
 
 Everything runs offline against a fake speaker; no audio device is opened.
 """
@@ -25,14 +25,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 
 import config  # noqa: E402
-import ev_core  # noqa: E402
-from ev.brain import ToolCall  # noqa: E402
-from ev.tts import clean_for_speech  # noqa: E402
+import leo_core  # noqa: E402
+from leo.brain import ToolCall  # noqa: E402
+from leo.tts import clean_for_speech  # noqa: E402
 
 
 class FakeSpeaker:
@@ -63,7 +63,7 @@ class FakeSpeaker:
 
 
 class SilentUI:
-    """Every `ev.ui` call is a `-> None` draw, so a no-op stands in for all."""
+    """Every `leo.ui` call is a `-> None` draw, so a no-op stands in for all."""
 
     def __init__(self) -> None:
         self.notes: list[str] = []
@@ -92,9 +92,9 @@ class FakeTranscriber:
         self.recent = text
 
 
-def _assistant(monkeypatch, speaker: FakeSpeaker) -> ev_core.EV:
-    """An `EV` with no network, no microphone and no audio device."""
-    assistant = ev_core.EV.__new__(ev_core.EV)
+def _assistant(monkeypatch, speaker: FakeSpeaker) -> leo_core.Leo:
+    """An `Leo` with no network, no microphone and no audio device."""
+    assistant = leo_core.Leo.__new__(leo_core.Leo)
     assistant.ui = SilentUI()
     assistant.speaker = speaker
     assistant.transcriber = FakeTranscriber()
@@ -166,7 +166,7 @@ def test_a_slow_tool_is_acknowledged_out_loud(monkeypatch):
 
 
 def test_an_acknowledgement_already_speaking_is_allowed_to_finish(monkeypatch):
-    """Cutting a `to_thread` playback short would put E.V. on top of itself."""
+    """Cutting a `to_thread` playback short would put Leo on top of itself."""
 
     async def scenario():
         speaker = FakeSpeaker(duration=0.05)
@@ -229,7 +229,7 @@ def state(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "BACKLOG_FILE", tmp_path / "backlog.json")
     monkeypatch.setattr(config, "BACKLOG_ENABLED", True)
     monkeypatch.setattr(config, "BACKLOG_AUTOLOG", True)
-    from ev.backlog import Backlog
+    from leo.backlog import Backlog
 
     return Backlog()
 
@@ -285,9 +285,9 @@ def test_the_boot_report_is_assembled_once_and_reaches_the_model(monkeypatch, tm
     monkeypatch.setattr(config, "MEMORY_ENABLED", True)
     monkeypatch.setattr(config, "BACKLOG_ENABLED", True)
 
-    from ev.backlog import Backlog
-    from ev.brain import Brain
-    from ev.memory import Memory
+    from leo.backlog import Backlog
+    from leo.brain import Brain
+    from leo.memory import Memory
 
     assistant = _assistant(monkeypatch, FakeSpeaker())
     assistant.memory = Memory()
@@ -307,7 +307,7 @@ def test_the_boot_report_is_assembled_once_and_reaches_the_model(monkeypatch, tm
 
 
 def _stateful(monkeypatch, tmp_path, speaker, offline_seconds=0.0):
-    """An `EV` wired to temporary memory and backlog files."""
+    """An `Leo` wired to temporary memory and backlog files."""
     import json
 
     monkeypatch.setattr(config, "MEMORY_FILE", tmp_path / "memory.json")
@@ -315,10 +315,10 @@ def _stateful(monkeypatch, tmp_path, speaker, offline_seconds=0.0):
     monkeypatch.setattr(config, "MEMORY_ENABLED", True)
     monkeypatch.setattr(config, "BACKLOG_ENABLED", True)
 
-    from ev.backlog import Backlog
-    from ev.brain import Brain
-    from ev.memory import Memory
-    from ev.session import Session
+    from leo.backlog import Backlog
+    from leo.brain import Brain
+    from leo.memory import Memory
+    from leo.session import Session
 
     memory = Memory()
     memory.begin_session()
@@ -353,7 +353,7 @@ def test_the_boot_report_says_how_long_we_were_down_and_what_is_open(
         "2 hours and 15 minutes."
     )
     assert "2 backlog items remaining from your previous session" in speaker.said[1]
-    # Both went to the speaker through `EV.say`, so both are label-free.
+    # Both went to the speaker through `Leo.say`, so both are label-free.
     for spoken in speaker.said:
         assert clean_for_speech(spoken) == spoken
 
@@ -379,7 +379,7 @@ def test_a_quiet_restart_still_greets_but_says_nothing_else(monkeypatch, tmp_pat
 
 
 def test_the_greeting_can_be_switched_off(monkeypatch, tmp_path):
-    """`EV_GREET_ON_START=false` restores the old quiet-restart behaviour."""
+    """`LEO_GREET_ON_START=false` restores the old quiet-restart behaviour."""
     monkeypatch.setattr(config, "GREET_ON_START", False)
     speaker = FakeSpeaker()
     assistant = _stateful(monkeypatch, tmp_path, speaker)

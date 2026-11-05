@@ -23,6 +23,6 @@ for (const init of sections) {
     init();
   } catch (err) {
     // One broken widget must never take the page down with it.
-    console.error('[ev] section failed to init', err);
+    console.error('[leo] section failed to init', err);
   }
 }

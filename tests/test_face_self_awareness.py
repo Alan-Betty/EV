@@ -1,4 +1,4 @@
-"""E.V. knows it has a face, and uses it.
+"""Leo knows it has a face, and uses it.
 
 Before this, the face only ever showed the loop's own states - thinking,
 speaking, a smile on success - and the model had no idea it existed. Asked
@@ -6,11 +6,11 @@ for a demo it had nothing to run, and asked to look angry it could only say
 so. Four layers, tested alone:
 
 * the schema - `chat` carries a `mood`, and every mood it offers is real
-* `ev.face.expression` - an emote outlasts the loop's states, and the demo
+* `leo.face.expression` - an emote outlasts the loop's states, and the demo
   reel plays every mood once and stops when the user talks
-* `ev_core` - a reply's mood reaches the face after "speaking", replaces the
+* `leo_core` - a reply's mood reaches the face after "speaking", replaces the
   stock success smile, and the model is told when there is no face to show
-* `ev.face.window` - a demo keeps the face up and captions each mood
+* `leo.face.window` - a demo keeps the face up and captions each mood
 """
 
 from __future__ import annotations
@@ -25,17 +25,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 
 import config  # noqa: E402
-import ev_core  # noqa: E402
-from ev.brain import ToolCall  # noqa: E402
-from ev.face import link  # noqa: E402
-from ev.face.expression import REEL_SKIP, Expression, apply_command, load_library  # noqa: E402
-from ev.face.link import FaceLink  # noqa: E402
-from ev.session import Session  # noqa: E402
+import leo_core  # noqa: E402
+from leo.brain import ToolCall  # noqa: E402
+from leo.face import link  # noqa: E402
+from leo.face.expression import REEL_SKIP, Expression, apply_command, load_library  # noqa: E402
+from leo.face.link import FaceLink  # noqa: E402
+from leo.session import Session  # noqa: E402
 from tools.base import ToolResult  # noqa: E402
 from tools.schemas import FACE_MOODS, TOOL_SPECS, to_gemini_tools, to_openai_tools  # noqa: E402
 
@@ -105,7 +105,7 @@ def test_an_emote_outlasts_the_loops_states_then_hands_back():
 
 
 def test_a_base_mood_can_be_worn_on_demand_without_sticking():
-    """"Look sleepy" must not leave E.V. asleep."""
+    """"Look sleepy" must not leave Leo asleep."""
     face = Expression(mood="idle")
     assert face.emote("sleepy", 1.0)
     face.tick(0.05)
@@ -244,8 +244,8 @@ class FakeBrain:
         self.remembered.append(speech)
 
 
-def _assistant() -> ev_core.EV:
-    assistant = ev_core.EV.__new__(ev_core.EV)
+def _assistant() -> leo_core.Leo:
+    assistant = leo_core.Leo.__new__(leo_core.Leo)
     assistant.ui = QuietUI()
     assistant.face = RecordingFace()
     assistant.speaker = FakeSpeaker()
@@ -338,7 +338,7 @@ def _pump(ms: int) -> None:
 
 
 def test_a_demo_keeps_the_face_up_and_captions_it(qt_app):
-    from ev.face.window import FaceWindow, route_line
+    from leo.face.window import FaceWindow, route_line
 
     expression = Expression(load_library())
     window = FaceWindow(expression, presence="summoned", busy_poll_s=0)

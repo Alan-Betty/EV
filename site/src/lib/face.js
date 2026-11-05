@@ -1,5 +1,5 @@
-// E.V.'s face on a canvas: a port of ev/face/render.py and a trimmed-down
-// ev/face/expression.py. Moods are read from the real ev/face/expressions.json,
+// L.E.O.'s face on a canvas: a port of leo/face/render.py and a trimmed-down
+// leo/face/expression.py. Moods are read from the real leo/face/expressions.json,
 // so a mood changed there changes here on the next build.
 //
 // As in render.py, lids are subtracted rather than drawn: an eye is a rounded
@@ -7,7 +7,7 @@
 // smile is an ellipse cut out of the bottom. Canvas has no path subtraction,
 // so each cut is a clip: everything below the lid line, everything outside
 // the smile ellipse (an even-odd clip against a large rectangle).
-import EXPR from '../../../ev/face/expressions.json';
+import EXPR from '../../../leo/face/expressions.json';
 
 // Geometry constants, copied from render.py.
 const SCREEN_INSET = 0.11;
@@ -77,7 +77,7 @@ export function createFace(canvas, { onTick, boot = false } = {}) {
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
   // Booting starts in standby with the eyes shut and wakes up a moment later,
-  // the same sleepy -> idle hand-over E.V. does when it hears its name.
+  // the same sleepy -> idle hand-over L.E.O. does when it hears its name.
   let base = resolve(boot ? 'sleepy' : 'idle');
   let target = base;
   let emoteUntil = 0;

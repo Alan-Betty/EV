@@ -14,16 +14,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 
 import config  # noqa: E402
-import ev.memory as memory_module  # noqa: E402
-import ev.semantic_memory as sm  # noqa: E402
-from ev.brain import Brain  # noqa: E402
-from ev.semantic_memory import SemanticMemory, tokens, validate_row  # noqa: E402
-from ev.tts import clean_for_speech  # noqa: E402
+import leo.memory as memory_module  # noqa: E402
+import leo.semantic_memory as sm  # noqa: E402
+from leo.brain import Brain  # noqa: E402
+from leo.semantic_memory import SemanticMemory, tokens, validate_row  # noqa: E402
+from leo.tts import clean_for_speech  # noqa: E402
 from tools import CONFIRMATION_ONLY_ARGS, _ALLOWED_ARGS, dispatch, from_model  # noqa: E402
 from tools.safety import is_high_risk  # noqa: E402
 

@@ -17,14 +17,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import httpx  # noqa: E402
 import pytest  # noqa: E402
 
 import config  # noqa: E402
-from ev.brain import Brain, BrainError  # noqa: E402
-from ev.tts import clean_for_speech  # noqa: E402
+from leo.brain import Brain, BrainError  # noqa: E402
+from leo.tts import clean_for_speech  # noqa: E402
 
 
 def _frame(**delta) -> str:

@@ -1,9 +1,9 @@
-// Everything the page says about getting E.V. Repo facts come from repo.json
+// Everything the page says about getting L.E.O. Repo facts come from repo.json
 // (regenerated from git before every dev and build run); the choices a human
 // makes - which commit Stable points at, its label, and what each platform's
 // download is - come from content/site.json, usually through the site manager.
 //
-// Out of the box E.V. ships as source, so a download is a GitHub archive
+// Out of the box L.E.O. ships as source, so a download is a GitHub archive
 // pinned to a commit and the thing to verify is that commit id. Upload a real
 // file in the manager and that platform switches to the file and its SHA-256.
 // content.js owns the JSON import; it alone accepts hot updates, so an edit
@@ -15,7 +15,7 @@ import REPO from './repo.json';
 export { REPO };
 
 export const PRODUCT = {
-  name: 'E.V.',
+  name: 'L.E.O.',
   repo: REPO.repo,
   docs: `${REPO.repo}/blob/main/OVERVIEW.md`,
   quickstart: `${REPO.repo}/blob/main/quickstart.md`,
@@ -48,7 +48,7 @@ function rebuild(content) {
     tag: label || (n ? `iter ${n}` : short(commit.hash)),
     ref: commit.hash,
     date: commit.date,
-    note: `${label || (n ? `Iteration ${n}` : `Commit ${short(commit.hash)}`)}, ${commit.date}. What the devlog describes.`,
+    note: `${label || (n ? `Iteration ${n}` : `Commit ${short(commit.hash)}`)}, ${commit.date}.`,
   };
   CHANNELS.nightly = {
     label: 'Nightly',
@@ -74,10 +74,10 @@ store.on('content', (content) => content && rebuild(content));
 export const PLATFORMS = {
   linux: {
     label: 'Linux',
-    long: 'Ubuntu first-class, other distros work',
-    requires: 'Python 3.11+. On GNOME Wayland, install the window extension and log in again.',
+    long: 'Ubuntu and Hyprland, other distros work',
+    requires: 'Python 3.11+. The setup line is for Ubuntu; elsewhere, install PortAudio with your package manager. On GNOME Wayland, install the window extension and log in again.',
     setup: 'sudo apt install libportaudio2 && python3 -m pip install -r requirements.txt && cp .env.example .env',
-    extra: { name: 'Wayland window support', detail: 'GNOME Shell extension for exact windows and focus', command: 'python3 ev_core.py --install-gnome-extension' },
+    extra: { name: 'Wayland window support', detail: 'GNOME Shell extension for exact windows and focus', command: 'python3 leo_core.py --install-gnome-extension' },
     verifyFile: (a) => `echo "${a.sha256}  ${a.file}" | sha256sum -c`,
   },
   macos: {
@@ -103,7 +103,7 @@ export function verifyCommand(platform, build) {
   if (build.sha256) return PLATFORMS[platform].verifyFile(build);
   return platform === 'windows'
     ? 'git rev-parse HEAD   # in a clone; or open the zip and read its comment'
-    : 'unzip -z EV-*.zip | tail -1   # prints the commit the archive was made from';
+    : 'unzip -z Leo-*.zip | tail -1   # prints the commit the archive was made from';
 }
 
 // The Stable download for one platform, from the manager's settings.
@@ -130,9 +130,9 @@ export function artifactsFor(platform, channel) {
   const rows = [];
 
   if (channel === 'canary') {
-    rows.push({ id: 'clone', name: 'Clone', detail: 'Full history, ready for branches', command: `git clone ${REPO.repo}.git && cd EV` });
+    rows.push({ id: 'clone', name: 'Clone', detail: 'Full history, ready for branches', command: `git clone ${REPO.repo}.git && cd Leo` });
     rows.push({ id: 'tests', name: 'Run the tests', detail: `${REPO.tests} tests, offline, no API key`, command: 'python -m pip install pytest && python -m pytest tests/ -q' });
-    rows.push({ id: 'live', name: 'Live browser suite', detail: 'Real Chromium against real sites', command: 'EV_LIVE_BROWSER=1 python -m pytest tests/test_web_agent_live.py -q' });
+    rows.push({ id: 'live', name: 'Live browser suite', detail: 'Real Chromium against real sites', command: 'LEO_LIVE_BROWSER=1 python -m pytest tests/test_web_agent_live.py -q' });
     return rows;
   }
 
@@ -144,7 +144,7 @@ export function artifactsFor(platform, channel) {
       detail: `${c.ref === 'main' ? 'main' : c.version}, zip from GitHub`,
       primary: true,
       url: c.ref === 'main' ? `${REPO.repo}/archive/refs/heads/main.zip` : `${REPO.repo}/archive/${c.ref}.zip`,
-      file: `EV-${c.ref === 'main' ? 'main' : short(c.ref)}.zip`,
+      file: `Leo-${c.ref === 'main' ? 'main' : short(c.ref)}.zip`,
       commit,
     },
   );

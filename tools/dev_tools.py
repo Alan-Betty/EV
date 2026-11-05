@@ -28,13 +28,13 @@ from tools.base import (
 )
 from tools.window import focus_by_title
 
-log = logging.getLogger("ev.tools.dev")
+log = logging.getLogger("leo.tools.dev")
 
 _VSCODE_WINDOW_HINT = "Visual Studio Code"
 
 
 def _type_into_focused(lines: list[str], settle: float = 0.4) -> bool:
-    """Type lines plus Enter into the focused window, through E.V.'s hands."""
+    """Type lines plus Enter into the focused window, through Leo's hands."""
     from tools.desktop.hands import hands
 
     gui = hands()
@@ -125,7 +125,7 @@ def dev_workflow(
         return ToolResult.failure(
             "VS Code isn't on the path.",
             f"'{config.VSCODE_CLI}' could not be resolved. Install the VS Code "
-            "shell command or set EV_VSCODE_CLI.",
+            "shell command or set LEO_VSCODE_CLI.",
         )
 
     if not start_claude:

@@ -15,14 +15,13 @@ const TEXT = [
   {
     group: 'Demo',
     preview: '#demo',
-    fields: [['demo.title', 'Title'], ['demo.body', 'Intro', true]],
+    fields: [['demo.title', 'Title']],
   },
   {
     group: 'Features',
     preview: '#features',
     fields: [
       ['features.title', 'Title'],
-      ['features.body', 'Intro', true],
       ...['voice', 'apps', 'light', 'memory', 'guard', 'web'].flatMap((k) => [
         [`features.${k}.title`, `${k[0].toUpperCase()}${k.slice(1)} tile, title`],
         [`features.${k}.body`, `${k[0].toUpperCase()}${k.slice(1)} tile, text`, true],
@@ -32,7 +31,7 @@ const TEXT = [
   {
     group: 'System logs',
     preview: '#activity',
-    fields: [['activity.title', 'Title'], ['activity.body', 'Intro', true]],
+    fields: [['activity.title', 'Title']],
   },
   {
     group: 'Download',
@@ -54,7 +53,7 @@ function set(obj, path, value) {
 }
 
 async function api(path, options = {}) {
-  const res = await fetch(`/__admin${path}`, { ...options, headers: { 'x-ev-admin': '1', ...options.headers } });
+  const res = await fetch(`/__admin${path}`, { ...options, headers: { 'x-leo-admin': '1', ...options.headers } });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || `request failed (${res.status})`);
   return body;
@@ -119,7 +118,6 @@ async function refreshGit() {
   if (state.uncommitted == null) return (el.textContent = '');
   el.dataset.clean = String(state.uncommitted === 0);
   el.textContent = state.uncommitted === 0 ? 'Committed' : `${state.uncommitted} file${state.uncommitted === 1 ? '' : 's'} to commit`;
-  el.title = 'Changes live in site/content and site/public/downloads. Commit them with git when you are happy.';
 }
 
 window.addEventListener('beforeunload', (e) => {
@@ -144,7 +142,7 @@ function field(path, label, { multiline = false, placeholder = '', hint = '', ty
 
 function card(id, title, intro, preview, body, aside = '') {
   return `<section class="card" id="card-${id}" data-preview="${preview}">
-    <header class="card-head"><div><h2>${title}</h2><p>${intro}</p></div>${aside}</header>
+    <header class="card-head"><div><h2>${title}</h2>${intro ? `<p>${intro}</p>` : ''}</div>${aside}</header>
     <div class="card-body">${body}</div>
   </section>`;
 }
@@ -171,12 +169,11 @@ function releaseCard() {
   return card(
     'release',
     'Release',
-    'Read from git automatically. Only change these to hold a release back or rename it.',
+    '',
     '#download',
     `<dl class="facts">${facts}</dl>
-     <label class="field"><span class="field-label">Stable points at</span><select data-path="release.pin">${options}</select>
-       <small>Automatic follows the newest commit with "Iteration" in its message.</small></label>
-     ${field('release.label', 'Version label', { placeholder: `iteration ${it.number} (automatic)`, hint: 'Shown on the download buttons. Leave empty for the automatic one.' })}`,
+     <label class="field"><span class="field-label">Stable points at</span><select data-path="release.pin">${options}</select></label>
+     ${field('release.label', 'Version label', { placeholder: `iteration ${it.number} (automatic)` })}`,
   );
 }
 
@@ -184,11 +181,11 @@ function downloadBody(platform) {
   const d = state.content.release.downloads[platform];
   const base = `release.downloads.${platform}`;
   if (d.source === 'github') {
-    return `<p class="hint">Zip of the pinned commit, straight from GitHub. Nothing to upload.</p>`;
+    return '';
   }
   if (d.source === 'url') {
     return `${field(`${base}.url`, 'Link', { type: 'url', placeholder: 'https://github.com/Alan-Betty/EV/releases/download/…' })}
-      ${field(`${base}.sha256`, 'SHA-256 (optional)', { placeholder: '64 hex characters', hint: 'Without it, visitors are told to check the commit instead.' })}
+      ${field(`${base}.sha256`, 'SHA-256 (optional)', { placeholder: '64 hex characters' })}
       ${field(`${base}.title`, 'Button label', { placeholder: 'Download' })}`;
   }
   if (uploading[platform]) {
@@ -210,7 +207,6 @@ function downloadBody(platform) {
   return `<label class="dropzone" data-drop="${platform}">
       <input type="file" class="sr-only" data-upload="${platform}" />
       <span class="text-[13.5px] text-slate-200">Drop a file here, or click to choose one</span>
-      <span class="text-[12px] text-slate-500">It is copied into public/downloads and hashed automatically.</span>
     </label>`;
 }
 
@@ -230,21 +226,17 @@ function downloadsCard() {
       </div>`;
     })
     .join('');
-  return card('downloads', 'Downloads', 'What the Stable buttons hand out on each system. Nightly and Canary always use GitHub.', '#download', rows);
+  return card('downloads', 'Stable downloads', '', '#download', rows);
 }
 
 function heroCard() {
   return card(
     'hero',
-    'Headline',
-    'The first thing anyone reads.',
+    'Hero',
+    '',
     '#top',
     `${field('hero.headline', 'Headline')}
-     ${field('hero.sub', 'Intro', { multiline: true })}
-     <div class="grid gap-4 sm:grid-cols-[1fr_9rem]">
-       ${field('hero.status', 'Status line', { hint: 'Next to the iteration badge above the headline.' })}
-       ${field('hero.statusLink', 'Links to', { placeholder: '#features' })}
-     </div>`,
+     ${field('hero.sub', 'Intro', { multiline: true })}`,
   );
 }
 
@@ -277,7 +269,7 @@ function roadmapCard() {
   return card(
     'roadmap',
     'Road to 1.0',
-    'The checklist beside the system logs. The percentage works itself out.',
+    '',
     '#activity',
     `<ol class="roadmap" id="roadmap">${roadmapRows()}</ol>
      <button type="button" class="admin-btn mt-3" data-action="road-add">Add a milestone</button>`,
@@ -328,7 +320,7 @@ function upload(platform, file) {
   // XHR rather than fetch: fetch cannot report upload progress.
   const xhr = new XMLHttpRequest();
   xhr.open('PUT', `/__admin/upload?name=${encodeURIComponent(file.name)}`);
-  xhr.setRequestHeader('x-ev-admin', '1');
+  xhr.setRequestHeader('x-leo-admin', '1');
   xhr.upload.onprogress = (e) => {
     if (!e.lengthComputable) return;
     const pct = Math.max(1, Math.round((e.loaded / e.total) * 100));

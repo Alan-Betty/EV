@@ -20,10 +20,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Keep the tests deterministic regardless of the developer's own .env.
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import config  # noqa: E402
-from ev.tts import clean_for_speech  # noqa: E402
+from leo.tts import clean_for_speech  # noqa: E402
 from tools import CANCELLABLE, REGISTRY, dispatch  # noqa: E402
 from tools import _ALLOWED_ARGS  # noqa: E402
 from tools.base import CancelToken  # noqa: E402
@@ -42,6 +42,7 @@ from tools.computer_use import (  # noqa: E402
 )
 from tools.safety import Risk, classify_gui  # noqa: E402
 from tools.schemas import TOOL_SPECS, to_gemini_tools, to_openai_tools  # noqa: E402
+from tools.schemas import TOOL_NAMES as ALL_TOOL_NAMES  # noqa: E402
 
 COMPUTER_TOOLS = (
     "take_screenshot",
@@ -169,7 +170,7 @@ def test_computer_tools_are_registered_and_described_once():
 def test_computer_schemas_translate_to_both_providers():
     openai_names = {tool["function"]["name"] for tool in to_openai_tools()}
     gemini_names = {
-        decl["name"] for decl in to_gemini_tools()[0]["functionDeclarations"]
+        decl["name"] for decl in to_gemini_tools(ALL_TOOL_NAMES)[0]["functionDeclarations"]
     }
     for tool in COMPUTER_TOOLS:
         assert tool in openai_names
@@ -198,7 +199,7 @@ def test_gemini_schema_has_no_unsupported_keys():
         if "items" in node:
             walk(node["items"])
 
-    for decl in to_gemini_tools()[0]["functionDeclarations"]:
+    for decl in to_gemini_tools(ALL_TOOL_NAMES)[0]["functionDeclarations"]:
         if decl["name"] in COMPUTER_TOOLS:
             walk(decl["parameters"])
 
@@ -218,7 +219,7 @@ def test_gemini_translation_keeps_every_declared_property():
     argument.
     """
     declarations = {
-        decl["name"]: decl for decl in to_gemini_tools()[0]["functionDeclarations"]
+        decl["name"]: decl for decl in to_gemini_tools(ALL_TOOL_NAMES)[0]["functionDeclarations"]
     }
     for spec in TOOL_SPECS:
         declared = set(spec["parameters"].get("properties", {}))
@@ -485,7 +486,7 @@ def test_screenshot_reports_a_vision_failure_in_english(monkeypatch):
 
 
 def test_screenshot_save_path_goes_through_the_root_check(monkeypatch, tmp_path):
-    """A saved frame obeys FILE_ROOTS like every other file E.V. writes."""
+    """A saved frame obeys FILE_ROOTS like every other file Leo writes."""
     from tools import computer_use
 
     monkeypatch.setattr(computer_use, "capture_screen", _frame)
@@ -846,7 +847,7 @@ def test_computer_tool_speech_survives_the_speech_cleaner(monkeypatch):
     for result in results:
         assert result.speech
         assert result.speech == clean_for_speech(result.speech)
-        for banned in ("Spoke:", "E.V.:", "Reply:", "**", "{", "}"):
+        for banned in ("Spoke:", "Leo:", "Reply:", "**", "{", "}"):
             assert banned not in result.speech
 
 
@@ -1157,11 +1158,12 @@ def test_typing_falls_back_when_the_clipboard_refuses(monkeypatch):
 # ---------------------------------------------------------------------------
 # Looking closely
 # ---------------------------------------------------------------------------
-def test_a_region_is_read_as_fractions_and_padded():
+def test_a_region_is_read_as_fractions_and_padded(monkeypatch):
     """Padded outwards because a model asked to box some text boxes the text
     and not the control it sits on."""
     from tools import computer_use
 
+    monkeypatch.setattr(computer_use, "screen_size", lambda *a, **k: (1920, 1080))
     region = computer_use._parse_region("0.25,0.25,0.75,0.75")
     assert region is not None
     left, top, right, bottom = region

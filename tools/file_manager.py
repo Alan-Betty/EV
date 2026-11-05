@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -36,7 +37,7 @@ from tools.base import (
     was_cancelled,
 )
 
-log = logging.getLogger("ev.tools.files")
+log = logging.getLogger("leo.tools.files")
 
 # Spoken folder words that should resolve to a real user directory even when
 # they arrive wrapped in filler: "my downloads folder", "the Desktop".
@@ -101,6 +102,9 @@ _CONFIRM_REASON = {
 }
 
 
+_DRIVE_PATH = re.compile(r"^[a-zA-Z]:[\\\\/]")
+
+
 class PathRefused(ValueError):
     """The path resolved outside the allowed roots, or onto a protected file."""
 
@@ -115,6 +119,35 @@ def _normalise_dir_word(text: str) -> str:
         if word.endswith(suffix):
             word = word[: -len(suffix)]
     return word.strip()
+
+
+def _folder_ignoring_case(base: Path, text: str) -> Path | None:
+    """The folder `text` names under `base`, however it was capitalised.
+
+    Whisper hears "github" and the folder is `GitHub`. Windows never noticed;
+    a Linux filesystem says there is no such place. Folders only, on purpose:
+    two files differing by case are two real files there, and a create aimed
+    at `Notes.txt` must not land on an existing `notes.txt`.
+    """
+    here = base
+    for part in Path(text).parts:
+        exact = here / part
+        if exact.is_dir():
+            here = exact
+            continue
+        try:
+            matches = [
+                entry.path
+                for entry in os.scandir(here)
+                if entry.name.lower() == part.lower() and entry.is_dir()
+            ]
+        except OSError:
+            return None
+        # Two folders differing only by case: guessing would be retargeting.
+        if len(matches) != 1:
+            return None
+        here = Path(matches[0])
+    return here if here != base else None
 
 
 def resolve_user_path(raw: str, default: Path | None = None) -> Path:
@@ -134,6 +167,12 @@ def resolve_user_path(raw: str, default: Path | None = None) -> Path:
 
     text = os.path.expandvars(text)
 
+    # Off Windows, `C:/Windows/x` is a *relative* path, so it used to become a
+    # folder literally named "C:" under the default directory - reported as a
+    # success, in a place nobody asked for.
+    if not IS_WINDOWS and _DRIVE_PATH.match(text):
+        raise PathRefused(f"'{text}' is outside the allowed folders: it is a Windows path")
+
     # "Documents", "my downloads folder" -> the real directory.
     word = _normalise_dir_word(text)
     if word in config.USER_DIRS:
@@ -148,7 +187,7 @@ def resolve_user_path(raw: str, default: Path | None = None) -> Path:
     candidate = Path(text).expanduser()
     if not candidate.is_absolute():
         # A bare "notes.txt" belongs in the default folder, not in whatever
-        # directory E.V. happens to have been started from.
+        # directory Leo happens to have been started from.
         base = default if default is not None and default.is_dir() else config.FILE_DEFAULT_DIR
         # Speech carries filler that a filesystem does not. "my github folder"
         # is the same request as "github", and only the second one used to
@@ -159,7 +198,11 @@ def resolve_user_path(raw: str, default: Path | None = None) -> Path:
         if spoken and spoken != text.lower() and (base / spoken).exists():
             candidate = base / spoken
         else:
-            candidate = base / candidate
+            candidate = (
+                _folder_ignoring_case(base, text)
+                or (_folder_ignoring_case(base, spoken) if spoken else None)
+                or base / candidate
+            )
     return _check(candidate)
 
 
@@ -404,7 +447,7 @@ def _reveal(path: Path) -> ToolResult:
     The capability that was missing entirely. "Open my GitHub folder" had no
     tool to land on, so the model reached for `open_app` and handed it an
     invented path - which Explorer silently ignores, opening its default
-    location while E.V. announced success.
+    location while Leo announced success.
 
     Existence is checked *first* and the failure names the folder. Launching
     Explorer at a path that is not there looks identical to launching it at
@@ -806,7 +849,7 @@ def file_manager(
         log.warning("Refused path: %s", exc)
         return ToolResult.failure(
             "That's outside the folders I'm allowed to touch.",
-            f"Refused: {exc}. Do not retry; ask the user to widen EV_FILE_ROOTS.",
+            f"Refused: {exc}. Do not retry; ask the user to widen LEO_FILE_ROOTS.",
         )
 
     # Destructive actions are held for a spoken yes. `confirmed` only ever
@@ -818,7 +861,7 @@ def file_manager(
             f"Awaiting confirmation to {verb} {target}.",
             # Named so the core loop can tell a delete from a rename when it
             # decides how firm a yes it needs. Popped before the call is
-            # replayed - see `ev_core._resolve_pending`.
+            # replayed - see `leo_core._resolve_pending`.
             reason=_CONFIRM_REASON.get(verb, "changes files"),
             action=verb,
             path=str(target),

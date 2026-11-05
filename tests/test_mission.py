@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Keep the tests deterministic regardless of the developer's own .env.
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import config  # noqa: E402
 from tools import CANCELLABLE, REGISTRY, _ALLOWED_ARGS, dispatch  # noqa: E402
@@ -343,7 +343,7 @@ def test_a_mission_can_be_switched_off(monkeypatch):
     monkeypatch.setattr(config, "AGENT_MODE_ENABLED", False)
     result = mission.agent_task(task="find me a mouse", confirmed=True)
     assert not result.ok
-    assert "EV_AGENT_MODE_ENABLED" in result.detail
+    assert "LEO_AGENT_MODE_ENABLED" in result.detail
 
 
 def test_running_out_of_vision_budget_reports_progress(monkeypatch):

@@ -83,7 +83,7 @@ export function initActivity() {
     list.scrollTop = list.scrollHeight;
   }
 
-  // E.V.'s real history first, oldest at the top, then a short replayed session.
+  // L.E.O.'s real history first, oldest at the top, then a short replayed session.
   [...REPO.commits].reverse().forEach((c) =>
     append({ type: 'commit', date: c.date, msg: c.subject, hash: c.hash.slice(0, 7), full: c.hash, status: 'ok' }),
   );
@@ -110,9 +110,9 @@ export function initActivity() {
   function setPaused(value) {
     paused = value;
     pauseBtn.setAttribute('aria-pressed', String(paused));
-    pauseBtn.querySelector('[data-label]').textContent = paused ? 'Paused' : 'Live';
+    pauseBtn.querySelector('[data-label]').textContent = paused ? 'Paused' : 'Replay';
     pauseBtn.dataset.live = String(!paused);
-    pauseBtn.setAttribute('aria-label', paused ? 'Resume the live log' : 'Pause the live log');
+    pauseBtn.setAttribute('aria-label', paused ? 'Resume the replay' : 'Pause the replay');
     schedule();
   }
   pauseBtn.addEventListener('click', () => setPaused(!paused));

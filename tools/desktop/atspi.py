@@ -9,7 +9,7 @@ nothing there, and no Wayland protocol lets one client list another's
 windows.
 
 It is spoken directly over the accessibility bus with `jeepney` - no
-`pyatspi`, which needs PyGObject, which is not in E.V.'s virtualenv and
+`pyatspi`, which needs PyGObject, which is not in Leo's virtualenv and
 should not have to be. Three things about the other end shape everything
 here:
 
@@ -17,7 +17,7 @@ here:
   an AT-SPI call, it just never replies, so every call carries a timeout
   and a whole tree read carries a deadline.
 * **It may be sandboxed.** A strictly confined snap (Brave, Firefox) refuses
-  calls from a confined caller - E.V. started from VS Code's snapped
+  calls from a confined caller - Leo started from VS Code's snapped
   terminal inherits `snap.code.code`. That comes back as `sandboxed=True`,
   never as an app with no buttons, so the caller can say why and fall back
   to vision.
@@ -39,7 +39,7 @@ import config
 from tools.desktop import bus
 from tools.desktop.model import Element, Tree, WindowInfo
 
-log = logging.getLogger("ev.tools.desktop.atspi")
+log = logging.getLogger("leo.tools.desktop.atspi")
 
 _ACC = "org.a11y.atspi.Accessible"
 _REGISTRY = "org.a11y.atspi.Registry"
@@ -71,7 +71,7 @@ _READABLE_ROLES = frozenset({"label", "static", "heading", "paragraph", "caption
 _IGNORED_APPS = frozenset({
     "gnome-shell", "mutter-x11-frames", "xdg-desktop-portal-gtk", "xdg-desktop-portal-gnome",
     "ibus-extension-gtk3", "ibus-x11", "evolution-alarm-notify", "update-notifier",
-    "gsd-media-keys", "gsd-xsettings", "ev-face", "gjs",
+    "gsd-media-keys", "gsd-xsettings", "leo-face", "gjs",
 })
 _WINDOW_ROLES = frozenset({"frame", "window", "dialog", "alert", "file chooser"})
 

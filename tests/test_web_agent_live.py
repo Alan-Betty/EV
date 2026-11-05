@@ -1,14 +1,14 @@
 """Live browser tests: a real Chromium against real pages.
 
 Every other test file in this suite is offline and must stay that way, so
-these are skipped unless `EV_LIVE_BROWSER=1` is set. They exist because the
+these are skipped unless `LEO_LIVE_BROWSER=1` is set. They exist because the
 offline tests prove the *logic* and prove nothing at all about the thing the
 logic depends on: that a page scan finds the search box on a page nobody
 wrote for us, that an element number still points at the same element two
 hundred milliseconds later, and that a real site's real markup survives the
 round trip.
 
-    EV_LIVE_BROWSER=1 python -m pytest tests/test_web_agent_live.py -q
+    LEO_LIVE_BROWSER=1 python -m pytest tests/test_web_agent_live.py -q
 
 No planner is called here and no money can be spent. The shopping flow runs
 against `books.toscrape.com`, a site published for exactly this purpose: it
@@ -24,7 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 
@@ -37,8 +37,8 @@ from tools.web_agent import (  # noqa: E402
 )
 
 pytestmark = pytest.mark.skipif(
-    os.environ.get("EV_LIVE_BROWSER", "") not in {"1", "true", "yes"},
-    reason="live browser tests are opt-in: set EV_LIVE_BROWSER=1",
+    os.environ.get("LEO_LIVE_BROWSER", "") not in {"1", "true", "yes"},
+    reason="live browser tests are opt-in: set LEO_LIVE_BROWSER=1",
 )
 
 
@@ -47,7 +47,7 @@ def browser():
     """One headless Chromium for the whole file.
 
     Headless and profile-less on purpose: these tests must not touch the
-    profile E.V. keeps the user's real logins in, and they must run on a
+    profile Leo keeps the user's real logins in, and they must run on a
     machine with nobody watching.
     """
     config.BROWSER_PERSIST_PROFILE = False

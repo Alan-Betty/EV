@@ -29,12 +29,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 
 import config  # noqa: E402
-from ev.tts import clean_for_speech  # noqa: E402
+from leo.tts import clean_for_speech  # noqa: E402
 from tools import CANCELLABLE, dispatch  # noqa: E402
 from tools.base import CancelToken, ToolResult, was_cancelled  # noqa: E402
 from tools.file_manager import file_manager  # noqa: E402
@@ -245,6 +245,9 @@ def test_no_token_at_all_still_works(sandbox):
 
 
 # -- shell commands ----------------------------------------------------------
+_SLEEP = "Start-Sleep -Seconds 20" if sys.platform == "win32" else "sleep 20"
+
+
 def test_a_running_command_is_killed_not_waited_out():
     """The real thing: a 20-second command stopped after one."""
     token = CancelToken()
@@ -253,7 +256,7 @@ def test_a_running_command_is_killed_not_waited_out():
     started = time.monotonic()
     result = dispatch(
         "terminal_command",
-        {"command": "Start-Sleep -Seconds 20", "confirmed": True},
+        {"command": _SLEEP, "confirmed": True},
         token,
     )
     elapsed = time.monotonic() - started
@@ -267,14 +270,14 @@ def test_an_already_cancelled_token_stops_almost_immediately():
     token = CancelToken()
     token.cancel()
     result = dispatch(
-        "terminal_command", {"command": "Start-Sleep -Seconds 20", "confirmed": True}, token
+        "terminal_command", {"command": _SLEEP, "confirmed": True}, token
     )
     assert result.cancelled is True
 
 
 def test_an_uncancelled_command_still_returns_its_output():
     result = dispatch(
-        "terminal_command", {"command": "Write-Output hello", "confirmed": True}
+        "terminal_command", {"command": "echo hello", "confirmed": True}
     )
     assert result.ok is True
     assert result.cancelled is False
@@ -365,19 +368,19 @@ class FakeUtterance:
 
 
 def _listening_assistant(monkeypatch, mic, heard):
-    """An `EV` with just enough wired up to run `_watch_for_cancel`."""
-    import ev_core
-    from ev.session import Session
+    """An `Leo` with just enough wired up to run `_watch_for_cancel`."""
+    import leo_core
+    from leo.session import Session
 
     from tests.test_acknowledgement import FakeSpeaker, SilentUI  # noqa: PLC0415
 
     class FakeTranscriber:
         async def transcribe(self, _wav):
-            from ev.stt import Transcript
+            from leo.stt import Transcript
 
             return Transcript(heard, avg_logprob=-0.2)
 
-    assistant = ev_core.EV.__new__(ev_core.EV)
+    assistant = leo_core.Leo.__new__(leo_core.Leo)
     assistant.ui = SilentUI()
     assistant.speaker = FakeSpeaker()
     assistant.transcriber = FakeTranscriber()
@@ -395,7 +398,7 @@ def _listening_assistant(monkeypatch, mic, heard):
 def test_saying_stop_trips_the_token(monkeypatch):
     import asyncio
 
-    from ev.brain import ToolCall
+    from leo.brain import ToolCall
 
     async def scenario():
         assistant = _listening_assistant(monkeypatch, FakeMic(FakeUtterance()), "stop")
@@ -415,7 +418,7 @@ def test_stopping_an_unstoppable_tool_is_refused_not_faked(monkeypatch):
     """`open_app` has already launched it. Claiming a stop would be a lie."""
     import asyncio
 
-    from ev.brain import ToolCall
+    from leo.brain import ToolCall
 
     async def scenario():
         assistant = _listening_assistant(monkeypatch, FakeMic(FakeUtterance()), "stop")
@@ -434,7 +437,7 @@ def test_something_that_is_not_a_cancel_is_kept_not_dropped(monkeypatch):
     """Talking over a slow tool is usually the next command."""
     import asyncio
 
-    from ev.brain import ToolCall
+    from leo.brain import ToolCall
 
     async def scenario():
         assistant = _listening_assistant(
@@ -452,10 +455,10 @@ def test_something_that_is_not_a_cancel_is_kept_not_dropped(monkeypatch):
 
 
 def test_no_listener_without_a_microphone(monkeypatch):
-    import ev_core
-    from ev.brain import ToolCall
+    import leo_core
+    from leo.brain import ToolCall
 
-    assistant = ev_core.EV.__new__(ev_core.EV)
+    assistant = leo_core.Leo.__new__(leo_core.Leo)
     assistant.mic = None
     monkeypatch.setattr(config, "CANCEL_ENABLED", True)
     assert assistant._start_cancel_watch(ToolCall("terminal_command"), CancelToken()) is None
@@ -463,20 +466,20 @@ def test_no_listener_without_a_microphone(monkeypatch):
 
 def test_chat_is_never_watched(monkeypatch):
     """It has no side effect to stop, and it is already streaming its reply."""
-    import ev_core
-    from ev.brain import ToolCall
+    import leo_core
+    from leo.brain import ToolCall
 
-    assistant = ev_core.EV.__new__(ev_core.EV)
+    assistant = leo_core.Leo.__new__(leo_core.Leo)
     assistant.mic = FakeMic()
     monkeypatch.setattr(config, "CANCEL_ENABLED", True)
     assert assistant._start_cancel_watch(ToolCall("chat", {"reply": "hi"}), CancelToken()) is None
 
 
 def test_cancelling_can_be_switched_off(monkeypatch):
-    import ev_core
-    from ev.brain import ToolCall
+    import leo_core
+    from leo.brain import ToolCall
 
-    assistant = ev_core.EV.__new__(ev_core.EV)
+    assistant = leo_core.Leo.__new__(leo_core.Leo)
     assistant.mic = FakeMic()
     monkeypatch.setattr(config, "CANCEL_ENABLED", False)
     assert assistant._start_cancel_watch(ToolCall("terminal_command"), CancelToken()) is None

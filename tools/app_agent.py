@@ -15,7 +15,7 @@ action cannot miss the way a coordinate can.
 
 It hands over to vision rather than failing whenever the tree cannot do the
 job: a window that publishes nothing (a game, a canvas, a remote desktop),
-an app the sandbox will not let E.V. read, a planner that says the job
+an app the sandbox will not let Leo read, a planner that says the job
 needs the pointer, or two rounds of actions that changed nothing. Vision is
 stateless, so it carries on from wherever this left the screen.
 
@@ -48,10 +48,10 @@ from tools.desktop import a11y, system
 from tools.desktop.model import Element, Tree, WindowInfo
 from tools.safety import classify, classify_gui
 
-log = logging.getLogger("ev.tools.app_agent")
+log = logging.getLogger("leo.tools.app_agent")
 
 
-_SYSTEM = """You are E.V., finishing one job inside desktop applications by \
+_SYSTEM = """You are Leo, finishing one job inside desktop applications by \
 yourself. You are given the window you are working in as text: a numbered \
 list of its controls and text, read from the application's accessibility \
 interface. You never see a picture, and usually do not need one.
@@ -355,7 +355,7 @@ def run(
         if was_cancelled(cancel):
             return outcome("stopped", "Stopped.", "the kill switch was pressed")
         if is_locked_down():
-            return outcome("stopped", "Stopped - I'm locked down.", "E.V. was locked down mid-run")
+            return outcome("stopped", "Stopped - I'm locked down.", "Leo was locked down mid-run")
         if time.monotonic() > deadline:
             return outcome("ceiling", "Ran out of time on that one.", "hit the screen task time ceiling")
 

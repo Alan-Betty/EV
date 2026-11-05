@@ -1,12 +1,12 @@
 """Learning how this user sounds, and getting out of standby by name.
 
-Two complaints from real use, both about E.V. not adapting to the person:
+Two complaints from real use, both about Leo not adapting to the person:
 
 * **Speech recognition never got better.** Whisper is an HTTP call, so
   nothing can be retrained - but the decoding prompt and the confidence gate
-  can both be learned from the user's own addressed speech. `ev.hearing`
+  can both be learned from the user's own addressed speech. `leo.hearing`
   does that, and these tests pin what it may and may not learn from.
-* **Standby needed a password.** Saying "E.V." - or anything Whisper makes
+* **Standby needed a password.** Saying "Leo" - or anything Whisper makes
   of it - to a sleeping assistant did nothing unless "wake up" came with it.
 
 Offline; every profile lives in `tmp_path`.
@@ -22,16 +22,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 
 import config  # noqa: E402
-import ev_core  # noqa: E402
-from ev import hearing, wake  # noqa: E402
-from ev.hearing import HearingProfile  # noqa: E402
-from ev.session import Intent, Session  # noqa: E402
-from ev.stt import Transcriber, Transcript  # noqa: E402
+import leo_core  # noqa: E402
+from leo import hearing, wake  # noqa: E402
+from leo.hearing import HearingProfile  # noqa: E402
+from leo.session import Intent, Session  # noqa: E402
+from leo.stt import Transcriber, Transcript  # noqa: E402
 
 
 @pytest.fixture
@@ -230,8 +230,8 @@ def test_learning_off_means_no_profile_at_all(monkeypatch):
 # -- standby: the name is enough --------------------------------------------------
 
 
-@pytest.mark.parametrize("said", ["EV", "E.V.?", "Evie", "hey EV", "Eevee", "heavy",
-                                  "okay so EV you there", "Evi!"])
+@pytest.mark.parametrize("said", ["Leo", "Leo?", "Lio", "hey Leo", "L.E.O.", "heyleo",
+                                  "okay so Leo you there", "Leeo!"])
 def test_the_name_or_something_like_it_summons(said):
     assert wake.summons(said).matched
 
@@ -243,7 +243,7 @@ def test_ordinary_speech_does_not(said):
 
 
 def test_a_summons_carries_its_command():
-    assert wake.summons("EV, open chrome").command == "open chrome"
+    assert wake.summons("Leo, open chrome").command == "open chrome"
 
 
 def test_summons_ignores_wake_required_off(monkeypatch):
@@ -268,9 +268,9 @@ class NullTranscriber:
         pass
 
 
-def _sleeping(monkeypatch) -> ev_core.EV:
+def _sleeping(monkeypatch) -> leo_core.Leo:
     monkeypatch.setattr(config, "WAKE_REQUIRED", True)
-    assistant = ev_core.EV.__new__(ev_core.EV)
+    assistant = leo_core.Leo.__new__(leo_core.Leo)
     assistant.ui = QuietUI()
     assistant.transcriber = NullTranscriber()
     assistant.session = Session()
@@ -292,14 +292,14 @@ def _sleeping(monkeypatch) -> ev_core.EV:
 
 def test_saying_the_name_wakes_it_from_standby(monkeypatch):
     assistant = _sleeping(monkeypatch)
-    heard = Transcript("Evie?")
+    heard = Transcript("Lio?")
     asyncio.run(assistant._route(heard, assistant._extract_command(heard)))
     assert assistant.intents == [Intent.RESUME]
 
 
 def test_the_name_and_a_command_wakes_it_and_does_the_command(monkeypatch):
     assistant = _sleeping(monkeypatch)
-    heard = Transcript("EV, open chrome")
+    heard = Transcript("Leo, open chrome")
     asyncio.run(assistant._route(heard, assistant._extract_command(heard)))
     assert assistant.session.engaged
     assert assistant.handled == ["open chrome"]

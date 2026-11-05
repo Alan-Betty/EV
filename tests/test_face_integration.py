@@ -1,12 +1,12 @@
-"""The face as part of E.V.: started by the core, told what is happening,
+"""The face as part of Leo: started by the core, told what is happening,
 in view for a conversation and out of it when the screen is busy.
 
 Four layers, each tested alone:
 
-* `ev.face.busy` - is now a bad moment to be seen? (fake command runner)
-* `ev.face.link` - the pipe, which must never block or raise (fake process)
-* `ev_core` - what the loop tells the face, and when (recording face)
-* `ev.face.window` - presence and captions (offscreen Qt; skipped without it)
+* `leo.face.busy` - is now a bad moment to be seen? (fake command runner)
+* `leo.face.link` - the pipe, which must never block or raise (fake process)
+* `leo_core` - what the loop tells the face, and when (recording face)
+* `leo.face.window` - presence and captions (offscreen Qt; skipped without it)
 """
 
 from __future__ import annotations
@@ -21,15 +21,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 
-import ev_core  # noqa: E402
-from ev.face import busy, link  # noqa: E402
-from ev.face.link import FaceLink  # noqa: E402
-from ev.session import Session  # noqa: E402
-from ev.stt import Transcript  # noqa: E402
+import leo_core  # noqa: E402
+from leo.face import busy, link  # noqa: E402
+from leo.face.link import FaceLink  # noqa: E402
+from leo.session import Session  # noqa: E402
+from leo.stt import Transcript  # noqa: E402
 
 HAS_QT = importlib.util.find_spec("PySide6") is not None
 
@@ -122,7 +122,7 @@ def _fake_face(tmp_path, monkeypatch) -> Path:
     real_popen = link.subprocess.Popen
 
     def popen(argv, **kwargs):
-        assert argv[1:4] == ["-m", "ev.face", "--stdin"]
+        assert argv[1:4] == ["-m", "leo.face", "--stdin"]
         return real_popen([sys.executable, "-c", script], **kwargs)
 
     monkeypatch.setattr(link.subprocess, "Popen", popen)
@@ -143,7 +143,7 @@ def test_the_link_sends_states_once_and_quits_cleanly(tmp_path, monkeypatch):
     face.show(True)            # repeat dropped
     face.event("listening")
     face.event("listening")    # repeat dropped
-    face.heard("EV, find me firefox")
+    face.heard("Leo, find me firefox")
     face.event("success")
     face.event("success")      # a second smile is a second smile
     face.said("Firefox is up.")
@@ -151,7 +151,7 @@ def test_the_link_sends_states_once_and_quits_cleanly(tmp_path, monkeypatch):
     assert _lines(out) == [
         {"show": True},
         {"event": "listening"},
-        {"heard": "EV, find me firefox"},
+        {"heard": "Leo, find me firefox"},
         {"event": "success"},
         {"event": "success"},
         {"say": "Firefox is up."},
@@ -226,8 +226,8 @@ class FakeSpeaker:
         pass
 
 
-def _assistant(heard: str, engaged: bool = False) -> ev_core.EV:
-    assistant = ev_core.EV.__new__(ev_core.EV)
+def _assistant(heard: str, engaged: bool = False) -> leo_core.Leo:
+    assistant = leo_core.Leo.__new__(leo_core.Leo)
     assistant.ui = QuietUI()
     assistant.face = RecordingFace()
     assistant.speaker = FakeSpeaker()
@@ -258,12 +258,12 @@ def test_an_unaddressed_sentence_does_not_summon_the_face():
 
 
 def test_the_wake_phrase_brings_the_face_in_and_captions_it():
-    assistant = _assistant("EV, find me firefox")
+    assistant = _assistant("Leo, find me firefox")
     asyncio.run(assistant._tick())
     log = assistant.face.log
     assert ("event", "wake") in log
     assert ("show", True) in log
-    assert ("heard", "EV, find me firefox") in log
+    assert ("heard", "Leo, find me firefox") in log
     assert assistant.routed == ["find me firefox"]
 
 
@@ -301,7 +301,7 @@ def test_a_held_confirmation_keeps_the_face_up():
 
 
 def test_an_ev_built_without_init_has_a_harmless_face():
-    assistant = ev_core.EV.__new__(ev_core.EV)
+    assistant = leo_core.Leo.__new__(leo_core.Leo)
     assistant.face.event("thinking")
     assistant.face.said("nothing")
 
@@ -331,8 +331,8 @@ def _pump(ms: int) -> None:
 
 
 def _window(**kwargs):
-    from ev.face.expression import Expression, load_library
-    from ev.face.window import FaceWindow
+    from leo.face.expression import Expression, load_library
+    from leo.face.window import FaceWindow
 
     return FaceWindow(Expression(load_library()), busy_poll_s=0, **kwargs)
 
@@ -344,7 +344,7 @@ def test_a_summoned_face_starts_out_of_sight(qt_app):
 
 
 def test_show_brings_it_in_and_hide_takes_it_away(qt_app):
-    from ev.face.window import route_line
+    from leo.face.window import route_line
 
     window = _window(presence="summoned")
     window.start()
@@ -358,7 +358,7 @@ def test_show_brings_it_in_and_hide_takes_it_away(qt_app):
 
 
 def test_busy_overrules_a_summons_and_lets_go_afterwards(qt_app):
-    from ev.face.window import route_line
+    from leo.face.window import route_line
 
     window = _window(presence="summoned")
     window.start()
@@ -375,11 +375,11 @@ def test_busy_overrules_a_summons_and_lets_go_afterwards(qt_app):
 def test_captions_follow_the_face_and_never_take_input(qt_app):
     from PySide6.QtCore import Qt
 
-    from ev.face.window import route_line
+    from leo.face.window import route_line
 
     window = _window(presence="always")
     window.start()
-    route_line(window, '{"heard": "EV, what is playing"}')
+    route_line(window, '{"heard": "Leo, what is playing"}')
     route_line(window, '{"say": "Don\'t Stop Me Now by Queen."}')
     _pump(50)
     caption = window.caption
@@ -390,10 +390,64 @@ def test_captions_follow_the_face_and_never_take_input(qt_app):
 
 
 def test_always_mode_ignores_a_dismissal(qt_app):
-    from ev.face.window import route_line
+    from leo.face.window import route_line
 
     window = _window(presence="always")
     window.start()
     route_line(window, '{"show": false}')
     _pump(350)
     assert window.isVisible()
+
+
+# -- Hyprland: tiled and blurred until these held. Both measured live. --------
+@pytest.mark.parametrize(
+    ("value", "expected", "after"),
+    [
+        (None, True, "xcb"),
+        ("wayland;xcb", True, "xcb"),  # what Ryoku's session sets for everything
+        ("wayland", True, "xcb"),
+        ("xcb", False, "xcb"),
+        ("offscreen", False, "offscreen"),
+    ],
+)
+def test_only_a_value_that_rules_wayland_out_is_respected(monkeypatch, value, expected, after):
+    from leo.face import window as module
+
+    monkeypatch.setattr(module, "IS_LINUX", True)
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-1")
+    monkeypatch.setenv("DISPLAY", ":0")
+    if value is None:
+        monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+    else:
+        monkeypatch.setenv("QT_QPA_PLATFORM", value)
+    assert module.prefer_xwayland(True) is expected
+    assert os.environ["QT_QPA_PLATFORM"] == after
+
+
+def test_the_opt_out_still_opts_out(monkeypatch):
+    from leo.face import window as module
+
+    monkeypatch.setattr(module, "IS_LINUX", True)
+    monkeypatch.setenv("QT_QPA_PLATFORM", "wayland;xcb")
+    assert module.prefer_xwayland(False) is False
+    assert os.environ["QT_QPA_PLATFORM"] == "wayland;xcb"
+
+
+def test_the_blur_rule_is_only_asked_for_on_hyprland(monkeypatch):
+    from leo.face import window as module
+
+    calls: list[list[str]] = []
+
+    class Done:
+        returncode = 0
+        stdout = "ok"
+
+    monkeypatch.setattr(module, "IS_LINUX", True)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/hyprctl")
+    monkeypatch.setattr(module.subprocess, "run", lambda args, **_k: calls.append(args) or Done())
+    monkeypatch.delenv("HYPRLAND_INSTANCE_SIGNATURE", raising=False)
+    assert module.clear_compositor_effects() is False
+    assert calls == []
+    monkeypatch.setenv("HYPRLAND_INSTANCE_SIGNATURE", "x")
+    assert module.clear_compositor_effects() is True
+    assert calls[0][:2] == ["/usr/bin/hyprctl", "eval"] and "no_blur" in calls[0][2]

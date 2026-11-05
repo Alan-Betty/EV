@@ -1,20 +1,16 @@
 {
   "hero": {
-    "status": "WINDOWS + UBUNTU WAYLAND OPERATIONAL",
-    "statusLink": "#features",
-    "headline": "Intelligence at the Velocity of Thought.",
-    "sub": "E.V. is a voice assistant that does things on your computer. It opens apps, moves files, runs commands, drives the browser, and takes the mouse when it has to. Say its name once and keep talking."
+    "headline": "L.E.O.",
+    "sub": "Latency-optimized Executive Operator. Say Leo, keep talking: it opens apps, moves files, runs commands and drives the browser."
   },
   "demo": {
-    "title": "Watch it hear, plan and act",
-    "body": "Pick an errand. Each one replays a run through E.V.'s real tools. Pick another mid-run to cut in, the way you would by talking over it."
+    "title": "Watch it hear, plan and act"
   },
   "features": {
     "title": "Built to act, not only answer",
-    "body": "One loop owns everything: listen, transcribe, decide, act, speak. Every part of it closes the gap between saying something and it being done, without handing the model the keys.",
     "voice": {
       "title": "Full-duplex voice",
-      "body": "Say \"E.V.\" once and keep talking. Talk over a reply and it stops mid-word to listen. It learns your voice and its own, so it never answers itself on loudspeakers."
+      "body": "Say \"Leo\" once and keep talking. Talk over a reply and it stops mid-word to listen, and it knows its own voice, so it never answers itself on loudspeakers."
     },
     "apps": {
       "title": "Eyes and hands for any app",
@@ -34,16 +30,15 @@
     },
     "web": {
       "title": "Web errands without screenshots",
-      "body": "E.V. reads the page, numbers every control and plans in plain text. It remembers what it already clicked, so one mouse means one mouse in the basket."
+      "body": "L.E.O. reads the page, numbers every control and plans in plain text. It remembers what it already clicked, so one mouse means one mouse in the basket."
     }
   },
   "activity": {
-    "title": "{iteration} iterations, in the open",
-    "body": "Every commit so far, then a replay of what a session writes as it runs. Filter it, search it, copy any hash."
+    "title": "{iteration} iterations, in the open"
   },
   "download": {
-    "title": "Get E.V.",
-    "body": "Grab it for your system, run the setup line, add a free Groq or Gemini key, then check everything with python ev_core.py --check."
+    "title": "Get L.E.O.",
+    "body": "Grab it for your system, run the setup line, add a free Groq or Gemini key, then check everything with python leo_core.py --check."
   },
   "footer": {
     "privacy": "No telemetry. Your keys, your providers. Want speech kept local? Use whisper.cpp."
@@ -60,7 +55,7 @@
   "roadmap": [
     { "label": "Voice loop with barge-in", "state": "done" },
     { "label": "Browser errands through the DOM", "state": "done" },
-    { "label": "Desktop apps on Windows and Ubuntu", "state": "done" },
+    { "label": "Desktop apps on Windows and Linux", "state": "done" },
     { "label": "Long-term memory", "state": "done" },
     { "label": "Wayland without the GNOME extension", "state": "active", "progress": 40 },
     { "label": "Accessibility for snapped apps", "state": "todo" },

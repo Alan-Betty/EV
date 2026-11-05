@@ -4,7 +4,7 @@ Offline: every request is answered by a stub transport, so the suite never
 touches the network and needs no key that works.
 
 The regression at the centre of this file is worth stating plainly, because it
-was invisible from every angle except a real request. `to_gemini_tools()`
+was invisible from every angle except a real request. `to_gemini_tools(ALL_TOOL_NAMES)`
 filtered the keys of the `properties` map against the list of schema keywords,
 and argument names are not schema keywords - so every tool reached Gemini with
 no properties at all. The tool *names* were all still correct, which is why
@@ -23,15 +23,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import httpx  # noqa: E402
 import pytest  # noqa: E402
 
 import config  # noqa: E402
-from ev.brain import Brain, BrainError, _gemini_retry_after  # noqa: E402
-from ev.tts import clean_for_speech  # noqa: E402
+from leo.brain import Brain, BrainError, _gemini_retry_after  # noqa: E402
+from leo.tts import clean_for_speech  # noqa: E402
 from tools.schemas import TOOL_SPECS, to_gemini_tools  # noqa: E402
+from tools.schemas import TOOL_NAMES as ALL_TOOL_NAMES  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +67,7 @@ def _function_call(name: str, args: dict) -> httpx.Response:
 def test_every_declared_property_survives_translation():
     """The bug: `properties` came out empty for all thirteen tools."""
     declarations = {
-        decl["name"]: decl for decl in to_gemini_tools()[0]["functionDeclarations"]
+        decl["name"]: decl for decl in to_gemini_tools(ALL_TOOL_NAMES)[0]["functionDeclarations"]
     }
     assert declarations, "no function declarations at all"
 
@@ -78,7 +79,7 @@ def test_every_declared_property_survives_translation():
 
 def test_nothing_named_in_required_is_undefined():
     """The exact invariant Gemini enforces, and the exact 400 it used to send."""
-    for decl in to_gemini_tools()[0]["functionDeclarations"]:
+    for decl in to_gemini_tools(ALL_TOOL_NAMES)[0]["functionDeclarations"]:
         params = decl["parameters"]
         defined = set(params.get("properties", {}))
         for name in params.get("required", []):
@@ -91,7 +92,7 @@ def test_nothing_named_in_required_is_undefined():
 def test_property_descriptions_and_enums_come_through():
     """Recursing into the values, not just keeping the keys."""
     declarations = {
-        decl["name"]: decl for decl in to_gemini_tools()[0]["functionDeclarations"]
+        decl["name"]: decl for decl in to_gemini_tools(ALL_TOOL_NAMES)[0]["functionDeclarations"]
     }
     engine = declarations["web_search"]["parameters"]["properties"]["engine"]
     assert engine["type"] == "string"
@@ -280,7 +281,7 @@ def test_a_404_model_falls_down_the_ladder(monkeypatch):
 
 
 def test_the_vision_model_follows_the_brain_off_a_dead_model(monkeypatch):
-    """Otherwise E.V. talks fine and goes blind.
+    """Otherwise Leo talks fine and goes blind.
 
     `GEMINI_VISION_MODEL` is bound at import from `GEMINI_MODEL`. When the
     ladder moves the brain after a 404, a derived vision model has to move
@@ -305,7 +306,7 @@ def test_the_vision_model_follows_the_brain_off_a_dead_model(monkeypatch):
 
 
 def test_a_pinned_vision_model_is_left_alone(monkeypatch):
-    """An explicit EV_GEMINI_VISION_MODEL is a choice, not a default."""
+    """An explicit LEO_GEMINI_VISION_MODEL is a choice, not a default."""
     monkeypatch.setattr(config, "GEMINI_MODEL", "gemini-2.5-flash")
     monkeypatch.setattr(config, "GEMINI_VISION_MODEL", "gemini-3-pro-image")
     monkeypatch.setattr(config, "GEMINI_VISION_MODEL_PINNED", True)

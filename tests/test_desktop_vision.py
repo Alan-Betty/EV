@@ -15,12 +15,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 
 import config  # noqa: E402
-from ev.session import Intent, match_intent  # noqa: E402
+from leo.session import Intent, match_intent  # noqa: E402
 from tools import computer_use as cu  # noqa: E402
 from tools import overlay  # noqa: E402
 from tools.desktop import xhud  # noqa: E402
@@ -115,7 +115,7 @@ def test_groq_rotation_keeps_the_vision_model_when_vision_is_on_gemini(monkeypat
 
     import httpx
 
-    from ev.brain import Brain
+    from leo.brain import Brain
 
     monkeypatch.setattr(config, "VISION_PROVIDER", "auto")
     monkeypatch.setattr(config, "GEMINI_API_KEY", "g-key")
@@ -199,7 +199,7 @@ def test_a_stale_groq_budget_is_dropped_after_gemini_answers(monkeypatch, auto_v
 
 
 def test_vision_failures_stay_speakable(monkeypatch, auto_vision):
-    from ev.tts import clean_for_speech
+    from leo.tts import clean_for_speech
 
     _use(monkeypatch, FakeClient([_gemini_429("90s"), FakeResponse(503, text="down")]))
     with pytest.raises(cu.VisionError) as caught:
@@ -376,10 +376,10 @@ def test_tk_objects_are_released_on_the_tk_thread(monkeypatch):
         return Root()
 
     monkeypatch.setattr(hud, "_build", build)
-    thread = threading.Thread(target=hud._run, name="ev-overlay-test")
+    thread = threading.Thread(target=hud._run, name="leo-overlay-test")
     thread.start()
     thread.join(2.0)
-    assert seen.get("destroyed") and seen["loop_thread"] == "ev-overlay-test"
+    assert seen.get("destroyed") and seen["loop_thread"] == "leo-overlay-test"
     assert hud._glow_canvas is None and hud._badge_canvas is None
 
 

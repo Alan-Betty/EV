@@ -9,7 +9,7 @@ Explorer and navigate to my GitHub folder" appeared to be ignored, because:
 2. `open_app` handed those arguments straight to the process unchecked. The
    model invented `C:\\Users\\Alan\\GitHub` for a machine with no Alan on it;
    Explorer opens its default location for a path that is not there and exits
-   0, so E.V. reported "Explorer, up." A false success is worse than a
+   0, so Leo reported "Explorer, up." A false success is worse than a
    failure - neither the user nor the model on the next turn can tell.
 3. "open my email" had nowhere to go, so it came back as a question.
 
@@ -27,10 +27,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Keep the tests deterministic regardless of the developer's own .env.
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import config  # noqa: E402
-from ev.tts import clean_for_speech  # noqa: E402
+from leo.tts import clean_for_speech  # noqa: E402
 from tools import app_launcher, browser, dispatch  # noqa: E402
 
 # `tools/__init__.py` exports a *function* named `file_manager`, which

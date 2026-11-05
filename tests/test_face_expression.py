@@ -16,12 +16,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 
-from ev.face import expression as ex  # noqa: E402
-from ev.face.expression import Expression, apply_command, load_library  # noqa: E402
+from leo.face import expression as ex  # noqa: E402
+from leo.face.expression import Expression, apply_command, load_library  # noqa: E402
 
 DT = 1 / 60
 
@@ -214,7 +214,7 @@ def test_every_mood_renders_with_a_transparent_outside():
     from PySide6.QtGui import QGuiApplication, QImage, QPainter
     from PySide6.QtWidgets import QApplication
 
-    from ev.face import render
+    from leo.face import render
 
     # A QApplication rather than a QGuiApplication: Qt allows one per
     # process, and the window tests in test_face_integration need widgets.

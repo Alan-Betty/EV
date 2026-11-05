@@ -3,7 +3,7 @@
 On a stock Ubuntu the pip wheel for `sounddevice` installs fine and then
 fails at import with "PortAudio library not found", because it loads the
 *system* PortAudio and nothing installed it. The mic worked in every other
-app and E.V. said "No microphone backend. Install sounddevice" - about a
+app and Leo said "No microphone backend. Install sounddevice" - about a
 package that was installed. These pin the recorder fallback and the message.
 
 Offline: the "recorder" is this Python interpreter writing bytes to stdout.
@@ -18,12 +18,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 
-from ev import audio  # noqa: E402
-from ev.audio import AudioError, Microphone, _CommandStream, _no_backend_message  # noqa: E402
+from leo import audio  # noqa: E402
+from leo.audio import AudioError, Microphone, _CommandStream, _no_backend_message  # noqa: E402
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="recorder commands are POSIX")
 
@@ -77,7 +77,7 @@ def test_a_recorder_that_dies_at_once_is_skipped_for_the_next(monkeypatch):
 def test_no_recorder_installed_says_which_were_looked_for(monkeypatch):
     monkeypatch.setattr(
         _CommandStream, "_commands",
-        staticmethod(lambda rate, device: [("pw-record", ["ev-no-such-recorder-xyz"])]),
+        staticmethod(lambda rate, device: [("pw-record", ["leo-no-such-recorder-xyz"])]),
     )
     with pytest.raises(AudioError, match="pw-record not installed"):
         _CommandStream.first_available(16000, 960)
@@ -143,9 +143,9 @@ def test_stock_ubuntu_has_a_way_to_play_mp3(monkeypatch):
 # which input: the microphone, never the screen
 # ---------------------------------------------------------------------------
 # The system default input on the user's machine was the speaker monitor, and
-# E.V. recorded whatever the default was - so it heard every video on screen,
+# Leo recorded whatever the default was - so it heard every video on screen,
 # and its own replies at full digital level, which it barged in on and
-# answered. An empty EV_INPUT_DEVICE now means "the user's microphone".
+# answered. An empty LEO_INPUT_DEVICE now means "the user's microphone".
 MONITOR = "alsa_output.pci-0000_00_1f.3.analog-stereo.monitor"
 BUILT_IN = "alsa_input.pci-0000_00_1f.3.analog-stereo"
 HEADSET = "bluez_input.C7_16_53_5B_FF_8F.0"

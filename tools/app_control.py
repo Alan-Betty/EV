@@ -18,7 +18,7 @@ Three rules shape the close path, all from "graceful + confirm":
 
 * **A close is always polite.** It is the title bar's X, so an editor with
   unsaved work gets to ask its own question.
-* **That question belongs to the user.** If one appears, E.V. reads it out
+* **That question belongs to the user.** If one appears, Leo reads it out
   - what it says and which buttons it offers - and stops. It never answers
   "Save changes?" on the user's behalf.
 * **Losing work takes a strict yes.** `discard` (close without saving) and
@@ -39,7 +39,7 @@ from tools.desktop import a11y
 from tools.desktop.model import Element, Tree, WindowInfo
 from tools.safety import classify, classify_gui
 
-log = logging.getLogger("ev.tools.app_control")
+log = logging.getLogger("leo.tools.app_control")
 
 ACTIONS = ("list", "focus", "close", "quit", "minimize", "maximize", "kill", "read", "press", "set_text", "menu")
 
@@ -61,7 +61,7 @@ _ALIASES = {
 }
 
 # The buttons a "Save changes?" dialog offers for "lose the changes", across
-# the toolkits E.V. is likely to meet.
+# the toolkits Leo is likely to meet.
 _DISCARD_BUTTONS = (
     "don't save", "dont save", "do not save", "discard", "close without saving",
     "don't save changes", "close without save", "no",
@@ -152,7 +152,7 @@ def _focus(app: str) -> ToolResult:
         return ToolResult.success(f"{_name(target)}.", f"Brought '{target.title}' to the front.")
     return ToolResult.failure(
         f"{_name(target)} wouldn't come forward.",
-        f"Focusing '{target.title}' ({target.source}) did not take. On GNOME Wayland, installing E.V.'s "
+        f"Focusing '{target.title}' ({target.source}) did not take. On GNOME Wayland, installing Leo's "
         "Shell extension (--install-gnome-extension) makes focus reliable.",
     )
 
@@ -184,7 +184,7 @@ def _close(app: str, discard: bool, confirmed: bool) -> ToolResult:
     spoken = _name(target)
     if discard and not confirmed:
         # The yes replays these arguments. "The focused window" by then may
-        # be E.V.'s own terminal, so the window is pinned by its title.
+        # be Leo's own terminal, so the window is pinned by its title.
         return ToolResult.confirm(
             f"Close {spoken} without saving? Confirm?",
             f"Awaiting confirmation: close '{target.title}' and discard unsaved work.",
@@ -445,7 +445,7 @@ def app_control(
 ) -> ToolResult:
     """Switch to, close, quit, minimise, maximise, kill, read or operate an app."""
     if not getattr(config, "APP_CONTROL_ENABLED", True):
-        return ToolResult.failure("App control is switched off.", "EV_APP_CONTROL_ENABLED is false.")
+        return ToolResult.failure("App control is switched off.", "LEO_APP_CONTROL_ENABLED is false.")
     verb = verb_of(action)
     app = str(app or "").strip()
     discard = discard is True or str(discard).strip().lower() in {"true", "1", "yes"}
@@ -472,7 +472,7 @@ def app_control(
             return _set_text(app, str(target or ""), str(text or ""), confirmed)
         if verb == "menu":
             return _menu(app, str(target or text or ""), confirmed)
-    except Exception as exc:  # a backend failing mid-call costs this call, not E.V.
+    except Exception as exc:  # a backend failing mid-call costs this call, not Leo
         log.exception("app_control %s failed", verb)
         return ToolResult.failure("That didn't work.", f"app_control {verb} failed: {exc}")
     return ToolResult.failure(

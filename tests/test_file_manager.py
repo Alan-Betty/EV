@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 
@@ -84,7 +84,7 @@ def test_relative_path_anchors_to_the_named_folder(sandbox):
 
 
 def test_bare_filename_lands_in_the_default_folder(sandbox):
-    # Crucially *not* the process working directory, which is wherever E.V.
+    # Crucially *not* the process working directory, which is wherever Leo
     # happened to be started from.
     assert resolve_user_path("notes.txt") == sandbox["documents"] / "notes.txt"
 

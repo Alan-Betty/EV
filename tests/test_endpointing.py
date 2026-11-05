@@ -1,12 +1,12 @@
-"""When E.V. decides the user has finished talking.
+"""When Leo decides the user has finished talking.
 
 This is the largest fixed cost in the whole listen -> answer -> speak path
-and the only one that is entirely E.V.'s to spend: the user has stopped, the
+and the only one that is entirely Leo's to spend: the user has stopped, the
 network is idle, and nothing is happening. It used to be a flat second.
 
 It is now two waits, and the split is about *when* people pause rather than
 how long for. The pause that must not be cut into is the one right at the
-start - "E.V." and then a beat while they decide what they want. A pause a
+start - "Leo" and then a beat while they decide what they want. A pause a
 second into a sentence is much rarer, and by then there is a real utterance
 in the buffer. So the tests below are really one test asked twice: a short
 burst keeps the generous wait, and a sentence ends promptly.
@@ -23,10 +23,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("GROQ_API_KEY", "test-key")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import config  # noqa: E402
-from ev.audio import Microphone  # noqa: E402
+from leo.audio import Microphone  # noqa: E402
 
 
 def _frames(mic: Microphone, speech_ms: int, silence_ms: int) -> None:
@@ -80,7 +80,7 @@ def test_a_whole_sentence_ends_on_the_short_wait():
 
 
 def test_a_single_word_keeps_the_generous_wait():
-    """"E.V." followed by a beat while they decide what they want.
+    """"Leo" followed by a beat while they decide what they want.
 
     Cutting in here costs the whole utterance, so this is the case the long
     wait exists for.
@@ -114,7 +114,7 @@ def test_the_old_flat_behaviour_is_still_reachable(monkeypatch):
 
 
 def test_the_short_wait_is_never_longer_than_the_long_one(monkeypatch):
-    """A misconfigured pair must not make E.V. wait less when it is unsure."""
+    """A misconfigured pair must not make Leo wait less when it is unsure."""
     monkeypatch.setattr(config, "SILENCE_HANG_MS", 900)
     monkeypatch.setattr(config, "SILENCE_HANG_LONG_MS", 300)
     mic = _microphone()

@@ -21,17 +21,17 @@ function commands() {
   const channel = store.get('channel');
   const build = primaryFor(platform, channel);
   return [
-    { group: 'Go to', label: 'Features', hint: 'Capabilities grid', run: () => jump('#features') },
-    { group: 'Go to', label: 'Live demo', hint: 'Assistant simulator', run: () => jump('#demo') },
-    { group: 'Go to', label: 'System logs', hint: 'Commit history and session log', run: () => jump('#activity') },
-    { group: 'Go to', label: 'Download specs', hint: 'Install steps for every platform', run: () => jump('#download') },
+    { group: 'Go to', label: 'Features', run: () => jump('#features') },
+    { group: 'Go to', label: 'Live demo', run: () => jump('#demo') },
+    { group: 'Go to', label: 'System logs', run: () => jump('#activity') },
+    { group: 'Go to', label: 'Download', run: () => jump('#download') },
     {
       group: 'Go to', label: 'Search system logs', keys: ['/'],
       run: () => { jump('#activity'); setTimeout(() => document.getElementById('log-search')?.focus({ preventScroll: true }), 350); },
     },
     ...SCRIPTS.map((s) => ({
       group: 'Run in demo', label: s.label,
-      run: () => { jump('#demo'); document.dispatchEvent(new CustomEvent('ev:demo', { detail: s.id })); },
+      run: () => { jump('#demo'); document.dispatchEvent(new CustomEvent('leo:demo', { detail: s.id })); },
     })),
     { group: 'Download', label: `Download for ${PLATFORMS[platform].label}`, hint: build.file, run: () => { location.href = build.url; } },
     { group: 'Download', label: 'Copy the commit id', hint: build.commit.slice(0, 12), run: () => copy(build.commit, `Copied ${build.commit.slice(0, 7)}`) },

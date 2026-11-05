@@ -6,12 +6,12 @@ command, `file_manager._check` reads a path, and both answer a question about
 one call in isolation. This module assumes less than that. It answers three
 questions the per-call checks structurally cannot:
 
-* **"Is E.V. allowed to act at all right now?"** - lockdown. "Stop" cancels
-  the tool that is running and says nothing about the next one. When E.V. is
+* **"Is Leo allowed to act at all right now?"** - lockdown. "Stop" cancels
+  the tool that is running and says nothing about the next one. When Leo is
   looping, or has been told something by a web page that it should not have
   believed, cancelling one iteration is not what the user wants. Lockdown
   takes every side effect away at once and leaves talking, remembering-back
-  and looking intact, so E.V. can explain itself while holding still.
+  and looking intact, so Leo can explain itself while holding still.
 
 * **"Is this the tenth one of these in ten seconds?"** - the runaway
   limiter. A loop is not a bug in any single call: each one is individually
@@ -43,20 +43,23 @@ from typing import Any
 import config
 from tools.base import ToolResult
 
-log = logging.getLogger("ev.tools.guard")
+log = logging.getLogger("leo.tools.guard")
 
 
-# Tools that change something outside E.V.'s own head: they start a process,
+# Tools that change something outside Leo's own head: they start a process,
 # move a file, move the pointer, write to disk, or send something. These are
 # what lockdown withholds and what the runaway limiter counts.
 #
 # `remember_fact`, `manage_todo` and `backlog` are on the list even though
-# they only write small JSON files of E.V.'s own. A stored fact is read back
+# they only write small JSON files of Leo's own. A stored fact is read back
 # into the system prompt on every later turn, so a poisoned one outlives the
 # turn that wrote it - which makes it the most durable side effect here, not
 # the mildest.
 SIDE_EFFECT_TOOLS: frozenset[str] = frozenset(
     {
+        "dev_session",
+        "whatsapp",
+        "system_control",
         "open_app",
         # Closes, quits, presses and types into other programs. Its two
         # read-only actions are let through below - see `_read_only`.
@@ -83,12 +86,18 @@ SIDE_EFFECT_TOOLS: frozenset[str] = frozenset(
     }
 )
 
-# Tools whose `detail` carries text E.V. did not write and the user did not
+# Tools whose `detail` carries text Leo did not write and the user did not
 # say: a web page, a file, whatever the screen happened to show. It is data
 # about the world, and the model must read it as data - see
-# `ev.brain.Brain.remember`.
+# `leo.brain.Brain.remember`.
 UNTRUSTED_OUTPUT: frozenset[str] = frozenset(
     {
+        # Claude's account of its run has read whatever is in the repo.
+        "dev_session",
+        # Anyone at all can message this number.
+        "whatsapp",
+        # A process name is its author's choice; a log line is a request's.
+        "system_control",
         "agent_task",
         # Window titles and an app's own labels are written by whoever made
         # the document or the page the app is showing.
@@ -172,6 +181,8 @@ class _State:
         self.since = 0.0
         # (timestamp, signature) for every side-effecting call.
         self.recent: deque[tuple[float, str]] = deque(maxlen=512)
+        # When outside text last reached the model. See `recently_read_outside`.
+        self.read_outside_at = 0.0
 
 
 _state = _State()
@@ -184,6 +195,7 @@ def reset() -> None:
         _state.reason = "configured to start locked down" if _state.locked else ""
         _state.since = time.monotonic() if _state.locked else 0.0
         _state.recent.clear()
+        _state.read_outside_at = 0.0
 
 
 reset()
@@ -305,10 +317,42 @@ def _trip(reason: str, speech: str, detail: str) -> ToolResult:
 
 # Calls to a side-effecting tool that only look. Listing the open windows or
 # reading what is in one changes nothing, and refusing it under lockdown
-# would leave E.V. unable to say what is on screen - the same argument that
+# would leave Leo unable to say what is on screen - the same argument that
 # keeps take_screenshot working. Named per tool rather than imported from
 # the tool, so the guard stays importable before any tool module is.
+# The untrusted tools whose output can carry a sentence somebody else wrote. A
+# track title or a page that was only opened gives a model nothing to act on.
+TEXT_READERS: frozenset[str] = frozenset(
+    {
+        "agent_task", "app_control", "browser_task", "dev_session", "file_manager",
+        "screen_task", "system_control", "take_screenshot", "whatsapp",
+    }
+)
+
+
+def note_read_outside(name: str) -> None:
+    if name in TEXT_READERS:
+        with _state.lock:
+            _state.read_outside_at = time.monotonic()
+
+
+def recently_read_outside() -> bool:
+    """Did outside text reach the model within `MEMORY_TAINT_S`?
+
+    Memory outlives the conversation, so a message saying "remember that the
+    bank details changed to..." would otherwise become a standing fact, replayed
+    with no fence around where it came from. This lets a save ask first.
+    """
+    with _state.lock:
+        seen = _state.read_outside_at
+    return bool(seen) and time.monotonic() - seen < config.MEMORY_TAINT_S
+
+
 _READ_ONLY_ACTIONS: dict[str, frozenset[str]] = {
+    "system_control": frozenset({"status", "processes", "ports", "list", "logs"}),
+    "whatsapp": frozenset({"search", "recent"}),
+    # Stop must work in lockdown: that is when it is wanted most.
+    "dev_session": frozenset({"status", "stop"}),
     "app_control": frozenset({"list", "read", "inspect", "look", "windows", "list_windows", "apps"}),
 }
 
@@ -325,7 +369,7 @@ def check(name: str, arguments: dict[str, Any]) -> ToolResult | None:
     """Decide whether this call may run at all. None means "carry on".
 
     Runs *before* the tool, and therefore before the tool's own confirmation
-    gate. That order matters: a locked-down E.V. that still asked "Confirm?"
+    gate. That order matters: a locked-down Leo that still asked "Confirm?"
     and then refused the yes would be worse than useless, because the user
     would have said yes to something that was never going to happen.
     """
@@ -337,8 +381,8 @@ def check(name: str, arguments: dict[str, Any]) -> ToolResult | None:
         audit("refused", tool=name, why="locked down", args=_loggable(arguments))
         return ToolResult.failure(
             "I'm locked down. Say 'unlock' and I'll pick it back up.",
-            f"Refused '{name}': E.V. is in lockdown ({reason}). Nothing ran. "
-            "Do not retry any tool - tell the user E.V. is locked down and "
+            f"Refused '{name}': Leo is in lockdown ({reason}). Nothing ran. "
+            "Do not retry any tool - tell the user Leo is locked down and "
             "that saying 'unlock' or 'stand down' releases it.",
         )
 
@@ -384,7 +428,7 @@ def check(name: str, arguments: dict[str, Any]) -> ToolResult | None:
             f"{len(recent)} actions in {int(config.GUARD_WINDOW_S)} seconds",
             "That's a lot of actions very fast. I've stopped until you say otherwise.",
             f"Refused '{name}': {len(recent)} side-effecting actions in the last "
-            f"{int(config.GUARD_WINDOW_S)} seconds is past the limit. E.V. is now "
+            f"{int(config.GUARD_WINDOW_S)} seconds is past the limit. Leo is now "
             "locked down. Tell the user, and do not call another tool.",
         )
 

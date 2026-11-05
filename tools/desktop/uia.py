@@ -23,7 +23,7 @@ import config
 from tools.desktop.model import Element, Tree, WindowInfo
 from tools.desktop.system import IS_WINDOWS
 
-log = logging.getLogger("ev.tools.desktop.uia")
+log = logging.getLogger("leo.tools.desktop.uia")
 
 # Property ids (UIAutomationClient.h).
 _NAME = 30005

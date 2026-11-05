@@ -1,15 +1,15 @@
 """Full-duplex capture and speech interruption.
 
 The microphone never stops. A background reader thread keeps pulling frames
-while E.V. is talking, which is what makes it possible to interrupt a reply
+while Leo is talking, which is what makes it possible to interrupt a reply
 part-way through instead of waiting politely for it to end.
 
-Three things have to hold, and each one has a failure mode that makes E.V.
+Three things have to hold, and each one has a failure mode that makes Leo
 unusable in a different direction:
 
 * **Two conditions, not one.** Frame count alone cannot tell the user's voice
-  from E.V.'s own coming back through the speakers - both are a long steady
-  run of speech-looking frames - so E.V. would interrupt itself on every
+  from Leo's own coming back through the speakers - both are a long steady
+  run of speech-looking frames - so Leo would interrupt itself on every
   reply. Loudness alone trips on a door closing.
 * **Stopping means stopping.** Killing the clip that is playing ends one
   sentence; a streamed reply has the rest of itself queued behind it and
@@ -31,14 +31,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 
 import config  # noqa: E402
-import ev_core  # noqa: E402
-from ev.audio import Microphone  # noqa: E402
-from ev.tts import Speaker, clean_for_speech  # noqa: E402
+import leo_core  # noqa: E402
+from leo.audio import Microphone  # noqa: E402
+from leo.tts import Speaker, clean_for_speech  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -100,8 +100,8 @@ class SilentUI:
         return _draw
 
 
-def _assistant(mic, speaker) -> ev_core.EV:
-    assistant = ev_core.EV.__new__(ev_core.EV)
+def _assistant(mic, speaker) -> leo_core.Leo:
+    assistant = leo_core.Leo.__new__(leo_core.Leo)
     assistant.ui = SilentUI()
     assistant.speaker = speaker
     assistant.mic = mic
@@ -150,7 +150,7 @@ def test_ev_hearing_itself_does_not_count_as_an_interruption():
     """The loopback case: a long run of frames, but no louder than the room.
 
     Without the level test this is indistinguishable from the user talking,
-    and E.V. cuts itself off on its own voice every single reply.
+    and Leo cuts itself off on its own voice every single reply.
     """
     mic = FakeMic(energy=40, level=0.025, floor=0.02)  # 40 frames, but quiet
     speaker = FakeSpeaker()
@@ -236,7 +236,7 @@ def test_keeping_the_audio_can_be_switched_off(monkeypatch):
 
 
 def test_the_prompt_to_go_ahead_is_drawn_and_never_spoken():
-    """`ev.ui` is a dead end: nothing it draws may reach the speaker."""
+    """`leo.ui` is a dead end: nothing it draws may reach the speaker."""
     mic = FakeMic(energy=12, level=0.09, floor=0.02)
     speaker = FakeSpeaker()
     assistant = _assistant(mic, speaker)
@@ -351,7 +351,7 @@ def test_a_broken_playback_hook_does_not_cost_the_reply():
 def test_a_speaker_with_no_audio_device_never_claims_playback_started():
     """There is no floor to take, so nothing should be told it was taken.
 
-    This is the `EV_TTS_ENABLED=false` path the whole suite runs under, and
+    This is the `LEO_TTS_ENABLED=false` path the whole suite runs under, and
     also what a machine with no working output device looks like.
     """
     speaker = Speaker()
@@ -369,7 +369,7 @@ def test_the_core_loop_wires_the_hook_to_the_microphone():
     """The reset is only useful if something actually connects the two."""
     import inspect
 
-    source = inspect.getsource(ev_core.EV.start)
+    source = inspect.getsource(leo_core.Leo.start)
     assert "on_playback_start" in source
     assert "reset_levels" in source
 
@@ -411,7 +411,7 @@ def _wired_speaker() -> Speaker:
 
 
 def test_a_clip_queued_before_a_stop_is_never_played():
-    """The failure this prevents is the only one that sounds like two E.V.s.
+    """The failure this prevents is the only one that sounds like two Leos.
 
     `asyncio.to_thread` hands playback to a worker thread, and cancelling the
     await does not stop that thread. So a barge-in can land in the gap
@@ -455,7 +455,7 @@ def test_a_fresh_reply_still_plays_after_an_interruption():
 
 def test_the_player_refuses_a_clip_whose_turn_has_passed():
     """The same contract at the device end, where the thread actually lands."""
-    from ev.audio import _SubprocessPlayer
+    from leo.audio import _SubprocessPlayer
 
     player = _SubprocessPlayer(["true", "{}"])
     assert player.play("anything.mp3", aborted=lambda: True) is False

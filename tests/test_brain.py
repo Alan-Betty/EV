@@ -18,13 +18,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ["GROQ_API_KEY"] = "test-groq-key"
 os.environ["GEMINI_API_KEY"] = "test-gemini-key"
-os.environ["EV_TTS_ENABLED"] = "false"
-os.environ["EV_TEXT_MODE"] = "true"
+os.environ["LEO_TTS_ENABLED"] = "false"
+os.environ["LEO_TEXT_MODE"] = "true"
 
 import httpx  # noqa: E402
 
 import config  # noqa: E402
-from ev.brain import Brain, BrainError  # noqa: E402
+from leo.brain import Brain, BrainError  # noqa: E402
 from tools.schemas import CORE_TOOLS, TOOL_NAMES, TOOL_SPECS  # noqa: E402
 
 # The environment variables above only reach `config` if this module is the
@@ -113,7 +113,7 @@ def test_groq_request_shape_and_tool_parsing():
     assert body["model"] == config.GROQ_MODEL
     assert body["tool_choice"] == "required"
     assert body["messages"][0]["role"] == "system"
-    assert "E.V." in body["messages"][0]["content"]
+    assert "Leo" in body["messages"][0]["content"]
     # Not every tool any more: the schema is filtered per utterance, because
     # sending all of it cost ~2830 of the ~4400 tokens a turn spends against
     # a per-minute budget. What must hold is that the filter is a subset of
@@ -265,13 +265,13 @@ def test_missing_api_key_is_caught_at_construction():
 
 
 def test_core_loop_runs_a_tool_and_records_history():
-    import ev_core
+    import leo_core
 
     async def go():
         client = _client(
             lambda r: _groq_tool_response("chat", {"reply": "Two plus two is four."})
         )
-        assistant = ev_core.EV(text_mode=True)
+        assistant = leo_core.Leo(text_mode=True)
         await assistant._http.aclose()
         assistant._http = client
         assistant.brain = Brain(client)
@@ -289,7 +289,7 @@ def test_core_loop_runs_a_tool_and_records_history():
 
 
 def test_core_loop_holds_and_cancels_a_risky_command():
-    import ev_core
+    import leo_core
 
     async def go():
         client = _client(
@@ -297,7 +297,7 @@ def test_core_loop_holds_and_cancels_a_risky_command():
                 "terminal_command", {"command": "del notes.txt"}
             )
         )
-        assistant = ev_core.EV(text_mode=True)
+        assistant = leo_core.Leo(text_mode=True)
         await assistant._http.aclose()
         assistant._http = client
         assistant.brain = Brain(client)
@@ -322,7 +322,7 @@ def test_core_loop_holds_and_cancels_a_risky_command():
 
 
 def test_core_loop_executes_after_an_affirmative():
-    import ev_core
+    import leo_core
     import tools
 
     async def go():
@@ -331,7 +331,7 @@ def test_core_loop_executes_after_an_affirmative():
                 "terminal_command", {"command": "git reset --hard"}
             )
         )
-        assistant = ev_core.EV(text_mode=True)
+        assistant = leo_core.Leo(text_mode=True)
         await assistant._http.aclose()
         assistant._http = client
         assistant.brain = Brain(client)
@@ -349,12 +349,12 @@ def test_core_loop_executes_after_an_affirmative():
                 return tools.ToolResult.success("Done.")
             return original(name, arguments, cancel)
 
-        ev_core.dispatch = spy
+        leo_core.dispatch = spy
         try:
             await assistant.handle("reset the repo")
             await assistant.handle("yes")
         finally:
-            ev_core.dispatch = original
+            leo_core.dispatch = original
             await assistant.stop()
         return ran
 
@@ -403,7 +403,7 @@ if __name__ == "__main__":
 # field. "Open Gmail and give me a summary of the important mail" produced a
 # flawless browser_task object that way, and it was read out, braces and all.
 def test_a_tool_call_written_as_prose_is_rescued():
-    from ev.brain import _salvage_tool_call
+    from leo.brain import _salvage_tool_call
 
     call = _salvage_tool_call(
         '{"name": "browser_task", "arguments": {"task": "Open Gmail"}}'
@@ -414,7 +414,7 @@ def test_a_tool_call_written_as_prose_is_rescued():
 
 
 def test_a_rescued_call_survives_a_code_fence():
-    from ev.brain import _salvage_tool_call
+    from leo.brain import _salvage_tool_call
 
     call = _salvage_tool_call(
         '```json\n{"name": "screen_task", "arguments": {"task": "open notepad"}}\n```'
@@ -423,7 +423,7 @@ def test_a_rescued_call_survives_a_code_fence():
 
 
 def test_the_nested_function_shape_is_rescued_too():
-    from ev.brain import _salvage_tool_call
+    from leo.brain import _salvage_tool_call
 
     call = _salvage_tool_call(
         '{"function": {"name": "open_app", "arguments": {"app": "chrome"}}}'
@@ -434,7 +434,7 @@ def test_the_nested_function_shape_is_rescued_too():
 def test_ordinary_speech_is_never_mistaken_for_a_tool_call():
     """The strictness is the point: a chat answer that quotes some JSON must
     be spoken, not executed."""
-    from ev.brain import _salvage_tool_call
+    from leo.brain import _salvage_tool_call
 
     assert _salvage_tool_call("Three thirteen point two. Modern of you.") is None
     assert _salvage_tool_call("") is None
@@ -444,6 +444,6 @@ def test_ordinary_speech_is_never_mistaken_for_a_tool_call():
 
 def test_a_rescued_chat_call_stays_prose():
     """Rescuing a `chat` would be a no-op that threw away the actual words."""
-    from ev.brain import _salvage_tool_call
+    from leo.brain import _salvage_tool_call
 
     assert _salvage_tool_call('{"name": "chat", "arguments": {"reply": "hi"}}') is None

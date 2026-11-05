@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Keep the tests deterministic regardless of the developer's own .env.
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import json  # noqa: E402
 
@@ -277,8 +277,8 @@ def test_an_unreadable_action_costs_that_action_and_no_more():
 def test_a_reference_becomes_the_selector_for_that_element():
     """The whole reason the DOM route is reliable: no guessed selectors."""
     page = FakePage()
-    assert _locator(page, "12").selector == '[data-ev="12"]'
-    assert _locator(page, "#12").selector == '[data-ev="12"]'
+    assert _locator(page, "12").selector == '[data-leo="12"]'
+    assert _locator(page, "#12").selector == '[data-leo="12"]'
     # An explicit selector is honoured as written.
     assert _locator(page, ".s-result-item").selector == ".s-result-item"
     # Anything else is visible text, which is how a person would name it.
@@ -306,8 +306,8 @@ def test_every_verb_reaches_the_page():
     for verb in ("goto", "click", "fill", "select", "check", "press", "wheel", "back", "read"):
         assert verb in done, verb
     assert ("goto", "https://shop.test") in page.calls
-    assert ("click", '[data-ev="12"]') in page.calls
-    assert ("fill", '[data-ev="3"]', "gaming mouse") in page.calls
+    assert ("click", '[data-leo="12"]') in page.calls
+    assert ("fill", '[data-leo="3"]', "gaming mouse") in page.calls
     assert gathered and "a row" in gathered[0]
 
 
@@ -380,7 +380,7 @@ def test_a_web_errand_finishes_without_a_single_vision_call(monkeypatch):
     outcome = web_mission("find a gaming mouse", start="shop.test")
     assert outcome.status == "done"
     assert outcome.speech == "It's in your basket."
-    assert ("fill", '[data-ev="3"]', "gaming mouse") in page.calls
+    assert ("fill", '[data-leo="3"]', "gaming mouse") in page.calls
 
 
 def test_the_planner_is_shown_the_page_and_the_history(monkeypatch):
@@ -639,7 +639,7 @@ def test_a_hidden_control_is_forced_rather_than_abandoned():
     page = Hidden()
     run_action(page, Action("click", "1"), [])
     assert [a["force"] for a in attempts] == [False, True]
-    assert ("click", '[data-ev="1"]') in page.calls
+    assert ("click", '[data-leo="1"]') in page.calls
 
 
 def test_a_click_that_is_simply_missing_is_not_forced():

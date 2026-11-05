@@ -34,6 +34,11 @@ class Verdict:
 
 # Patterns that are never worth the risk of a misheard voice command.
 _BLOCKED: tuple[tuple[str, str], ...] = (
+    # WhatsApp has one road, through the `whatsapp` tool and its limits and its
+    # spoken yes. From a shell, wacli could send, forward, or sign the device
+    # out with none of that, and a page could ask for it. Only the harmless
+    # diagnostics get through.
+    (r"\bwacli\b(?!\s+(?:--version\b|--help\b|doctor\b))", "WhatsApp only goes through the whatsapp tool"),
     (r"\brm\s+(-[a-z]*\s+)*-[a-z]*[rf][a-z]*\s+/\s*$", "recursive delete of root"),
     (r"\brm\s+(-[a-z]*\s+)*-[a-z]*[rf][a-z]*\s+[a-z]:[\\/]?\s*$", "recursive delete of a drive root"),
     (r"\bformat\s+[a-z]:", "disk format"),
@@ -116,7 +121,7 @@ _REVIEW: tuple[tuple[str, str], ...] = (
 # Reasons that describe something irreversible or expensive. A spoken "go"
 # is a fine way to confirm opening an app; it is a poor way to confirm a
 # delete, because "go" is one syllable and the microphone is open. These are
-# the verdicts `ev_core` holds to a stricter yes - see `is_affirmative`.
+# the verdicts `leo_core` holds to a stricter yes - see `is_affirmative`.
 HIGH_RISK_REASONS: frozenset[str] = frozenset(
     {
         "deletes files",
@@ -191,7 +196,9 @@ _GUI_REVIEW: tuple[tuple[str, str], ...] = (
         "spends money",
     ),
     (
-        r"\b(send|sending|post|publish|tweet|submit|reply\s+all|forward)\b",
+        # WhatsApp by name, because "message Priya on WhatsApp" has no "send"
+        # in it and this is how the screen route would otherwise reach it.
+        r"\b(send|sending|post|publish|tweet|submit|reply\s+all|forward|whatsapp)\b",
         "sends something other people will see",
     ),
     (

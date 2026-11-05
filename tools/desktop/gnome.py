@@ -1,14 +1,14 @@
-"""GNOME Wayland windows through E.V.'s own Shell extension (org.ev.Windows).
+"""GNOME Wayland windows through Leo's own Shell extension (org.leo.Windows).
 
 Wayland deliberately gives no client a way to list, focus or close another
 client's windows, so the only complete answer on GNOME is code running
-inside the compositor. `ev/gnome/ev-windows@ev.local` is that code, kept to
-five methods. It is optional: without it, E.V. still lists native windows
+inside the compositor. `leo/gnome/leo-windows@leo.local` is that code, kept to
+five methods. It is optional: without it, Leo still lists native windows
 through accessibility and XWayland ones through X11, focuses through the
 overview and closes with alt+F4 - it just has no rectangles for native
 windows and has to drive the keyboard to do what this does in one call.
 
-Installed with `python ev_core.py --install-gnome-extension`. GNOME on
+Installed with `python leo_core.py --install-gnome-extension`. GNOME on
 Wayland loads new extensions only at login, so the first use needs a log
 out and back in, and `--check` says so rather than leaving it a mystery.
 """
@@ -25,30 +25,49 @@ from pathlib import Path
 from tools.desktop import bus
 from tools.desktop.model import WindowInfo
 
-log = logging.getLogger("ev.tools.desktop.gnome")
+log = logging.getLogger("leo.tools.desktop.gnome")
 
-NAME = "org.ev.Windows"
-PATH = "/org/ev/Windows"
-UUID = "ev-windows@ev.local"
-SOURCE = Path(__file__).resolve().parent.parent.parent / "ev" / "gnome" / UUID
+NAME = "org.leo.Windows"
+PATH = "/org/leo/Windows"
+UUID = "leo-windows@leo.local"
+SOURCE = Path(__file__).resolve().parent.parent.parent / "leo" / "gnome" / UUID
 
 
-def available() -> bool:
+# What the extension was called before the rename. A copy installed then keeps
+# answering under this name until the user reinstalls and logs back in, because
+# Wayland only loads an extension at login. So the old name is tried too: losing
+# exact windows and the global kill key over a rename would be a silent downgrade.
+LEGACY_NAME = "org.ev.Windows"
+LEGACY_PATH = "/org/ev/Windows"
+LEGACY_UUID = "ev-windows@ev.local"
+
+
+def _owned(name: str) -> bool:
     try:
         (owner,) = bus.call(
             "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
-            "NameHasOwner", "s", (NAME,), timeout=1.0,
+            "NameHasOwner", "s", (name,), timeout=1.0,
         )
         return bool(owner)
     except Exception:
         return False
 
 
+def _address() -> tuple[str, str]:
+    """The bus name and path of whichever copy is running. New wins."""
+    return (LEGACY_NAME, LEGACY_PATH) if not _owned(NAME) and _owned(LEGACY_NAME) else (NAME, PATH)
+
+
+def available() -> bool:
+    return _owned(NAME) or _owned(LEGACY_NAME)
+
+
 def _call(method: str, window_id: int | None = None) -> object:
+    name, path = _address()
     if window_id is None:
-        (result,) = bus.call(NAME, PATH, NAME, method, timeout=2.0)
+        (result,) = bus.call(name, path, name, method, timeout=2.0)
     else:
-        (result,) = bus.call(NAME, PATH, NAME, method, "t", (int(window_id),), timeout=2.0)
+        (result,) = bus.call(name, path, name, method, "t", (int(window_id),), timeout=2.0)
     return result
 
 
@@ -56,7 +75,7 @@ def list_windows(limit: int = 12) -> list[WindowInfo]:
     try:
         raw = json.loads(str(_call("List")))
     except Exception as exc:
-        log.debug("org.ev.Windows List failed: %s", exc)
+        log.debug("org.leo.Windows List failed: %s", exc)
         return []
     found: list[WindowInfo] = []
     # The extension returns most-recently-used first; the focused window
@@ -109,28 +128,31 @@ def exists(window: WindowInfo) -> bool:
 
 # -- kill-switch hotkey ------------------------------------------------------
 # Wayland lets no client grab a global key; the compositor can. Extension
-# version 2 holds the accelerator and counts presses; E.V. polls the count.
+# version 2 holds the accelerator and counts presses; Leo polls the count.
 # An older extension answers UnknownMethod, and the caller falls back to X11.
 def grab_kill(accelerator: str) -> bool:
     try:
-        (action,) = bus.call(NAME, PATH, NAME, "GrabKill", "s", (accelerator,), timeout=2.0)
+        name, path = _address()
+        (action,) = bus.call(name, path, name, "GrabKill", "s", (accelerator,), timeout=2.0)
     except Exception as exc:
-        log.debug("org.ev.Windows GrabKill failed: %s", exc)
+        log.debug("org.leo.Windows GrabKill failed: %s", exc)
         return False
     return bool(action)
 
 
 def release_kill() -> None:
     try:
-        bus.call(NAME, PATH, NAME, "ReleaseKill", timeout=2.0)
+        name, path = _address()
+        bus.call(name, path, name, "ReleaseKill", timeout=2.0)
     except Exception as exc:
-        log.debug("org.ev.Windows ReleaseKill failed: %s", exc)
+        log.debug("org.leo.Windows ReleaseKill failed: %s", exc)
 
 
 def kill_count() -> int | None:
     """Presses so far, or None when the extension cannot be asked."""
     try:
-        (count,) = bus.call(NAME, PATH, NAME, "KillCount", timeout=1.0)
+        name, path = _address()
+        (count,) = bus.call(name, path, name, "KillCount", timeout=1.0)
     except Exception:
         return None
     return int(count)
@@ -152,6 +174,8 @@ def install() -> tuple[bool, str]:
     tool = shutil.which("gnome-extensions")
     enabled = False
     if tool:
+        # Two copies would fight over the same key.
+        subprocess.run([tool, "disable", LEGACY_UUID], capture_output=True, text=True, timeout=10)
         done = subprocess.run([tool, "enable", UUID], capture_output=True, text=True, timeout=10)
         enabled = done.returncode == 0
     if available():

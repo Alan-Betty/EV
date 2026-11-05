@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>E.V. — a voice assistant that acts on your desktop</title>
-    <meta name="description" content="E.V. is a voice assistant for Windows and Ubuntu that opens apps, moves files, runs commands, drives the browser and takes the mouse when it has to. About 120 MB of RAM, guarded by Confirm? on anything risky." />
+    <title>L.E.O. — Latency-optimized Executive Operator</title>
+    <meta name="description" content="L.E.O. (Latency-optimized Executive Operator) is a voice assistant for Windows and Linux (Ubuntu, Hyprland). It opens apps, moves files, runs commands and drives the browser, and asks Confirm? before anything risky." />
     <meta name="theme-color" content="#090A0F" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <!-- Entrance and reveal styles only hide content once we know JS will show it again. -->
@@ -15,7 +15,7 @@
 
     <header id="site-header" class="site-header fixed inset-x-0 top-0 z-50" data-scrolled="false">
       <div class="shell flex h-16 items-center gap-8">
-        <a href="#top" class="group -ml-1 flex items-center gap-3 rounded-lg p-1" aria-label="E.V., back to top">
+        <a href="#top" class="group -ml-1 flex items-center gap-3 rounded-lg p-1" aria-label="L.E.O., back to top">
           <span class="relative grid size-8 place-items-center">
             <span aria-hidden="true" class="logo-aura absolute -inset-2.5 rounded-full animate-aura"></span>
             <svg viewBox="0 0 32 32" fill="none" class="relative size-8" aria-hidden="true">
@@ -25,10 +25,10 @@
                 </linearGradient>
               </defs>
               <rect x=".5" y=".5" width="31" height="31" rx="8.5" fill="#0F1117" stroke="rgba(255,255,255,.1)" />
-              <path d="M8.5 10.5h6M8.5 16h5M8.5 21.5h6M8.5 10.5v11M17.5 10.5l3.25 11 3.25-11" stroke="url(#logo-g)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+              <path d="M11 9.5v13h10" stroke="url(#logo-g)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
           </span>
-          <span class="text-[14px] font-semibold tracking-[0.18em] text-white">E.V.</span>
+          <span class="text-[14px] font-semibold tracking-[0.18em] text-white">L.E.O.</span>
         </a>
 
         <nav aria-label="Primary" class="hidden md:block">
@@ -73,21 +73,11 @@
 
         <div class="shell grid items-center gap-16 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] lg:gap-8">
           <div class="relative z-10">
-            <a id="hero-tag" href="#features" data-enter style="--i: 0" class="tag-pill">
-              <span class="relative flex size-1.5" aria-hidden="true">
-                <span class="absolute inset-0 rounded-full bg-pulse animate-ping"></span>
-                <span class="relative size-1.5 rounded-full bg-pulse"></span>
-              </span>
-              <span class="text-slate-200" data-iteration-tag>[ BUILD: ITERATION 14 ]</span>
-              <span class="text-slate-600" aria-hidden="true">::</span>
-              <span data-content="hero.status">WINDOWS + UBUNTU WAYLAND OPERATIONAL</span>
-            </a>
+            <h1 id="hero-title" data-split class="hero-title text-balance text-display-sm font-semibold sm:text-display-md xl:text-display-lg" data-content="hero.headline">L.E.O.</h1>
 
-            <h1 id="hero-title" data-split class="hero-title mt-8 text-balance text-display-sm font-semibold sm:text-display-md xl:text-display-lg" data-content="hero.headline">Intelligence at the Velocity of Thought.</h1>
+            <p data-enter style="--i: 2" class="mt-6 max-w-[32rem] text-pretty text-[17px] leading-8 text-slate-400" data-content="hero.sub">Latency-optimized Executive Operator. Say Leo, keep talking: it opens apps, moves files, runs commands and drives the browser.</p>
 
-            <p data-enter style="--i: 4" class="mt-6 max-w-[32rem] text-pretty text-[17px] leading-8 text-slate-400" data-content="hero.sub">E.V. is a voice assistant that does things on your computer. It opens apps, moves files, runs commands, drives the browser, and takes the mouse when it has to. Say its name once and keep talking.</p>
-
-            <div data-enter style="--i: 5" class="mt-10 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+            <div data-enter style="--i: 3" class="mt-10 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
               <div class="group/cta relative">
                 <a id="hero-download" href="#download" class="btn-primary h-[52px] w-full pl-4 pr-3 font-semibold sm:w-auto" aria-describedby="hero-sha">
                   <span data-icon class="grid size-[18px] place-items-center"></span>
@@ -102,18 +92,18 @@
               </div>
               <a href="#demo" class="btn-ghost h-[52px]">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-[18px] text-electric" aria-hidden="true"><path d="m5 7 5 5-5 5" /><path d="M12.5 17H19" /></svg>
-                Launch interactive terminal demo
+                Run the demo
               </a>
             </div>
 
-            <p id="hero-alt" data-enter style="--i: 6" class="mt-6 text-[13px] text-slate-500"></p>
+            <p id="hero-alt" data-enter style="--i: 4" class="mt-6 text-[13px] text-slate-500"></p>
           </div>
 
           <div class="face-wrap relative mx-auto w-full max-w-[440px] sm:max-w-[540px] lg:-mr-6 lg:max-w-none">
             <div id="face-stage" class="face-stage relative aspect-[5/4] w-full">
-              <canvas id="face" class="absolute inset-0 size-full cursor-pointer" role="img" aria-label="E.V.'s face. Two glowing eyes that follow your pointer and change mood. Click it to poke it."></canvas>
+              <canvas id="face" class="absolute inset-0 size-full cursor-pointer" role="img" aria-label="L.E.O.'s face. Two glowing eyes that follow your pointer and change mood. Click it to poke it."></canvas>
             </div>
-            <div id="face-moods" data-enter style="--i: 7" class="mt-6 flex flex-wrap justify-center gap-1.5" role="group" aria-label="Try one of E.V.'s moods"></div>
+            <div id="face-moods" data-enter style="--i: 5" class="mt-6 flex flex-wrap justify-center gap-1.5" role="group" aria-label="Try one of L.E.O.'s moods"></div>
           </div>
         </div>
       </section>
@@ -123,7 +113,6 @@
         <div class="shell">
           <div class="section-head" data-reveal>
             <h2 id="demo-title" data-content="demo.title">Watch it hear, plan and act</h2>
-            <p data-content="demo.body">Pick an errand. Each one replays a run through E.V.'s real tools. Pick another mid-run to cut in, the way you would by talking over it.</p>
           </div>
 
           <div class="sim-window relative mt-12" data-reveal>
@@ -135,7 +124,7 @@
                   <span class="size-2.5 rounded-full bg-white/[0.12]"></span>
                   <span class="size-2.5 rounded-full bg-white/[0.12]"></span>
                 </div>
-                <p id="sim-title" class="min-w-0 flex-1 truncate text-center font-mono text-[11.5px] text-slate-400 sm:text-[12px]">E.V. - Idle</p>
+                <p id="sim-title" class="min-w-0 flex-1 truncate text-center font-mono text-[11.5px] text-slate-400 sm:text-[12px]">L.E.O. - Idle</p>
                 <span id="sim-state" class="state-pill" data-state="idle">[IDLE]</span>
               </div>
 
@@ -150,7 +139,7 @@
                 </div>
 
                 <div class="flex min-w-0 flex-col bg-black/30">
-                  <p class="flex h-10 items-center border-b border-white/[0.06] px-4 font-mono text-[11px] text-slate-500">~/EV</p>
+                  <p class="flex h-10 items-center border-b border-white/[0.06] px-4 font-mono text-[11px] text-slate-500">~/leo</p>
                   <ol id="sim-term" class="h-[280px] overflow-y-auto px-4 py-3 font-mono text-[12px] leading-[1.75] sm:text-[12.5px] lg:h-auto lg:flex-1" aria-label="Tool calls"></ol>
                 </div>
               </div>
@@ -164,18 +153,17 @@
         <div class="shell">
           <div class="section-head" data-reveal>
             <h2 id="features-title" data-content="features.title">Built to act, not only answer</h2>
-            <p data-content="features.body">One loop owns everything: listen, transcribe, decide, act, speak. Every part of it closes the gap between saying something and it being done, without handing the model the keys.</p>
           </div>
 
           <div class="mt-14 grid gap-3 sm:grid-cols-2 lg:grid-cols-6 lg:gap-4" data-reveal-group>
             <article class="bento sheen sm:col-span-2 lg:col-span-4">
               <div class="bento-copy">
                 <h3 data-content="features.voice.title">Full-duplex voice</h3>
-                <p data-content="features.voice.body">Say "E.V." once and keep talking. Talk over a reply and it stops mid-word to listen. It learns your voice and its own, so it never answers itself on loudspeakers.</p>
+                <p data-content="features.voice.body">Say "Leo" once and keep talking. Talk over a reply and it stops mid-word to listen, and it knows its own voice, so it never answers itself on loudspeakers.</p>
               </div>
               <div class="bento-visual mt-auto px-5 pb-6 sm:px-6" aria-hidden="true">
                 <div class="duplex">
-                  <div class="duplex-lane"><span class="duplex-label">E.V.</span><div class="duplex-bars" data-lane="ev"></div></div>
+                  <div class="duplex-lane"><span class="duplex-label">L.E.O.</span><div class="duplex-bars" data-lane="leo"></div></div>
                   <div class="duplex-lane"><span class="duplex-label">you</span><div class="duplex-bars" data-lane="you"></div></div>
                   <span class="duplex-cut"><span>barge-in</span></span>
                 </div>
@@ -238,7 +226,7 @@
             <article class="bento sheen sm:col-span-2 lg:col-span-3">
               <div class="bento-copy">
                 <h3 data-content="features.web.title">Web errands without screenshots</h3>
-                <p data-content="features.web.body">E.V. reads the page, numbers every control and plans in plain text. It remembers what it already clicked, so one mouse means one mouse in the basket.</p>
+                <p data-content="features.web.body">L.E.O. reads the page, numbers every control and plans in plain text. It remembers what it already clicked, so one mouse means one mouse in the basket.</p>
               </div>
               <div class="bento-visual mt-auto px-5 pb-6 sm:px-6" aria-hidden="true">
 <pre class="overflow-x-auto rounded-xl border border-white/[0.06] bg-black/40 px-3.5 py-3 font-mono text-[11.5px] leading-[1.75] text-slate-400"><code><span class="tk-d">[12]</span> link   <span class="tk-s">"Logitech G502 X"</span>  ₹4,295
@@ -256,7 +244,6 @@
         <div class="shell">
           <div class="section-head" data-reveal>
             <h2 id="activity-title" data-content="activity.title">Fourteen iterations, in the open</h2>
-            <p data-content="activity.body">Every commit so far, then a replay of what a session writes as it runs. Filter it, search it, copy any hash.</p>
           </div>
 
           <div class="mt-12 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]" data-reveal>
@@ -278,7 +265,7 @@
                     <kbd class="kbd hidden sm:inline-flex" aria-hidden="true">/</kbd>
                   </label>
                   <button id="log-pause" type="button" class="log-pause" aria-pressed="false" data-live="true">
-                    <span class="log-live-dot" aria-hidden="true"></span><span data-label>Live</span>
+                    <span class="log-live-dot" aria-hidden="true"></span><span data-label>Replay</span>
                   </button>
                 </div>
               </div>
@@ -306,8 +293,8 @@
         <div aria-hidden="true" class="download-glow absolute inset-x-0 top-0 -z-10 h-[520px]"></div>
         <div class="shell">
           <div class="section-head" data-reveal>
-            <h2 id="download-title" data-content="download.title">Get E.V.</h2>
-            <p data-content="download.body">Grab it for your system, run the setup line, add a free Groq or Gemini key, then check everything with python ev_core.py --check.</p>
+            <h2 id="download-title" data-content="download.title">Get L.E.O.</h2>
+            <p data-content="download.body">Grab it for your system, run the setup line, add a free Groq or Gemini key, then check everything with python leo_core.py --check.</p>
           </div>
 
           <div class="mt-10 flex flex-col gap-4 sm:flex-row sm:items-center" data-reveal>
@@ -337,13 +324,12 @@
     <footer class="border-t border-white/[0.06]">
       <div class="shell flex flex-col gap-8 py-12 lg:flex-row lg:items-center lg:justify-between">
         <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
-          <a href="#top" class="inline-flex items-center gap-3 rounded-lg" aria-label="E.V., back to top">
-            <svg viewBox="0 0 32 32" fill="none" class="size-7" aria-hidden="true"><rect x=".5" y=".5" width="31" height="31" rx="8.5" fill="#0F1117" stroke="rgba(255,255,255,.1)" /><path d="M8.5 10.5h6M8.5 16h5M8.5 21.5h6M8.5 10.5v11M17.5 10.5l3.25 11 3.25-11" stroke="url(#logo-g)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
-            <span class="text-[14px] font-semibold tracking-[0.18em] text-white">E.V.</span>
+          <a href="#top" class="inline-flex items-center gap-3 rounded-lg" aria-label="L.E.O., back to top">
+            <svg viewBox="0 0 32 32" fill="none" class="size-7" aria-hidden="true"><rect x=".5" y=".5" width="31" height="31" rx="8.5" fill="#0F1117" stroke="rgba(255,255,255,.1)" /><path d="M11 9.5v13h10" stroke="url(#logo-g)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            <span class="text-[14px] font-semibold tracking-[0.18em] text-white">L.E.O.</span>
           </a>
-          <p class="status-pill" role="status">
-            <span class="relative flex size-2" aria-hidden="true"><span class="absolute inset-0 rounded-full bg-pulse animate-ping"></span><span class="relative size-2 rounded-full bg-pulse"></span></span>
-            All Systems Nominal — <span data-tests class="tabular">950</span> tests passing offline
+          <p class="status-pill">
+            <span data-tests class="tabular">950</span> offline tests
           </p>
         </div>
 
@@ -351,7 +337,7 @@
           <a class="footer-link" data-link="docs" href="#">Overview</a>
           <a class="footer-link" data-link="quickstart" href="#">Quickstart</a>
           <a class="footer-link" data-link="devlog" href="#">Devlog</a>
-          <a data-repo href="#" class="gh-badge" rel="noopener" aria-label="E.V. on GitHub">
+          <a data-repo href="#" class="gh-badge" rel="noopener" aria-label="L.E.O. on GitHub">
             <span class="flex items-center gap-1.5 px-2.5"><svg viewBox="0 0 24 24" fill="currentColor" class="size-3.5" aria-hidden="true"><path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.2.5-2.3 1.3-3.1-.1-.4-.6-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.8.1 3.2.8.8 1.3 1.9 1.3 3.2 0 4.6-2.8 5.6-5.5 5.9.5.4.9 1.1.9 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3" /></svg>GitHub</span>
             <span data-stars class="border-l border-white/10 px-2.5 tabular text-slate-300"></span>
           </a>

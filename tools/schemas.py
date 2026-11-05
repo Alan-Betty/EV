@@ -1,6 +1,6 @@
 """Canonical JSON-Schema tool definitions exposed to the LLM.
 
-These are provider-neutral. `ev.brain` translates them into whatever shape
+These are provider-neutral. `leo.brain` translates them into whatever shape
 Groq (OpenAI-compatible) or Gemini expects, so a tool is described exactly
 once, here.
 """
@@ -13,10 +13,10 @@ from typing import Any
 
 ToolSpec = dict[str, Any]
 
-# What `chat` may put on E.V.'s face. Every one but "demo" is a mood in
-# `ev/face/expressions.json`, which a test checks; the loop's own states -
+# What `chat` may put on Leo's face. Every one but "demo" is a mood in
+# `leo/face/expressions.json`, which a test checks; the loop's own states -
 # listening, speaking, focused, the red lockdown alert - are deliberately
-# not offered, because wearing one of those would be a lie about what E.V.
+# not offered, because wearing one of those would be a lie about what Leo
 # is doing.
 FACE_MOODS: tuple[str, ...] = (
     "happy", "sad", "angry", "surprised", "confused", "skeptical", "excited",
@@ -125,6 +125,7 @@ TOOL_SPECS: list[ToolSpec] = [
     },
     {
         "name": "dev_workflow",
+        "on_demand": True,
         "description": (
             "Developer macro: open VS Code on a folder, spawn an integrated "
             "terminal, start the Claude Code CLI, optionally type a prompt."
@@ -262,8 +263,9 @@ TOOL_SPECS: list[ToolSpec] = [
     },
     {
         "name": "backlog",
+        "on_demand": True,
         "description": (
-            "What E.V. itself left unfinished - interrupted commands and "
+            "What Leo itself left unfinished - interrupted commands and "
             "failures: 'what's outstanding', 'retry the first one'. The "
             "user's own list is manage_todo."
         ),
@@ -302,6 +304,8 @@ TOOL_SPECS: list[ToolSpec] = [
                 "key": {"type": "string", "description": "1-2 words; omit for a note."},
                 "value": {"type": "string"},
                 "forget": {"type": "boolean"},
+                "about": {"type": "string", "description": "Person, or 'topic: name'."},
+                "link": {"type": "string", "description": "e.g. 'sister: Sam'."},
             },
             "required": [],
         },
@@ -316,6 +320,7 @@ TOOL_SPECS: list[ToolSpec] = [
             "type": "object",
             "properties": {
                 "key": {"type": "string", "description": "Name or search words."},
+                "about": {"type": "string", "description": "Person or topic."},
             },
             "required": [],
         },
@@ -325,7 +330,7 @@ TOOL_SPECS: list[ToolSpec] = [
         "description": (
             "The user's own to-do list, kept between sessions: 'add milk "
             "to my list', 'what's on my list'. Not the backlog, which is "
-            "what E.V. itself left unfinished."
+            "what Leo itself left unfinished."
         ),
         "parameters": {
             "type": "object",
@@ -531,7 +536,71 @@ TOOL_SPECS: list[ToolSpec] = [
         },
     },
     {
+        "name": "system_control",
+        "on_demand": True,
+        "description": (
+            "This machine: status, processes, ports; and servers you start: "
+            "start, stop, list, logs."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["status", "processes", "ports", "start", "stop", "list", "logs"],
+                },
+                "name": {"type": "string", "description": "Server name, process filter or port."},
+                "command": {"type": "string", "description": "What start runs."},
+                "directory": {"type": "string", "description": "Where start runs it."},
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "dev_session",
+        "on_demand": True,
+        "description": (
+            "Leave a coding job running in Claude Code on its own branch: start, "
+            "status, continue, stop. Reports back when it stops."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["start", "status", "continue", "stop"]},
+                "goal": {"type": "string", "description": "What to do, or what to do next."},
+                "directory": {"type": "string", "description": "The project."},
+                "id": {"type": "string", "description": "Omit for the latest."},
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "whatsapp",
+        "on_demand": True,
+        "description": (
+            "The user's WhatsApp: search, recent, fetch a file, send_to_phone a local "
+            "file, or send one message after a spoken yes."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["search", "recent", "fetch", "send_to_phone", "send"],
+                },
+                "query": {"type": "string"},
+                "contact": {"type": "string", "description": "As the user said it."},
+                "message": {"type": "string", "description": "What to say; drafted in their style."},
+                "exact": {"type": "boolean", "description": "They dictated it."},
+                "id": {"type": "string", "description": "For fetch."},
+                "path": {"type": "string", "description": "For send_to_phone."},
+            },
+            "required": ["action"],
+        },
+    },
+    {
         "name": "media_control",
+        "on_demand": True,
         "description": (
             "Music already playing, and system volume: pause, skip, what's "
             "on, louder, mute. New music is browser_task."
@@ -568,7 +637,7 @@ TOOL_SPECS: list[ToolSpec] = [
                     "type": "string",
                     "description": (
                         "What to say out loud. Two or three sentences, 35 "
-                        "words max, in E.V.'s warm dry voice."
+                        "words max, in Leo's warm dry voice."
                     ),
                 },
                 "mood": {
@@ -710,6 +779,10 @@ _TRIGGERS: dict[str, tuple[str, ...]] = {
         "note that", "note down", "make a note", "take a note", "my notes",
         "your notes", "where did i", "where's my", "wheres my", "what did i",
         "did i tell", "i told you", "last time",
+        # People and projects are asked about by name, with nothing else in
+        # the sentence to say that memory is what is wanted.
+        "know about", "who is", "who's", "sister", "brother", "mum", "mom", "dad", "wife",
+        "husband", "girlfriend", "boyfriend", "friend", "colleague", "birthday",
     ),
     "recall_fact": (),
     "manage_todo": (),
@@ -750,6 +823,21 @@ _TRIGGERS: dict[str, tuple[str, ...]] = {
         "previous", "playing", "play", "spotify", "turn it up", "turn it down",
         "sound", "audio",
     ),
+    "dev_session": (
+        "coding session", "code session", "dev session", "session", "coding agent", "claude code",
+        "fix the bug", "fix this bug", "fix that bug", "implement", "refactor", "make the tests pass",
+        "write the code", "add a feature", "on its own branch", "worktree",
+    ),
+    "whatsapp": (
+        "whatsapp", "message", "messages", "msg", "texted", "text her", "text him", "text my",
+        "text them", "tell my", "what did", "did they say", "did she say", "did he say",
+        "to my phone", "on my phone", "chat with",
+    ),
+    "system_control": (
+        "cpu", "ram", "memory usage", "disk space", "free space", "process", "processes",
+        "port", "ports", "server", "servers", "localhost", "uptime", "system status",
+        "resources", "logs", "log file", "spin up", "dev server", "hogging", "using so much",
+    ),
     "browser_task": (
         "browser", "chrome", "edge", "firefox", "website", "webpage", "site",
         "web", "online", "page", "link", "result", "go to", "goto",
@@ -764,7 +852,7 @@ _TRIGGERS: dict[str, tuple[str, ...]] = {
     # An errand rather than an action: words that describe an outcome
     # somebody wants reached, with the steps left unsaid. Generous on
     # purpose - a false positive costs tokens on one turn, a false negative
-    # costs the user a job E.V. could have finished by itself.
+    # costs the user a job Leo could have finished by itself.
     "agent_task": (
         "buy", "order", "cart", "basket", "checkout", "book", "reserve",
         "apply", "sign up", "subscribe", "compare", "cheapest", "under",
@@ -809,17 +897,53 @@ _DOMAIN = re.compile(
 )
 
 
-def select_tools(*texts: str) -> list[str]:
+# -- the on-demand tier ------------------------------------------------------
+#
+# `"on_demand": True` on a spec means the tool is only ever sent when this
+# utterance asks for it, or a recent one did. It leaves the full schema, so it
+# does not count against the two-turn ceiling that `tests/test_memory_tools.py`
+# enforces - which is what lets a narrow tool exist at all when there are 28
+# tokens of headroom. A flag rather than a second list, because `_ALLOWED_ARGS`,
+# the aliases and every schema test read `TOOL_SPECS`: a tool missing from it
+# silently loses all its arguments.
+#
+# The cost is that the tool-failure retry cannot rescue a miss here, since the
+# retry only knows what was triggered. So triggers for these are generous, and
+# `ON_DEMAND_MAX` bounds how many can ride on one turn: an utterance that
+# matches every list must still fit the budget.
+ON_DEMAND_MAX = 2
+
+ON_DEMAND_TOOLS: frozenset[str] = frozenset(
+    spec["name"] for spec in TOOL_SPECS if spec.get("on_demand")
+)
+
+
+def select_tools(
+    *texts: str, sticky: Sequence[str] = (), max_on_demand: int = ON_DEMAND_MAX
+) -> list[str]:
     """The tools worth offering for this utterance, in declaration order.
 
     Never returns an empty list: `CORE_TOOLS` is always in it, so a
-    transcript nothing matches still reaches `chat`.
+    transcript nothing matches still reaches `chat`. `sticky` is on-demand
+    tools a recent turn used: "continue it" names nothing, and without this
+    the tool that "it" refers to would have vanished by then.
     """
     haystack = " ".join(text for text in texts if text).lower()
     chosen = set(CORE_TOOLS)
+    wanted: list[tuple[int, str]] = []
     for name, pattern in _TRIGGER_PATTERNS.items():
-        if pattern.search(haystack):
+        match = pattern.search(haystack)
+        if not match:
+            continue
+        if name in ON_DEMAND_TOOLS:
+            wanted.append((match.start(), name))
+        else:
             chosen.add(name)
+    # What was said first is what was asked for, and what was said goes ahead
+    # of what merely was recent.
+    ranked = [name for _position, name in sorted(wanted)]
+    ranked += [name for name in sticky if name in ON_DEMAND_TOOLS and name not in ranked]
+    chosen.update(ranked[: max(0, max_on_demand)])
     if _DOMAIN.search(haystack):
         chosen.add("browser_task")
     for family in _FAMILIES:
@@ -830,16 +954,33 @@ def select_tools(*texts: str) -> list[str]:
     return [spec["name"] for spec in TOOL_SPECS if spec["name"] in chosen]
 
 
+def base_specs() -> list[ToolSpec]:
+    """The full schema: everything except the on-demand tier."""
+    return [spec for spec in TOOL_SPECS if not spec.get("on_demand")]
+
+
+def full_schema_names(selected: Sequence[str]) -> list[str]:
+    """Every base tool, plus the on-demand tools already picked this turn.
+
+    What "put the whole schema back" means now. Dropping the on-demand picks
+    on a retry would take away the one tool the user just asked for by name.
+    """
+    wanted = set(selected)
+    return [
+        spec["name"] for spec in TOOL_SPECS if not spec.get("on_demand") or spec["name"] in wanted
+    ]
+
+
 def _specs_for(names: Sequence[str] | None) -> list[ToolSpec]:
-    """`TOOL_SPECS` filtered to `names`, or all of them when `names` is None.
+    """`TOOL_SPECS` filtered to `names`, or the full schema when `names` is None.
 
     An unknown name is ignored rather than raised on: the selector is a
     heuristic and a typo in it must not take the assistant down.
     """
     if names is None:
-        return list(TOOL_SPECS)
+        return base_specs()
     wanted = set(names)
-    return [spec for spec in TOOL_SPECS if spec["name"] in wanted] or list(TOOL_SPECS)
+    return [spec for spec in TOOL_SPECS if spec["name"] in wanted] or base_specs()
 
 
 def to_openai_tools(names: Sequence[str] | None = None) -> list[dict[str, Any]]:

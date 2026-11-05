@@ -27,7 +27,7 @@ import config
 from tools.desktop import system
 from tools.desktop.model import EDITABLE_ROLES, Element, Tree, WindowInfo
 
-log = logging.getLogger("ev.tools.desktop.a11y")
+log = logging.getLogger("leo.tools.desktop.a11y")
 
 _enabled_once = False
 

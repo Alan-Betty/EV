@@ -1,4 +1,4 @@
-// Reads E.V.'s own git history and test suite (the repo this site lives in)
+// Reads L.E.O.'s own git history and test suite (the repo this site lives in)
 // into src/data/repo.json, so the page states real numbers. Runs before dev
 // and build. Without git or the parent repo it keeps the committed JSON.
 import { execFileSync } from 'node:child_process';
@@ -15,7 +15,7 @@ function git(...args) {
 }
 
 try {
-  // E.V.'s own commits: anything that touched the project outside this site.
+  // L.E.O.'s own commits: anything that touched the project outside this site.
   const commits = git('log', '--format=%H%x09%ad%x09%s', '--date=short', '--', '.', ':(exclude)site')
     .split('\n')
     .filter(Boolean)

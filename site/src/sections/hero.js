@@ -1,4 +1,4 @@
-import { CHANNELS, PLATFORMS, REPO, primaryFor } from '../data/release.js';
+import { CHANNELS, PLATFORMS, primaryFor } from '../data/release.js';
 import { createFace } from '../lib/face.js';
 import { platformIcon } from '../lib/icons.js';
 import { store } from '../lib/store.js';
@@ -38,8 +38,6 @@ export function initHero() {
     if (pick) store.set('platform', pick);
   });
 
-  document.querySelectorAll('[data-iteration-tag]').forEach((el) => (el.textContent = `[ BUILD: ITERATION ${REPO.iteration.number} ]`));
-
   initFace(cta);
 }
 
@@ -77,7 +75,7 @@ function initFace(cta) {
   // distance covered over the last ~100ms, not between two events: pointer
   // events can be 1ms apart, and a 5px hop over 1ms reads as 5000px/s.
   // It also has to happen near the face; a flick across the nav bar is not
-  // something E.V. would see.
+  // something L.E.O. would see.
   const trail = [];
   let lastStartle = -1e9, idleTimer = 0, asleep = false;
   const doze = () => {

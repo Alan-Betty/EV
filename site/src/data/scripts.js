@@ -1,4 +1,4 @@
-// Simulator scripts. Each replays one errand through E.V.'s real tools, with
+// Simulator scripts. Each replays one errand through L.E.O.'s real tools, with
 // the arguments those tools really take: what was heard, the plan, an optional
 // spoken confirmation, the tool calls, and the spoken reply.
 // `ms` on a step is the duration shown next to it once it finishes.
@@ -7,7 +7,7 @@ export const SCRIPTS = [
   {
     id: 'error',
     label: 'Read the error on screen & hand it to Claude Code',
-    heard: 'E.V., what does that error say? Get Claude Code to fix it.',
+    heard: 'Leo, what does that error say? Get Claude Code to fix it.',
     plan: 'take_screenshot to read the error, then dev_workflow to start Claude Code with it',
     steps: [
       { cmd: 'take_screenshot question="what does the error say"', ms: 1840, out: ['frame 1280px  95 KB  sent to Gemini vision', 'TypeError: cannot unpack non-iterable NoneType  (router.py:218)'] },

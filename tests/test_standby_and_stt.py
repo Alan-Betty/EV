@@ -10,7 +10,7 @@ Three regressions live here, all reported from real use:
   shelled out to `cmd /c start`, which pops a *modal dialog* for a name
   Windows cannot find and blocks until it is dismissed.
 * **A garbled transcript became a confidently wrong action.** Whisper reports
-  how sure it was; E.V. was asking for plain `json` and throwing it away.
+  how sure it was; Leo was asking for plain `json` and throwing it away.
 
 Everything here is offline. No microphone, no network, no program launched.
 """
@@ -24,13 +24,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 
 import config  # noqa: E402
-from ev.session import Intent, Mode, is_resume_phrase, match_intent  # noqa: E402
-from ev.stt import Transcript, _score  # noqa: E402
+from leo.session import Intent, Mode, is_resume_phrase, match_intent  # noqa: E402
+from leo.stt import Transcript, _score  # noqa: E402
 
 
 # -- standby recovery --------------------------------------------------------
@@ -41,7 +41,7 @@ from ev.stt import Transcript, _score  # noqa: E402
         "Wake up!",
         "hey wake up",
         "okay wake up",
-        "EV, wake up",
+        "Leo, wake up",
         "you awake?",
         "you there?",
         "come back",
@@ -179,7 +179,7 @@ def test_malformed_segments_are_skipped_not_fatal():
 # -- the decoding prompt -----------------------------------------------------
 @pytest.fixture
 def transcriber():
-    from ev.stt import Transcriber
+    from leo.stt import Transcriber
 
     return Transcriber()
 

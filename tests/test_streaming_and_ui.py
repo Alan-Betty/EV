@@ -5,8 +5,8 @@ tool-call arguments arrive a few characters at a time and `json.loads` cannot
 help until the last one lands. Getting this wrong means either speaking
 garbage or losing the reply entirely.
 
-The UI tests pin down the structural reason E.V. cannot read its own chrome
-aloud: `ev.ui` renders, and returns nothing that could be spoken.
+The UI tests pin down the structural reason Leo cannot read its own chrome
+aloud: `leo.ui` renders, and returns nothing that could be spoken.
 """
 
 from __future__ import annotations
@@ -19,13 +19,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 
 import config  # noqa: E402
-from ev import ui as ui_module  # noqa: E402
-from ev.brain import _SentenceEmitter, partial_reply  # noqa: E402
+from leo import ui as ui_module  # noqa: E402
+from leo.brain import _SentenceEmitter, partial_reply  # noqa: E402
 
 
 # -- partial JSON ------------------------------------------------------------
@@ -107,9 +107,9 @@ def test_never_repeats_text():
 
 
 def test_holds_back_fragments_shorter_than_the_minimum(monkeypatch):
-    """"E.V." parses as a finished sentence; it is not worth a round trip."""
+    """"Leo" parses as a finished sentence; it is not worth a round trip."""
     monkeypatch.setattr(config, "TTS_STREAM_MIN_CHARS", 12)
-    spoken, _ = _collect(["E.V. is the assistant here."])
+    spoken, _ = _collect(["Leo is the assistant here."])
     assert spoken == []
 
 

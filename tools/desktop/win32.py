@@ -8,7 +8,7 @@ dependency and no measurable memory cost.
 Close is `WM_CLOSE`, posted rather than sent. It is the same message the
 title bar's X sends, so an editor with unsaved work asks its own "Save
 changes?" question instead of losing the work - and posting means a window
-that is busy, or that is showing that very dialog, cannot block E.V. while
+that is busy, or that is showing that very dialog, cannot block Leo while
 it decides.
 """
 
@@ -21,7 +21,7 @@ from typing import Any
 from tools.desktop.model import WindowInfo
 from tools.desktop.system import IS_WINDOWS
 
-log = logging.getLogger("ev.tools.desktop.win32")
+log = logging.getLogger("leo.tools.desktop.win32")
 
 if IS_WINDOWS:
     import ctypes

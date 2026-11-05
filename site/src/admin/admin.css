@@ -83,6 +83,7 @@
 .platform { @apply rounded-xl border border-white/[0.06] bg-black/20 p-4; }
 .platform-icon { @apply grid size-7 place-items-center rounded-lg border border-white/[0.08] bg-white/[0.04]; }
 .platform-body { @apply mt-3 space-y-3; }
+.platform-body:empty { display: none; }
 
 .dropzone {
   @apply flex cursor-pointer flex-col items-center gap-1 rounded-xl border border-dashed border-white/15 px-4 py-6 text-center

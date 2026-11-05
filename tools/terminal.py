@@ -19,7 +19,7 @@ from tools.base import (
 )
 from tools.safety import Risk, classify
 
-log = logging.getLogger("ev.tools.terminal")
+log = logging.getLogger("leo.tools.terminal")
 
 
 def _shell_argv(command: str, shell: str) -> list[str] | None:
@@ -31,12 +31,33 @@ def _shell_argv(command: str, shell: str) -> list[str] | None:
         return [exe, "-lc", command] if exe else None
 
     # Default: PowerShell. Prefer pwsh 7 when present, fall back to 5.1.
-    exe = resolve_executable("pwsh") or resolve_executable("powershell")
+    exe = _powershell()
     if not exe:
         return None
     # -NoLogo roughly halves PowerShell 5.1's startup cost, which dominates
     # the latency of a short command.
     return [exe, "-NoProfile", "-NonInteractive", "-NoLogo", "-Command", command]
+
+
+def _pick_shell(requested: str) -> str:
+    """The shell to run under: what was asked for, if this OS can honour it.
+
+    The schema offers `powershell`, `cmd` and `bash` on every platform and the
+    model picks from that, so off Windows it can ask for a shell that was
+    never going to exist. Refusing costs the whole command; bash at least runs
+    it, and the ordinary case - no shell named at all - was failing here with
+    "No powershell on this machine".
+    """
+    name = (requested or "").strip().lower()
+    if IS_WINDOWS:
+        return name or "powershell"
+    if name == "cmd" or not name or (name == "powershell" and not _powershell()):
+        return "bash"
+    return name
+
+
+def _powershell() -> str | None:
+    return resolve_executable("pwsh") or resolve_executable("powershell")
 
 
 # Process bookkeeping nobody wants read aloud: PIDs, handles, job tables.
@@ -64,7 +85,7 @@ def _summarise(command: str, returncode: int, output: str) -> str:
     """Turn command output into something worth saying out loud.
 
     Raw console output is written for a screen, not an ear. Reading it back
-    verbatim means E.V. announcing process IDs and table headers, so the
+    verbatim means Leo announcing process IDs and table headers, so the
     common shapes get rewritten into a plain sentence instead.
     """
     if returncode != 0:
@@ -92,7 +113,7 @@ def _summarise(command: str, returncode: int, output: str) -> str:
 
 def terminal_command(
     command: str = "",
-    shell: str = "powershell",
+    shell: str = "",
     working_directory: str = "",
     background: bool = False,
     confirmed: bool = False,
@@ -106,7 +127,7 @@ def terminal_command(
     if not config.ALLOW_SHELL:
         return ToolResult.failure(
             "Shell access is switched off.",
-            "EV_ALLOW_SHELL is false; refuse and tell the user to enable it.",
+            "LEO_ALLOW_SHELL is false; refuse and tell the user to enable it.",
         )
 
     verdict = classify(command)
@@ -134,7 +155,7 @@ def terminal_command(
     cwd = resolve_directory(working_directory, config.DEFAULT_PROJECT_DIR)
     cwd_str = str(cwd) if cwd else None
 
-    argv = _shell_argv(command, (shell or "powershell").lower())
+    argv = _shell_argv(command, _pick_shell(shell))
     if argv is None:
         return ToolResult.failure(
             f"No {shell} on this machine.", f"Shell '{shell}' could not be resolved."

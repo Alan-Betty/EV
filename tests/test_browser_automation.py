@@ -18,10 +18,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Keep the tests deterministic regardless of the developer's own .env.
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import config  # noqa: E402
-from ev.tts import clean_for_speech  # noqa: E402
+from leo.tts import clean_for_speech  # noqa: E402
 from tools import browser_automation  # noqa: E402
 from tools.base import CancelToken  # noqa: E402
 from tools.browser_automation import (  # noqa: E402
@@ -497,7 +497,7 @@ def test_browser_speech_is_safe_to_read_aloud(monkeypatch):
     for result in results:
         assert result.speech
         assert result.speech == clean_for_speech(result.speech)
-        for banned in ("Spoke:", "E.V.:", "**", "{", "}", "browser_task"):
+        for banned in ("Spoke:", "Leo:", "**", "{", "}", "browser_task"):
             assert banned not in result.speech
 
 

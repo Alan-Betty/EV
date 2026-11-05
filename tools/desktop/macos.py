@@ -4,7 +4,7 @@ Best effort, and labelled as such: this backend is written against System
 Events' documented scripting dictionary but has not run on hardware in this
 project's test loop. It needs no package - `osascript` ships with every Mac
 - and the one thing it does need is the Accessibility permission for
-whatever runs E.V. (Terminal, iTerm, VS Code) under System Settings ->
+whatever runs Leo (Terminal, iTerm, VS Code) under System Settings ->
 Privacy & Security -> Accessibility. Without it every call fails with error
 -1719 / -25211, which `permission_hint` turns into a sentence a person can
 act on.
@@ -26,7 +26,7 @@ from typing import Any
 from tools.desktop.model import Element, Tree, WindowInfo
 from tools.desktop.system import IS_MAC
 
-log = logging.getLogger("ev.tools.desktop.macos")
+log = logging.getLogger("leo.tools.desktop.macos")
 
 
 class MacError(RuntimeError):
@@ -40,7 +40,7 @@ def available() -> bool:
 def permission_hint(message: str) -> str:
     if "-1719" in message or "-25211" in message or "assistive access" in message.lower():
         return (
-            "macOS has not given E.V. accessibility access. Allow the app running E.V. under "
+            "macOS has not given Leo accessibility access. Allow the app running Leo under "
             "System Settings, Privacy & Security, Accessibility."
         )
     return message

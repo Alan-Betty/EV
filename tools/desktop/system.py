@@ -1,11 +1,11 @@
-"""Which desktop E.V. is running on, asked once and answered in one place.
+"""Which desktop Leo is running on, asked once and answered in one place.
 
 Every OS check used to be a private copy - `IS_LINUX` in the launcher,
 `IS_MAC` in media, `IS_WINDOWS` in the overlay - and none of them asked the
-question that decides whether E.V. can see or touch anything on Linux:
+question that decides whether Leo can see or touch anything on Linux:
 *which display server*. On GNOME under Wayland an X11 screen grab returns a
 perfectly sized, perfectly black frame, and XTest input reaches XWayland
-windows only. Nothing failed; E.V. was simply blind, and nothing said so.
+windows only. Nothing failed; Leo was simply blind, and nothing said so.
 
 Named `system` rather than `platform` so it can never be mistaken for the
 standard library module of that name.
@@ -83,11 +83,11 @@ def desktop() -> str:
 def confinement_label() -> str:
     """The AppArmor label this process runs under, or "".
 
-    Run from VS Code's snapped terminal, E.V. inherits `snap.code.code`,
+    Run from VS Code's snapped terminal, Leo inherits `snap.code.code`,
     and a strictly confined snap on the other end (Brave, Firefox) then
     refuses D-Bus calls from it - MPRIS and AT-SPI alike. That is not
     "nothing is playing" or "this app has no buttons", and the label is
-    what lets E.V. say which it is.
+    what lets Leo say which it is.
     """
     if not IS_LINUX:
         return ""

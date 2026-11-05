@@ -14,25 +14,28 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Keep the tests deterministic regardless of the developer's own .env.
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
+
+import pytest  # noqa: E402
 
 import config  # noqa: E402
-from ev import wake  # noqa: E402
-from ev.tts import clean_for_speech  # noqa: E402
+from leo import wake  # noqa: E402
+from leo.tts import clean_for_speech  # noqa: E402
 from tools import dispatch  # noqa: E402
 from tools.safety import Risk, classify, is_affirmative  # noqa: E402
 from tools.schemas import TOOL_SPECS, to_gemini_tools, to_openai_tools  # noqa: E402
 
 
 def test_schemas_translate_to_both_providers():
-    openai_tools = to_openai_tools()
+    every_tool = [spec["name"] for spec in TOOL_SPECS]
+    openai_tools = to_openai_tools(every_tool)
     assert len(openai_tools) == len(TOOL_SPECS)
     assert {tool["function"]["name"] for tool in openai_tools} == {
         spec["name"] for spec in TOOL_SPECS
     }
     assert all(tool["type"] == "function" for tool in openai_tools)
 
-    gemini = to_gemini_tools()
+    gemini = to_gemini_tools(every_tool)
     declarations = gemini[0]["functionDeclarations"]
     assert len(declarations) == len(TOOL_SPECS)
     # Gemini rejects schema keys outside its OpenAPI subset.
@@ -94,17 +97,17 @@ def test_terminal_tool_holds_risky_commands():
 
 
 def test_terminal_tool_runs_a_safe_command():
-    result = dispatch("terminal_command", {"command": "echo ev-smoke-test"})
+    result = dispatch("terminal_command", {"command": "echo leo-smoke-test"})
     assert result.ok, result.detail
-    assert "ev-smoke-test" in result.data["output"]
+    assert "leo-smoke-test" in result.data["output"]
 
 
 def test_wake_phrase_extracts_the_command():
-    assert wake.detect("hey EV open Chrome").command == "open Chrome"
-    assert wake.detect("EV, what time is it").command == "what time is it"
-    assert wake.detect("Evie launch VS Code").command == "launch VS Code"
-    assert wake.detect("E.V.").command == ""
-    assert wake.detect("E.V.").matched
+    assert wake.detect("hey Leo open Chrome").command == "open Chrome"
+    assert wake.detect("Leo, what time is it").command == "what time is it"
+    assert wake.detect("Lio launch VS Code").command == "launch VS Code"
+    assert wake.detect("Leo").command == ""
+    assert wake.detect("Leo").matched
     assert not wake.detect("just talking to myself").matched
 
 
@@ -121,7 +124,7 @@ def test_speech_is_cleaned_but_never_truncated():
     """Regression: replies used to be cut at a character limit, losing words."""
     import re
 
-    from ev.tts import split_for_speech
+    from leo.tts import split_for_speech
 
     assert clean_for_speech("**bold** text") == "bold text"
     assert "http" not in clean_for_speech("see https://example.com/x")
@@ -146,32 +149,40 @@ def test_speech_is_cleaned_but_never_truncated():
 
 
 def test_wake_survives_real_speech_to_text_manglings():
-    """Regression: 30% of real transcripts failed to wake E.V. at all.
+    """Regression: 30% of real transcripts failed to wake Leo at all.
 
     A miss here is the worst failure mode there is - the user speaks, the
     transcript prints, and nothing happens.
     """
-    from ev import wake
+    from leo import wake
 
     for transcript, expected in (
-        ("Hey EV, open Chrome", "open Chrome"),
-        ("Hey E.V., open Chrome", "open Chrome"),   # used to return "Chrome"
-        ("A.V. open Chrome", "open Chrome"),
-        ("Hey AV, open Chrome", "open Chrome"),
-        ("Hey, E.B. open Chrome", "open Chrome"),
-        ("Heavy, open Chrome", "open Chrome"),      # "hey EV" run together
-        ("Hey Ivy, open Chrome", "open Chrome"),
-        ("Hey Eve, open notepad", "open notepad"),
-        ("open Chrome, E.V.", "open Chrome"),       # trailing address
-        ("E.V.?", ""),
+        ("Hey Leo, open Chrome", "open Chrome"),   # used to return "Chrome"
+        ("Hey, Lio. open Chrome", "open Chrome"),
+        ("L.E.O. open Chrome", "open Chrome"),
+        ("L E O open Chrome", "open Chrome"),
+        ("Heyleo, open Chrome", "open Chrome"),    # "hey Leo" run together
+        ("Okay Leo, open notepad", "open notepad"),
+        ("open Chrome, Leo", "open Chrome"),       # trailing address
+        ("Leo?", ""),
     ):
         match = wake.detect(transcript)
         assert match.matched, f"failed to wake on {transcript!r}"
         assert match.command == expected, f"{transcript!r} -> {match.command!r}"
 
 
+@pytest.mark.parametrize(
+    "said",
+    ["lemon on the list", "buy lego for him", "Lee called", "Leon is here", "lion king",
+     "lo and behold", "let me think", "open Chrome, lemon", "video call", "neo is a film"],
+)
+def test_words_that_sound_near_the_name_do_not_wake_it(said):
+    """Measured against `_MIN_RATIO`: "lemon" 0.75, "lego" 0.86, "lee" 0.86."""
+    assert not wake.detect(said).matched
+
+
 def test_ordinary_speech_does_not_false_wake():
-    from ev import wake
+    from leo import wake
 
     for transcript in (
         "just talking to myself", "open the door please", "what an evening",
@@ -183,7 +194,7 @@ def test_ordinary_speech_does_not_false_wake():
 
 def test_control_phrases_resolve_locally():
     """"Take five" must never need the network - that is the whole point."""
-    from ev.session import Intent, Mode, match_intent
+    from leo.session import Intent, Mode, match_intent
 
     assert match_intent("take five") is Intent.STANDBY
     assert match_intent("take 5") is Intent.STANDBY
@@ -229,11 +240,11 @@ def test_app_launcher_reports_missing_apps_instead_of_guessing():
 
 
 def test_bare_project_name_searches_roots_not_the_cwd():
-    """A bare name must not resolve against wherever E.V. happens to run.
+    """A bare name must not resolve against wherever Leo happens to run.
 
-    Regression: "EV" used to match the `ev/` package subfolder of the current
+    Regression: "Leo" used to match the `leo/` package subfolder of the current
     working directory instead of the user's project, because Windows paths are
-    case-insensitive and `Path("EV")` is relative.
+    case-insensitive and `Path("Leo")` is relative.
     """
     import tempfile
     from pathlib import Path
@@ -279,7 +290,7 @@ def test_browsers_resolve_even_though_they_are_not_on_path():
 
 
 def test_process_ids_are_never_read_aloud():
-    """Regression: E.V. announced "with PID 12648" after closing an app."""
+    """Regression: Leo announced "with PID 12648" after closing an app."""
     from tools.terminal import _summarise
 
     kill_one = 'SUCCESS: Sent termination signal to the process "notepad.exe" with PID 12648.'
@@ -305,10 +316,10 @@ def test_process_ids_are_never_read_aloud():
 
 
 def test_conversation_stays_open_without_repeating_the_name():
-    """You should not have to say "E.V." before every single sentence."""
+    """You should not have to say "Leo" before every single sentence."""
     import time as _time
 
-    from ev.session import Intent, Mode, Session, match_intent
+    from leo.session import Intent, Mode, Session, match_intent
 
     original = config.CONVERSATION_WINDOW_S
     config.CONVERSATION_WINDOW_S = 0.4
@@ -345,8 +356,8 @@ def test_conversation_stays_open_without_repeating_the_name():
 
 
 def test_speech_starts_with_a_short_chunk():
-    """The opening chunk stays small so E.V. starts talking sooner."""
-    from ev.tts import split_for_speech
+    """The opening chunk stays small so Leo starts talking sooner."""
+    from leo.tts import split_for_speech
 
     short = "Chrome's up."
     assert split_for_speech(short) == [short], "a short reply needs no seam"

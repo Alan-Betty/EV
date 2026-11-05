@@ -28,13 +28,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import httpx  # noqa: E402
 import pytest  # noqa: E402
 
 import config  # noqa: E402
-from ev.brain import Brain, BrainError  # noqa: E402
+from leo.brain import Brain, BrainError  # noqa: E402
 from tools.schemas import (  # noqa: E402
     CORE_TOOLS,
     TOOL_NAMES,
@@ -42,6 +42,7 @@ from tools.schemas import (  # noqa: E402
     to_gemini_tools,
     to_openai_tools,
 )
+from tools.schemas import base_specs  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +113,7 @@ def test_the_core_tools_are_offered_whatever_was_said():
     """A transcript matching nothing still has to reach `chat`.
 
     This is the property that makes a wrong guess survivable rather than
-    silent: routing decides which extras to pay for, never whether E.V. can
+    silent: routing decides which extras to pay for, never whether Leo can
     answer at all.
     """
     for utterance in ("", "hmm", "asdfgh", "tell me a joke", "take five"):
@@ -205,7 +206,8 @@ def test_switching_the_subset_off_sends_everything(monkeypatch):
 
     _run(go())
     body = json.loads(REQUESTS[-1].content)
-    assert {t["function"]["name"] for t in body["tools"]} == set(TOOL_NAMES)
+    # Everything but the on-demand tier, which only rides when asked for.
+    assert {t["function"]["name"] for t in body["tools"]} == {s["name"] for s in base_specs()}
 
 
 def test_a_rejected_tool_call_is_retried_with_the_whole_schema(monkeypatch):
@@ -236,8 +238,9 @@ def test_a_rejected_tool_call_is_retried_with_the_whole_schema(monkeypatch):
 
     call = _run(go())
     assert call.name == "chat"
-    assert seen[0] != set(TOOL_NAMES)  # first try was the subset
-    assert seen[1] == set(TOOL_NAMES)  # retry showed everything
+    full = {s["name"] for s in base_specs()}
+    assert seen[0] != full  # first try was the subset
+    assert seen[1] == full  # retry showed the full schema
     assert json.loads(REQUESTS[-1].content)["tool_choice"] == "auto"
 
 
@@ -494,7 +497,7 @@ def test_rotation_state_does_not_leak_between_sessions(monkeypatch):
 def test_a_listed_but_unusable_model_is_dropped_rather_than_surfaced(monkeypatch):
     """`groq/compound` is the case this exists for: the catalogue lists it and
     using it answers 403, because it is disabled in the project's own
-    settings. It looks usable right up until a rate limit sends E.V. to it,
+    settings. It looks usable right up until a rate limit sends Leo to it,
     and the user can do nothing with "the model sent back an error, 403".
     """
     monkeypatch.setattr(config, "LLM_STREAMING", False)

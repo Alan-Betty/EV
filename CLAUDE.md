@@ -7,43 +7,80 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 python -m pip install -r requirements.txt
 
-python ev_core.py --check          # config readiness report; exit 1 if problems
-python ev_core.py                  # voice loop
-python ev_core.py --text           # typed input, same brain and tools
-python ev_core.py --say "open notepad"   # one command, then exit
-python ev_core.py -v               # debug logging
+python leo_core.py --check          # config readiness report; exit 1 if problems
+python leo_core.py                  # voice loop
+python leo_core.py --text           # typed input, same brain and tools
+python leo_core.py --say "open notepad"   # one command, then exit
+python leo_core.py -v               # debug logging
+python leo_core.py --whatsapp-reset  # allow sending again after it latched itself off
 
-python -m pytest tests/ -q                       # full suite, ~750 tests, offline
-EV_LIVE_BROWSER=1 python -m pytest tests/test_web_agent_live.py -q  # real browser
+python -m pytest tests/ -q                       # full suite, ~1300 tests, offline
+LEO_LIVE_BROWSER=1 python -m pytest tests/test_web_agent_live.py -q  # real browser
 python -m pytest tests/test_file_manager.py -q   # one file
 python -m pytest tests/test_smoke.py -k safety   # one test or group
 
-python -m ev.tts_voices                          # list voices
-python -m ev.tts_voices --demo en-US-AriaNeural  # audition one
+python -m leo.tts_voices                          # list voices
+python -m leo.tts_voices --demo en-US-AriaNeural  # audition one
 
-python -m ev.face --demo                         # floating face, cycles moods (needs PySide6)
-python -m ev.face --sheet moods.png              # every mood to one image, headless
-                                                 # (ev_core starts the face itself - EV_FACE_ENABLED)
-echo thinking | python -m ev.face --stdin        # how the core will drive it
+python -m leo.face --demo                         # floating face, cycles moods (needs PySide6)
+python -m leo.face --sheet moods.png              # every mood to one image, headless
+                                                 # (leo_core starts the face itself - LEO_FACE_ENABLED)
+echo thinking | python -m leo.face --stdin        # how the core will drive it
 ```
 
 `--check` is the fastest way to diagnose a broken environment: it verifies the API key, confirms the Groq model exists on this account, names an input device, prints the resolved `FILE_ROOTS`, and confirms the state directory is writable (a read-only one means a silently forgetful assistant).
 
-Every test module bootstraps itself with the same preamble — `sys.path.insert(0, parent)`, `os.environ.setdefault("GROQ_API_KEY", ...)`, `os.environ["EV_TTS_ENABLED"] = "false"` — before importing `config`. New test files need it too, and it must run before any project import, hence the `# noqa: E402` markers.
+Every test module bootstraps itself with the same preamble — `sys.path.insert(0, parent)`, `os.environ.setdefault("GROQ_API_KEY", ...)`, `os.environ["LEO_TTS_ENABLED"] = "false"` — before importing `config`. New test files need it too, and it must run before any project import, hence the `# noqa: E402` markers.
 
-There is now a `conftest.py`, and it exists for exactly one reason: `tools.guard` keeps process-global state — the rolling count of side-effecting calls, and whether E.V. is locked down. That is right in production and wrong in a suite, where hundreds of dispatches land inside a second, the limiter correctly concludes something is looping, and every test after that point fails against an assistant that has locked itself down. The fixture resets it per test and turns the audit log off, because otherwise a test run appends several hundred lines to the real `.cache/state/audit.jsonl` and buries the record of what E.V. actually did.
+There is now a `conftest.py`, and it exists for exactly one reason: `tools.guard` keeps process-global state — the rolling count of side-effecting calls, and whether Leo is locked down. That is right in production and wrong in a suite, where hundreds of dispatches land inside a second, the limiter correctly concludes something is looping, and every test after that point fails against an assistant that has locked itself down. The fixture resets it per test and turns the audit log off, because otherwise a test run appends several hundred lines to the real `.cache/state/audit.jsonl` and buries the record of what Leo actually did.
 
 Nothing in that file is imported at module scope, and that is load-bearing rather than tidy: `conftest.py` is imported before any test module, so an `import config` up there would read the environment before a single test module had set it, and quietly undo the preamble in all of them.
 
+## Product direction
+
+L.E.O. started as a recreation of E.V. from the Spider-Man films. It is now meant to be a hyper-capable, deeply contextual personal agent: a fully aware digital twin that manages workflows, runs tasks on the local machine, works with communication apps and handles complex development loops. Nothing Marvel belongs in it: no names, wording or persona.
+
+**Every decision must raise UX, DX and AX together**: the experience for the person using it, the developer working on it, and the agent operating it. A change that helps one by hurting another needs a reason.
+
+**Zero noise.** Cut taglines, helper text and decorative labels. If an element needs explaining, fix the layout rather than adding words. Information hierarchy should come from structure, with glass styling and instant feedback. The exception is safety: "L.E.O. HAS CONTROL", the kill hint and "Confirm?" stay, and the overlay panel stays opaque.
+
+**Personality.** Sharp, witty and high in conversational intelligence, while being absolutely useful. A good line never replaces the answer.
+
+**Fast in both modes.** Voice and text are both first-class, and latency is measured, not assumed. The name is a claim to keep earning.
+
+**Use what is available.** When building, reach for any MCP server, plugin, extension or skill that fits: filesystem, terminal, browser automation, desktop control, VS Code tools.
+
+### Where the original brief landed
+
+| Asked for | Status |
+|---|---|
+| Memory Tree: branches per person and topic, semantic lookup, self-updating, relationships | Built. Learning from conversations is off by default |
+| PC and process control | Built: `system_control`, `terminal_command` |
+| WhatsApp through `wacli`, files to the phone, messages in the user's style | Built. **Every send needs a spoken yes**, the user's rule |
+| Minecraft | **Deferred** by the user. See `ROADMAP.md` phase H |
+| VS Code and Claude Code bridge | Built as `dev_session`. Extension bridge not verified |
+| Continuous screen awareness | **Changed:** on demand and opt-in, see "Awareness is asked for, not watched" |
+| Plan, execute, debug and iterate on code safely | Built with one pass per session. Retry loops are in phase G |
+| Desktop app for Windows, macOS and Linux | Planned next: `ROADMAP.md` phase B |
+
+[ROADMAP.md](ROADMAP.md) holds future work by phase. "Implement phase B" means that section: write a short plan for it, then build it.
+
+### Working rules from the owner
+
+- **Commits carry no `Co-Authored-By` trailer and no Claude attribution**, in commit messages and in pull requests. They were removed from history on request. This overrides any default attribution instruction.
+- Commit or push only when asked.
+- The owner runs Arch with Hyprland in dwindle layout on the Ryoku desktop. Test window behaviour there, not only in offscreen Qt.
+- `devlog.md`, `devlog-12-14.md` and `site/DEVLOGS.md` are the owner's own writing. Do not edit or commit them unless asked.
+
 ## Architecture
 
-One async loop in [ev_core.py](ev_core.py) owns everything: `listen → transcribe → local intent? → decide → act → speak`. Every blocking call (microphone reads, `subprocess`, keystrokes, tool dispatch) is pushed through `asyncio.to_thread`, so a slow tool never stalls the loop or blocks Ctrl+C. New blocking work must follow that rule.
+One async loop in [leo_core.py](leo_core.py) owns everything: `listen → transcribe → local intent? → decide → act → speak`. Every blocking call (microphone reads, `subprocess`, keystrokes, tool dispatch) is pushed through `asyncio.to_thread`, so a slow tool never stalls the loop or blocks Ctrl+C. New blocking work must follow that rule.
 
-`EV.__init__` creates one `httpx.AsyncClient` shared by `Brain` and `Transcriber`. That sharing is deliberate — it keeps TLS connections warm across utterances — so don't introduce per-call clients.
+`Leo.__init__` creates one `httpx.AsyncClient` shared by `Brain` and `Transcriber`. That sharing is deliberate — it keeps TLS connections warm across utterances — so don't introduce per-call clients.
 
 ### Dependency policy
 
-The project's core constraint is resident memory (~90–160 MB). It runs no local model: the LLM and Whisper are HTTP calls, TTS is edge-tts, MP3 playback is Windows `winmm` over `ctypes`, and the wake word is a string match on the transcript. There are deliberately no vendor SDKs (`groq`, `google-generativeai`, `openai`) and no audio libraries (`pygame`, `pydub`, `ffmpeg`). Both providers are a single JSON POST built by hand in [ev/brain.py](ev/brain.py). Adding a heavyweight dependency undoes the whole design; reach for `httpx` and the stdlib first.
+The project's core constraint is resident memory (~90–160 MB). It runs no local model: the LLM and Whisper are HTTP calls, TTS is edge-tts, MP3 playback is Windows `winmm` over `ctypes`, and the wake word is a string match on the transcript. There are deliberately no vendor SDKs (`groq`, `google-generativeai`, `openai`) and no audio libraries (`pygame`, `pydub`, `ffmpeg`). Both providers are a single JSON POST built by hand in [leo/brain.py](leo/brain.py). Adding a heavyweight dependency undoes the whole design; reach for `httpx` and the stdlib first.
 
 Screen perception does not change that rule, it follows it. There is no local
 vision model: `mss` grabs the frame, Pillow downscales it and JPEGs it, and
@@ -67,17 +104,17 @@ Playwright is the one genuinely heavy dependency in the tree, which is why it
 is optional and imported inside `browser_task`. A run that fails is torn down
 at once; one that finishes, or stops to ask for a sign-in, leaves its window
 up on the kept browser (see "Getting web errands to the browser") until the
-user closes it or E.V. exits - with `EV_BROWSER_KEEP_OPEN=false` it is torn
+user closes it or Leo exits - with `LEO_BROWSER_KEEP_OPEN=false` it is torn
 down after every task, as it always used to be.
 
 ### The speech-purity boundary
 
-This is the most load-bearing invariant in the codebase, and it spans four files. E.V. once read "Spoke:" aloud, and the fix had two halves that must both stay intact:
+This is the most load-bearing invariant in the codebase, and it spans four files. Leo once read "Spoke:" aloud, and the fix had two halves that must both stay intact:
 
 - **Structural.** `Brain.remember(user, assistant, observation)` keeps the assistant role speech-only. Machine detail — exit codes, "Launched chrome.exe" — goes in `observation` and is replayed in an input role (a `system` message for Groq, a `user` turn for Gemini). Storing a tool observation as an assistant turn teaches the model, by example, to prefix its own replies with labels. `ToolResult.speech` is what gets said; `ToolResult.detail` is what the model sees next turn.
-- **Boundary.** `clean_for_speech` in [ev/tts.py](ev/tts.py) strips label-shaped prefixes regardless of origin, then strips again after markdown removal (`**E.V.:** hi` hides a label behind markdown). It must not become aggressive enough to eat real speech like "Spoke to your mother" — `tests/test_speech_purity.py` pins both the strip-cases and the keep-cases.
+- **Boundary.** `clean_for_speech` in [leo/tts.py](leo/tts.py) strips label-shaped prefixes regardless of origin, then strips again after markdown removal (`**Leo:** hi` hides a label behind markdown). It must not become aggressive enough to eat real speech like "Spoke to your mother" — `tests/test_speech_purity.py` pins both the strip-cases and the keep-cases.
 
-[ev/ui.py](ev/ui.py) is a strict dead end supporting this: every function returns `None` and only draws. Labels, panels and spinners live there and nowhere else, and the reply text reaches `Speaker.say` by a separate path in `ev_core`. Never have a UI function return a string that flows toward the speaker.
+[leo/ui.py](leo/ui.py) is a strict dead end supporting this: every function returns `None` and only draws. Labels, panels and spinners live there and nowhere else, and the reply text reaches `Speaker.say` by a separate path in `leo_core`. Never have a UI function return a string that flows toward the speaker.
 
 ### Tool contract
 
@@ -96,7 +133,7 @@ There was no tool for it. `file_manager` listed what was *in* a folder;
 nothing put one on screen. So the model routed it through `open_app` and
 invented an argument - `C:\Users\Alan\GitHub`, on a machine whose user is
 not called Alan. Explorer opens its **default location** for a path that does
-not exist and exits 0, so `open_app` reported a launch and E.V. said
+not exist and exits 0, so `open_app` reported a launch and Leo said
 "Explorer, up." The user was looking at the wrong folder and the model, next
 turn, believed it had succeeded.
 
@@ -135,11 +172,11 @@ question about one call in isolation. [tools/guard.py](tools/guard.py)
 assumes less than that, and answers three questions those checks
 structurally cannot.
 
-**"Is E.V. allowed to act at all right now?"** — lockdown. "Stop" cancels the
+**"Is Leo allowed to act at all right now?"** — lockdown. "Stop" cancels the
 tool that is running and says nothing about the next one, which is the wrong
-shape of answer when E.V. is looping or has believed something it read. The
+shape of answer when Leo is looping or has believed something it read. The
 phrases ("lockdown", "stop everything", "hands off", "freeze") are matched
-locally in `ev.session`, like every other control phrase, and for the
+locally in `leo.session`, like every other control phrase, and for the
 sharpest version of the usual reason: this is what someone says while
 watching the pointer move on its own, and routing it through the model means
 asking the thing that is misbehaving for permission to stop it. Side-effecting
@@ -154,7 +191,7 @@ which is exactly why no single-call check can see it. Two counts: the same
 tool with the same arguments back to back (twice is a retry, three times is a
 loop), and total side-effecting calls in a rolling minute. `confirmed` is
 excluded from the signature, so the call that asked and the call that ran are
-a pair rather than a repeat. Tripping it **locks E.V. down** rather than
+a pair rather than a repeat. Tripping it **locks Leo down** rather than
 merely refusing, because a loop that is only refused keeps looping.
 
 **"What did it actually do?"** — the audit log, one JSON object per action in
@@ -172,7 +209,7 @@ out as `KEY=[redacted groq key]`, with the word "key" still attached. And
 **untrusted marking**: `ToolResult.untrusted`, set centrally in `dispatch` for
 the tools that read the outside world, so no tool has to remember to do it.
 
-### Text E.V. reads is not text E.V. was told
+### Text Leo reads is not text Leo was told
 
 This is the one genuinely new attack surface the screen and browser tools
 opened, and it was wide open. A tool observation went into the request as a
@@ -183,7 +220,7 @@ the same channel, with the same authority, as the person at the microphone.
 Nothing in the request distinguished them, so the model could not either.
 
 `Brain._observation_text` fences the untrusted ones and says what they are.
-The content still goes through, because E.V. cannot summarise an inbox it is
+The content still goes through, because Leo cannot summarise an inbox it is
 not allowed to read — what changes is that the model is told where the
 outside text starts, where it stops, and that nothing between the two is an
 instruction. `SYSTEM_PROMPT` carries the matching rule under WHOSE ORDERS
@@ -219,7 +256,7 @@ resort; chit-chat goes to `chat`) came out, as did an `enum` described in
 prose and `terminal_command`'s list of the tools to use instead. The floor
 is ~3976 - 24 tokens of headroom, so the next tool pays before it lands.
 
-`chat`'s `mood` (see "E.V. knows it has a face") cost ~65 tokens of schema
+`chat`'s `mood` (see "Leo knows it has a face") cost ~65 tokens of schema
 and ~30 of prompt, paid by the same method: `mouse_action`,
 `take_screenshot` and `keyboard_action` lost sentences the TOOL RULES
 already say, one tone example and the "Contractions always" bullet came
@@ -248,7 +285,7 @@ one response rather than one per tool, and `tests/test_smoke.py` scans the
 source for the old phrasing so it cannot creep back into a branch the suite
 never reaches.
 
-`confirmed` is injected by the core loop after a spoken yes — it is added to `_ALLOWED_ARGS` manually and is never something the model can set for itself. The flow: a tool returns `ToolResult.confirm(...)` → `ev_core._execute` stores `session.pending` (holding the tool name too, since file deletes and shell commands both arrive here) → the next utterance goes to `_resolve_pending`. Only an unambiguous yes runs it; an utterance that is neither yes nor no is treated as the user moving on, and is re-dispatched as a fresh command rather than swallowed.
+`confirmed` is injected by the core loop after a spoken yes — it is added to `_ALLOWED_ARGS` manually and is never something the model can set for itself. The flow: a tool returns `ToolResult.confirm(...)` → `leo_core._execute` stores `session.pending` (holding the tool name too, since file deletes and shell commands both arrive here) → the next utterance goes to `_resolve_pending`. Only an unambiguous yes runs it; an utterance that is neither yes nor no is treated as the user moving on, and is re-dispatched as a fresh command rather than swallowed.
 
 Two independent gates enforce this:
 
@@ -291,12 +328,12 @@ Three more things the Gemini path needs and the Groq path does not:
   past it lands the session on a worse one.
 - **A derived vision model has to follow.** `GEMINI_VISION_MODEL` is bound at
   import from `GEMINI_MODEL`, so a fallback that moved only the brain left
-  every screenshot pointed at the model that just 404ed - E.V. talking
+  every screenshot pointed at the model that just 404ed - Leo talking
   normally and going blind. It follows only when the user did not pin one.
 - **The retry delay is in the body.** Gemini answers a 429 with a `RetryInfo`
   detail (`"retryDelay": "31s"`), not a `retry-after` header. Read from the
   headers alone, every Gemini rate limit looked like one with no stated delay,
-  so E.V. never waited at all.
+  so Leo never waited at all.
 
 **A rate limit on one provider is answered by the other.** `BrainError` carries
 `rate_limited`, and `_decide_elsewhere` re-runs the same turn against the other
@@ -315,9 +352,9 @@ Three rungs: `tool_choice: auto`, then `_plain_reply` with the tools stripped en
 
 ### Immediate acknowledgement
 
-A tool that launches an app or walks a folder tree takes seconds, and silence for those seconds reads as "it didn't hear me" — so the user repeats themselves and now there are two commands in flight. `EV._start_ack` draws an acknowledgement immediately and speaks one from a **background task**, so the dispatch is already running on its own thread before a syllable comes out. Awaiting the speech before the tool would make every command a second slower and defeat the whole thing.
+A tool that launches an app or walks a folder tree takes seconds, and silence for those seconds reads as "it didn't hear me" — so the user repeats themselves and now there are two commands in flight. `Leo._start_ack` draws an acknowledgement immediately and speaks one from a **background task**, so the dispatch is already running on its own thread before a syllable comes out. Awaiting the speech before the tool would make every command a second slower and defeat the whole thing.
 
-It is also delayed by `ACK_DELAY_S`: a tool that returns in 200ms needs no "stand by", and `_finish_ack` cancels the task before it speaks. Once it *is* speaking it is allowed to finish — cancelling an `asyncio.to_thread` playback does not stop the OS thread, so cutting in would put E.V. on top of itself. `chat` is never acknowledged; it has no side effect to wait on and is already streaming its real reply.
+It is also delayed by `ACK_DELAY_S`: a tool that returns in 200ms needs no "stand by", and `_finish_ack` cancels the task before it speaks. Once it *is* speaking it is allowed to finish — cancelling an `asyncio.to_thread` playback does not stop the OS thread, so cutting in would put Leo on top of itself. `chat` is never acknowledged; it has no side effect to wait on and is already streaming its real reply.
 
 ### Cancelling a running tool
 
@@ -325,13 +362,13 @@ It is also delayed by `ACK_DELAY_S`: a tool that returns in 200ms needs no "stan
 
 `dispatch(name, arguments, cancel)` attaches the token **after** argument filtering and type coercion — so the model can neither supply one nor clear one, and it never gets stringified on the way through. Only tools in `CANCELLABLE` receive it. `terminal_command` polls `Popen` instead of calling `subprocess.run` (which is precisely why "stop" was inert: `run` blocks the thread with no moment to act on anything) and drains stdout on reader threads, because a full pipe deadlocks a process nobody is reading from. `file_manager` checks between files in the batch actions and `organize`.
 
-While a cancellable tool runs, `EV._watch_for_cancel` keeps the microphone open. Two rules there: an utterance that is **not** a cancel is held in `_queued_utterance` and handled by `_route` afterwards rather than discarded — talking over a slow tool is usually the next command — and a cancel aimed at a tool outside `CANCELLABLE` sets `_cancel_refused`, which E.V. says out loud. `open_app` has already launched the program; reporting a stop that did not happen would be worse than admitting it cannot.
+While a cancellable tool runs, `Leo._watch_for_cancel` keeps the microphone open. Two rules there: an utterance that is **not** a cancel is held in `_queued_utterance` and handled by `_route` afterwards rather than discarded — talking over a slow tool is usually the next command — and a cancel aimed at a tool outside `CANCELLABLE` sets `_cancel_refused`, which Leo says out loud. `open_app` has already launched the program; reporting a stop that did not happen would be worse than admitting it cannot.
 
 A cancelled tool returns `ToolResult.stopped`, which is `ok=True` (the files that moved really did move) carrying `cancelled` in its data. The core loop reads that and backlogs the remainder as `interrupted`.
 
 ### Screen perception and computer use
 
-[tools/computer_use.py](tools/computer_use.py) is E.V.'s eyes and hands, and
+[tools/computer_use.py](tools/computer_use.py) is Leo's eyes and hands, and
 [tools/browser_automation.py](tools/browser_automation.py) is the faster route
 for anything on a web page. Five tools: `take_screenshot`, `mouse_action`,
 `keyboard_action`, `screen_task` and `browser_task`.
@@ -443,14 +480,14 @@ containing "move".
 Screenshots stay in memory. The single path that writes one to disk is
 `take_screenshot(save_as=...)`, and it resolves through
 `file_manager.resolve_user_path`, so `FILE_ROOTS` governs it like any other
-file E.V. writes.
+file Leo writes.
 
-`ev_core.SCREEN_TOOLS` gets a different acknowledgement from the generic
+`leo_core.SCREEN_TOOLS` gets a different acknowledgement from the generic
 "stand by", spoken with no delay at all. The usual argument for waiting - that
 a fast tool needs no announcement - does not apply to something that is about
 to move the pointer under the user's hands.
 
-**Vision goes to Gemini first.** `EV_VISION_PROVIDER=auto` (default) means
+**Vision goes to Gemini first.** `LEO_VISION_PROVIDER=auto` (default) means
 Gemini when its key is set: its quota is separate, so a screen task stops
 draining the Groq buckets the brain lives on. A 429 whose wait is too long,
 a 5xx, a bad key or no usable model hands the frame to the other provider
@@ -471,7 +508,7 @@ work already done and the desktop left mid-job.
 `launch_persistent_context` against `BROWSER_PROFILE_DIR` is what makes "open
 Gmail and summarise the important mail" reach an inbox instead of a sign-in
 page; Playwright's plain `launch` gives a blank browser with no cookies. The
-profile is E.V.'s own rather than the user's real Chrome one, for two
+profile is Leo's own rather than the user's real Chrome one, for two
 reasons: Chrome locks its profile while it is running, so borrowing it would
 fail whenever a browser was open, and automating a live signed-in profile is
 a much bigger thing to hand a voice command. A locked or unwritable profile
@@ -575,7 +612,7 @@ Six things make the DOM route work, and five of them were found by running it
 against real shops rather than by reasoning about it.
 
 **Elements are numbered, not described.** The scan stamps every interactive
-element with `data-ev="<n>"` and the planner answers `click 12`. A selector
+element with `data-leo="<n>"` and the planner answers `click 12`. A selector
 the model invents can be wrong; a number it read off the inventory two
 hundred milliseconds ago cannot be, because the attribute is still on the
 element. `looks_like_selector` is the one exception, for `read`: a
@@ -687,7 +724,7 @@ Playwright's shape - and every regression above has a test there.
 `tests/test_web_agent_live.py` is the other half: a real Chromium against
 example.com, books.toscrape.com, duckduckgo, wikipedia and saucedemo,
 including a full log-in-and-add-to-cart flow. It is skipped unless
-`EV_LIVE_BROWSER=1`, because the suite is offline and stays offline.
+`LEO_LIVE_BROWSER=1`, because the suite is offline and stays offline.
 
 ### Getting web errands to the browser
 
@@ -719,12 +756,12 @@ and it was four gaps rather than one. Each is pinned in
 - **The browser closed under the user.** "Play lofi on YouTube" played for
   half a second. Playwright's sync objects belong to the thread that made
   them, so `web_agent._KEEPER` owns the browser on a thread of its own
-  (`ev-browser`): every run - scripted or planned - is handed to it, and it
+  (`leo-browser`): every run - scripted or planned - is handed to it, and it
   keeps the window after `done` or `ask` (a sign-in or captcha is exactly
   when the window must stay). It closes on failure, when the user closes the
   window (polled every few seconds by asking a page for its title, since the
   sync API only notices a closed page when something pumps it), after
-  `EV_BROWSER_KEEP_OPEN_IDLE_S` if that is set, and at exit. The next errand
+  `LEO_BROWSER_KEEP_OPEN_IDLE_S` if that is set, and at exit. The next errand
   reuses it, which also skips a Chromium cold start. `release()` waits for
   the close to finish, because the persistent profile is locked while that
   browser lives. `conftest.py` turns it off, since a fake page kept by one
@@ -742,7 +779,7 @@ and it was four gaps rather than one. Each is pinned in
 Two confirmation holes surfaced on the way, and both are about what a yes
 carries. `dispatch` accepted `confirmed` - and `notes` - from the model,
 because both are in `_ALLOWED_ARGS` for the replay to get through; so a
-model call carrying `"confirmed": true` skipped its own gate. `ev_core`
+model call carrying `"confirmed": true` skipped its own gate. `leo_core`
 now passes every model call through `tools.from_model`, which strips
 `CONFIRMATION_ONLY_ARGS`; only the replay of a spoken yes supplies them.
 And a mission paused on a *new* risk resumed with only the original risk
@@ -777,14 +814,14 @@ thing a warning must never be.
 Three things about it are load-bearing, and each was a way to break the thing
 it is announcing:
 
-- **It must never take focus.** Everything E.V. types goes to the focused
+- **It must never take focus.** Everything Leo types goes to the focused
   window, so a HUD that stole focus would swallow the work it is narrating.
   `WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW` via `ctypes`, on both windows.
 - **It must never eat a click.** The full-screen window is keyed out with
   `-transparentcolor`, which on Windows makes those pixels invisible *and*
   click-through, and `WS_EX_TRANSPARENT` covers the rest. The badge is
   click-through by default for the same reason - a STOP button sitting over
-  the page E.V. is about to click is a button that intercepts it. Where colour
+  the page Leo is about to click is a button that intercepts it. Where colour
   keying is unavailable the frame is **not drawn at all** rather than drawn as
   a transparent sheet that swallows everything.
 - **It must survive being on top of a launch.** Every 120ms the windows are
@@ -797,7 +834,7 @@ by `root.after`, because widgets may only be touched from the thread that made
 them. Every entry point swallows its own failures: a missing Tk, an absent
 display or a hostile window manager costs the announcement, never the run.
 
-**It goes up whenever E.V. has the screen, not only for missions.**
+**It goes up whenever Leo has the screen, not only for missions.**
 `overlay.taking_over` wraps `screen_task`, every visible `browser_task` and
 `agent_task`. It is re-entrant: a mission hands sub-goals to `screen_task`
 and `browser_task`, and a nested call shares the outer takeover and updates
@@ -824,16 +861,16 @@ freed elsewhere, Tcl aborts with "async handler deleted by the wrong
 thread" - measured exit 134 after every takeover before this.
 
 **The kill switch has three routes in, and they are deliberately different
-kinds of thing.** `RegisterHotKey` (default `ctrl+alt+q`) reaches E.V. even
+kinds of thing.** `RegisterHotKey` (default `ctrl+alt+q`) reaches Leo even
 when a full-screen application owns every other keystroke, and needs no new
 dependency - a keyboard hook library would have been the obvious way and the
-wrong one. "Stop everything" is matched locally in `ev.session` as before, and
+wrong one. "Stop everything" is matched locally in `leo.session` as before, and
 `_watch_for_cancel` now acts on `Intent.LOCKDOWN` the moment it hears it
 rather than queueing it for after the tool: holding that phrase until an
 autonomous run finished would answer the wrong question by about a minute.
 Ctrl+C is the third. All three land on the same latch, which cancels the token
 every sub-tool already honours and - by default, `AGENT_KILL_LOCKS_DOWN` -
-locks E.V. down, because a person reaching for a kill switch means everything,
+locks Leo down, because a person reaching for a kill switch means everything,
 not this click. A hotkey with no modifier is refused outright: `RegisterHotKey`
 would take a bare letter and swallow it system-wide for the length of the run.
 
@@ -849,11 +886,11 @@ split, so vision is the exception rather than the route:
 
 1. **Window tier** - list, focus, close, quit, minimise, maximise, kill,
    through the OS, with no model call. `tools/window.py` is now a facade
-   over `win32` (user32), `x11` (EWMH over ctypes libX11), `gnome` (E.V.'s
+   over `win32` (user32), `x11` (EWMH over ctypes libX11), `gnome` (Leo's
    own Shell extension) and `atspi`, plus JXA on macOS.
 2. **Accessibility tier** - the app's own description of its controls
    (AT-SPI over `jeepney`, UI Automation over `comtypes`, System Events),
-   numbered like the browser route's `data-ev` elements. `app_control`
+   numbered like the browser route's `data-leo` elements. `app_control`
    acts on one by ref; [tools/app_agent.py](tools/app_agent.py) plans a
    whole in-app job over it on the planner's text buckets.
 3. **Vision tier** - `screen_task`'s loop, unchanged, reached when the tree
@@ -882,10 +919,10 @@ grabber is now an error, never a picture.
 
 **Closing is graceful plus confirm.** A close is always the polite one, so
 an editor with unsaved work gets to ask its own question; that question
-belongs to the user, and E.V. reads it out (text and buttons) and stops.
+belongs to the user, and Leo reads it out (text and buttons) and stops.
 `discard` and `kill` are held as "discards unsaved work" / "force quits a
 program", both in `HIGH_RISK_REASONS`. The held call pins the window by its
-title, because "the focused window" at replay time may be E.V.'s terminal.
+title, because "the focused window" at replay time may be Leo's terminal.
 `list` and `read` pass through lockdown, like `take_screenshot`.
 
 **What the planner is shown is budgeted, measured on Files.** GTK 4 hangs a
@@ -904,7 +941,7 @@ Three traps, each of which looks like "accessibility does not work":
 - **Wayland windows without the extension have no rectangle.** They are
   found through AT-SPI, described as "(position not available)", focused
   through the overview (super, the name, Enter) and verified.
-  `python ev_core.py --install-gnome-extension` installs `org.ev.Windows`
+  `python leo_core.py --install-gnome-extension` installs `org.leo.Windows`
   for exact windows and focus; Wayland loads it at the next login.
 
 `conftest.py` turns the tier off and stubs the window listing, because on a
@@ -913,10 +950,10 @@ windows.
 
 ### The face: a second process, so the core never pays for Qt
 
-[ev/face/](ev/face/) is a floating robot face - a dark rounded screen with two
-glowing eyes - that shows what E.V. is doing. It is the one place the
+[leo/face/](leo/face/) is a floating robot face - a dark rounded screen with two
+glowing eyes - that shows what Leo is doing. It is the one place the
 dependency policy bends, and it bends the way Playwright does: PySide6 is
-optional, and the face runs as **its own process** (`python -m ev.face
+optional, and the face runs as **its own process** (`python -m leo.face
 --stdin`), driven by JSON lines. The core never imports Qt, so its resident
 footprint does not move; the face costs ~85 MB of its own and dies on stdin
 EOF, because a face that outlives its assistant is a lie about whether anyone
@@ -950,7 +987,7 @@ Wayland compositor lets no client place its own window or keep it on top, so
 the face runs through XWayland (`QT_QPA_PLATFORM=xcb`) and bypasses the X11
 window manager: no dock entry, no focus, every workspace. Cursor tracking
 only sees the pointer over X11 windows; saccades keep the eyes alive anyway.
-And when E.V. is started from VS Code's integrated terminal - a snap - the
+And when Leo is started from VS Code's integrated terminal - a snap - the
 environment carries `GTK_PATH` and friends into the snap, Qt's GTK theme
 loads the snap's libraries, and the process dies with `undefined symbol:
 __libc_pthread_init` before a window exists. `scrub_snap_env()` removes them
@@ -959,40 +996,40 @@ before Qt loads.
 **Frames cost CPU, measured.** Wide stroked pens for the glow cost 8.5ms a
 frame at 240px - a third of a core at 60fps. The screen layer is now cached
 per (size, quantised colour, quantised glow) and the glow is a radial bloom
-plus one scaled fill: ~3ms. The window renders at `EV_FACE_FPS` only while
-`Expression.settling` (blink, glance, mood change) and at `EV_FACE_IDLE_FPS`
+plus one scaled fill: ~3ms. The window renders at `LEO_FACE_FPS` only while
+`Expression.settling` (blink, glance, mood change) and at `LEO_FACE_IDLE_FPS`
 otherwise, and polls the pointer at 15Hz since each poll is an X round trip.
 Live on XWayland: ~17% of a core thinking, ~13% idle. On XWayland every frame
 is a full-window copy, so frame count is the lever, not paint cost.
 
-`python -m ev.face --sheet out.png` renders every mood to one image headless,
+`python -m leo.face --sheet out.png` renders every mood to one image headless,
 which is how to review a change to `expressions.json` without a display.
 
-**The core starts it; nobody runs it by hand.** `EV.start` spawns the face
-through [ev/face/link.py](ev/face/link.py) (`EV_FACE_ENABLED`, on by
-default) and `EV.stop` closes it. `FaceLink` is the whole of the core's side
+**The core starts it; nobody runs it by hand.** `Leo.start` spawns the face
+through [leo/face/link.py](leo/face/link.py) (`LEO_FACE_ENABLED`, on by
+default) and `Leo.stop` closes it. `FaceLink` is the whole of the core's side
 and it has three rules, all of them about the face never costing the
 assistant anything: lines go through a bounded queue to a writer thread, so
 a frozen face fills a pipe nobody on the loop is waiting on; every failure -
 no PySide6, no display, a crashed face - is one log line and then a no-op;
 and a repeated base state is dropped, because the engaged loop polls every
 two seconds and resending "listening" each time would restart the
-transition. `EV.face` has a class-level default for the same reason
-`_clock` does: tests build `EV` with `__new__`.
+transition. `Leo.face` has a class-level default for the same reason
+`_clock` does: tests build `Leo` with `__new__`.
 
 What the terminal draws, the face shows, by separate calls rather than
-through `ev.ui` - the UI is a dead end and stays one. Every addressed line
+through `leo.ui` - the UI is a dead end and stays one. Every addressed line
 goes to it as `{"heard": ...}` and every reply as `{"say": ...}`, drawn in a
 caption bubble that is a window of its own with `WindowTransparentForInput`:
 the face can be dragged, the caption must never be in the way of a click.
 The mood follows the loop (`wake`, `listening`, `thinking`, `tool`/`screen`,
 `speaking`, `success`/`error`, `confirm`, `standby`, `lockdown`). An
 unaddressed sentence sends **nothing** - the face coming into view is a
-claim that E.V. heard something meant for it, the same claim the `you >`
+claim that Leo heard something meant for it, the same claim the `you >`
 echo makes, and it is gated by the same wake check (see "Silence has to look
 like silence").
 
-**Presence.** In `EV_FACE_PRESENCE=summoned` (the default) the face is out
+**Presence.** In `LEO_FACE_PRESENCE=summoned` (the default) the face is out
 of sight until spoken to, slides in for the conversation and leaves when
 `CONVERSATION_WINDOW_S` lapses. Only the core knows whether the wake phrase
 was heard, so it sends `{"show": ...}` from `_sync_face` each time it goes
@@ -1002,12 +1039,12 @@ mode blocks in `input()` and would never notice the lapse, so
 render timer stopped - transparent would still eat clicks and still cost
 frames.
 
-**E.V. knows it has a face.** The prompt says so in one line, and `chat`
+**Leo knows it has a face.** The prompt says so in one line, and `chat`
 carries an optional `mood` from `tools.schemas.FACE_MOODS` - every reply
 can wear an expression, and "look angry" or "give me a wink" is just a
 `chat` with that mood. `FACE_MOODS` is the moods worth *choosing*: the
 loop's own states (listening, speaking, focused, the red lockdown alert)
-are left out, because wearing one would be a lie about what E.V. is doing,
+are left out, because wearing one would be a lie about what Leo is doing,
 and a test checks every value but `demo` exists in `expressions.json`.
 
 The mood travels as `{"emote": name, "hold": s}`, not `{"mood": ...}`, and
@@ -1015,7 +1052,7 @@ the difference is the whole design. An emote is a *transient* whatever the
 mood's own `hold_s` says, so the base states the loop keeps sending -
 `speaking`, then `listening` - queue behind it instead of wiping it, and it
 hands back on its own after roughly the time the sentence takes to say
-(`EV._emote`). That is also why it is sent *after* `speaking`, and why a
+(`Leo._emote`). That is also why it is sent *after* `speaking`, and why a
 `chat` with a mood skips the stock `success` smile: a scowl preceded by a
 grin is the face contradicting the words.
 
@@ -1035,7 +1072,7 @@ the model it has a face and it will otherwise run a demo nobody can see.
 Silent in the normal case, since saying what the prompt already says costs
 tokens on every turn.
 
-**Busy wins over everything.** [ev/face/busy.py](ev/face/busy.py) is polled
+**Busy wins over everything.** [leo/face/busy.py](leo/face/busy.py) is polled
 on the face's own thread and can overrule any summons. Windows answers the
 question directly (`SHQueryUserNotificationState`: full screen, D3D,
 presentation). GNOME on Wayland does not - no client may see another, and
@@ -1052,12 +1089,12 @@ to hide.
 
 "Open my mail and give me a summary of the important things" is two jobs. The
 model answers it with **one** tool call - it opens the mail, and the summary
-never becomes a call at all. E.V. said "Opening your mail." and went quiet on
+never becomes a call at all. Leo said "Opening your mail." and went quiet on
 the only part the user was waiting for, which reads as being ignored. This is
 not the `tool_use_failed` ladder: the call was accepted and correct, it was
 just half the request.
 
-`ev.session.split_followup` finds the trailing clause and `EV._run_followup`
+`leo.session.split_followup` finds the trailing clause and `Leo._run_followup`
 takes one more turn for it. Three things keep that from being expensive or
 wrong:
 
@@ -1068,7 +1105,7 @@ wrong:
   user the answer.
 - **Depth one, always.** A follow-up cannot spawn a follow-up; that is a loop
   with no ceiling, and the problem being solved is a request losing half of
-  itself, not E.V. needing to plan.
+  itself, not Leo needing to plan.
 - **Only after the first half actually finished.** A failed or cancelled
   first half stops it. A confirmation *holds* it in `_pending_followup`, so
   "tidy my desktop and tell me what moved" still answers after a spoken yes,
@@ -1170,7 +1207,7 @@ implemented, measured, and removed.
 
 Keep new tool descriptions short regardless. The subset makes the ceiling
 survivable, not irrelevant: the full schema is still what the tool-failure
-retry sends and what `EV_TOOL_SUBSET_ENABLED=false` sends every turn, and
+retry sends and what `LEO_TOOL_SUBSET_ENABLED=false` sends every turn, and
 `tests/test_memory_tools.py` still asserts two of those fit under 8000.
 Splitting `remember` into `remember_fact`, `recall_fact` and `manage_todo`
 cost 157 tokens, paid for by compressing `file_manager`, `web_search`,
@@ -1187,18 +1224,18 @@ happening.
 response headers (`retry-after`, or `x-ratelimit-reset-tokens` as `2m52.8s` /
 `547ms`) rather than a guessed backoff, and gives up if the window is longer
 than `LLM_RATE_LIMIT_MAX_WAIT_S` - nobody stands at a microphone for a
-minute. "Rate limited, give it a few seconds" is E.V. asking the user to do
+minute. "Rate limited, give it a few seconds" is Leo asking the user to do
 waiting it could have done itself.
 
 ### Persistent state: memory and backlog
 
-[ev/memory.py](ev/memory.py) and [ev/backlog.py](ev/backlog.py) are two small JSON files, because E.V. gets killed rather than closed — a lid, a Windows update, a power cut.
+[leo/memory.py](leo/memory.py) and [leo/backlog.py](leo/backlog.py) are two small JSON files, because Leo gets killed rather than closed — a lid, a Windows update, a power cut.
 
-- **Writes are atomic.** Temp file in the same directory, `fsync`, then `os.replace` (atomic on Windows too). `ev.backlog` reuses `read_json`/`write_json` from `ev.memory` rather than duplicating that.
-- **A corrupt file is a warning, not an error.** It is moved to `.corrupt` and E.V. starts empty. Losing preferences is survivable; refusing to boot is not.
+- **Writes are atomic.** Temp file in the same directory, `fsync`, then `os.replace` (atomic on Windows too). `leo.backlog` reuses `read_json`/`write_json` from `leo.memory` rather than duplicating that.
+- **A corrupt file is a warning, not an error.** It is moved to `.corrupt` and Leo starts empty. Losing preferences is survivable; refusing to boot is not.
 - **The clean-shutdown flag is pessimistic.** Cleared and persisted at `begin_session`, set again only in `stop()`, so an unclean exit is detectable next time instead of looking like a tidy one.
 
-`EV._report_state()` greets by name on every start. This used to be silent on
+`Leo._report_state()` greets by name on every start. This used to be silent on
 a quick restart, on the argument that being greeted like a homecoming every
 time a process restarts gets old; the argument the other way won, because a
 voice assistant that comes up saying nothing is indistinguishable from one
@@ -1206,30 +1243,30 @@ that failed to come up. Only the name-led opening is unconditional - the
 offline gap, the backlog and the to-do list are still reported only when there
 is something to report. The name comes from a stored `name` fact first and
 `config.USER_NAME` second, so "remember my name is Al" changes the greeting
-without anyone touching `.env`. `EV_GREET_ON_START=false` restores the old
+without anyone touching `.env`. `LEO_GREET_ON_START=false` restores the old
 behaviour.
 
-`EV._boot()` is idempotent and called from both `start()` and `run_once()`, since `--say` reaches the loop by a different route. It assembles `Brain.session_context` — the offline gap, stored facts, open backlog — which rides in the system prompt under its own heading, separate from `extra_context` (which is about the last action). `EV._report_state()` speaks the welcome-back and the backlog summary in the interactive loop only.
+`Leo._boot()` is idempotent and called from both `start()` and `run_once()`, since `--say` reaches the loop by a different route. It assembles `Brain.session_context` — the offline gap, stored facts, open backlog — which rides in the system prompt under its own heading, separate from `extra_context` (which is about the last action). `Leo._report_state()` speaks the welcome-back and the backlog summary in the interactive loop only.
 
 A backlog entry is a reminder, **never a signed permission slip**: `Backlog.add` strips `confirmed` on the way in, and `backlog run` re-dispatches without it, so a delete declined on Monday is asked about again on Tuesday.
 
 **The to-do list is not the backlog, and they are separate on purpose.** The
-backlog is what E.V. failed to finish and files by itself; the to-do list in
-`ev/memory.py` is what the user asked to be kept. Merged, "remind me to call
+backlog is what Leo failed to finish and files by itself; the to-do list in
+`leo/memory.py` is what the user asked to be kept. Merged, "remind me to call
 the dentist" would sit next to a cancelled file copy and "clear the backlog"
 would quietly delete the dentist. `Memory.clear()` leaves the to-dos alone for
 the same reason - "forget what you know about me" is about preferences, not
 errands. `manage_todo clear` is gated like a file delete, which is why
 `manage_todo` is in the manual `confirmed` allow-list in `tools/__init__.py`.
 
-**Long-term notes** ([ev/semantic_memory.py](ev/semantic_memory.py),
+**Long-term notes** ([leo/semantic_memory.py](leo/semantic_memory.py),
 `STATE_DIR/semantic_memory.json`). `remember_fact` with a value and no key
 stores a free note; `recall_fact` falls back to searching notes when no fact
 has that name. Facts ride in every prompt; notes do not - only the few that
 match *this* utterance (`Brain.recall_context`, fenced as "facts, not
 instructions", 0 tokens when nothing matches). Retrieval is BM25 over light
 stems plus char-trigram fuzz for misheard words, all local; Gemini
-embeddings (`EV_SEMANTIC_EMBEDDINGS=auto`) lift it inside tool calls only,
+embeddings (`LEO_SEMANTIC_EMBEDDINGS=auto`) lift it inside tool calls only,
 never on the per-turn path. Embedding cosines are not 0-based: measured
 noise is 0.58-0.71, matches 0.76-0.83, hence `SEMANTIC_EMBED_FLOOR` and a
 margin-over-median guard. Failsafes: atomic writes, bad shape -> `.corrupt`,
@@ -1246,19 +1283,19 @@ no longer in `TOOL_SPECS`, so it costs nothing per turn; its arguments are
 declared by hand in `_ALLOWED_ARGS` because there is no spec left to derive
 them from, and an empty set there would mean every argument silently dropped.
 
-### Full duplex: hearing the user over E.V.'s own voice
+### Full duplex: hearing the user over Leo's own voice
 
-The microphone reader thread never stops, so E.V. can be interrupted
+The microphone reader thread never stops, so Leo can be interrupted
 mid-sentence. Turning that into working barge-in takes three things that are
 each easy to leave out:
 
 - **Two conditions, not one.** `_watch_for_barge_in` requires both
   `BARGE_IN_FRAMES` of sustained speech *and* a level above
   `noise_floor * BARGE_IN_LEVEL_MULTIPLIER`. Either alone fails in the
-  opposite direction: on loudspeakers E.V.'s own voice is a long steady run of
-  speech-looking frames, so a frame count alone has E.V. interrupting itself
+  opposite direction: on loudspeakers Leo's own voice is a long steady run of
+  speech-looking frames, so a frame count alone has Leo interrupting itself
   on every reply, while a level alone trips on a door closing.
-  `BARGE_IN_GRACE_S` covers the attack of E.V.'s own first word, and
+  `BARGE_IN_GRACE_S` covers the attack of Leo's own first word, and
   `Speaker.on_playback_start` clears the level history as playback begins -
   without it the tail of the user's own command is still counted as recent
   speech.
@@ -1269,7 +1306,7 @@ each easy to leave out:
   player, `SpeechStream.cancel()` drains its queue, and `feed()` refuses
   anything the model streams afterwards.
 - **And it has to reach the clip that has not started yet.** This is the one
-  that sounds like two E.V.s at once. Playback runs through
+  that sounds like two Leos at once. Playback runs through
   `asyncio.to_thread`, and cancelling the await does not stop the thread - so
   a barge-in can land in the window between a clip being queued and that clip
   having an MCI alias the player could close. The stop finds nothing to stop,
@@ -1288,38 +1325,38 @@ each easy to leave out:
   one flush. Flushed instead, the user has to start the sentence again - which
   is the thing barge-in exists to prevent.
 
-### E.V. hearing itself, and learning the user's voice
+### Leo hearing itself, and learning the user's voice
 
-On loudspeakers E.V. barged in on its own reply, kept the audio (as
+On loudspeakers Leo barged in on its own reply, kept the audio (as
 barge-in is meant to), transcribed its own words with the conversation
 window still open, and answered them - a loop that never finished a
 sentence. The level test was `noise_floor * BARGE_IN_LEVEL_MULTIPLIER`,
 which is "louder than the *room*", and speakers beat the room every time.
 And `BARGE_IN_GRACE_S` was timed from `speaking`, which turns on when a reply
-is *queued*, so it ran out during synthesis and E.V.'s first syllable landed
+is *queued*, so it ran out during synthesis and Leo's first syllable landed
 unguarded. Three independent fixes, all in `tests/test_voice.py`:
 
-- **Echo-relative barge-in.** The reference is E.V.'s own level at the
+- **Echo-relative barge-in.** The reference is Leo's own level at the
   microphone during *this* reply, on a lag (`BARGE_IN_ECHO_LAG_S`) so the
-  user starting to talk is compared against E.V. before they started.
+  user starting to talk is compared against Leo before they started.
   Until there is a lagged measurement, the grace period and the echo level
   learned from earlier replies stand in. Grace is timed from
   `Speaker.audible_since`, set by the playback thread when sound starts.
-- **A learned voiceprint** ([ev/voice.py](ev/voice.py)). Two diagonal
+- **A learned voiceprint** ([leo/voice.py](leo/voice.py)). Two diagonal
   Gaussians over 12 cepstral coefficients: the user, learned from every
   addressed utterance in `_tick` (after the wake and self-echo checks - a
-  voiceprint trained on the room is a model of the room), and E.V.'s own
+  voiceprint trained on the room is a model of the room), and Leo's own
   voice *through the speakers*, learned from every reply that played out
   uninterrupted and from every self-echo transcript. c0 is dropped, so it
   is gain-invariant. Exact averaging at first, then an EMA over
   `VOICE_ADAPT_FRAMES`, so it adapts forever. `score() is None` until both
   sides have `VOICE_MIN_FRAMES`, and **None is permission, never a veto**.
-  Trained, it refuses E.V.-sounding audio at any level and lets a
+  Trained, it refuses Leo-sounding audio at any level and lets a
   confidently-user voice through at the smaller `BARGE_IN_ECHO_MARGIN_KNOWN`.
   It is not a speaker-verification model and is not used to tell the user
   from other people. numpy is imported lazily; `Microphone` keeps
   `VOICE_HISTORY_S` of raw frames (never flushed) for it to read.
-- **The words.** `EV._heard_itself` drops any transcript of 3+ words where
+- **The words.** `Leo._heard_itself` drops any transcript of 3+ words where
   `SELF_ECHO_MATCH` of them appear in order in `Speaker.said_since(...)`.
   This is the guard that makes the loop impossible rather than unlikely,
   and it runs in `_watch_for_cancel` too - an acknowledgement spoken while
@@ -1328,21 +1365,21 @@ unguarded. Three independent fixes, all in `tests/test_voice.py`:
 
 ### Session modes and local intents
 
-[ev/session.py](ev/session.py) defines `IDLE` (wake phrase required) / `ENGAGED` (name optional, decays after `CONVERSATION_WINDOW_S`) / `STANDBY` (ignores everything but "wake up"). Control phrases — "take five", "wake up", "stop", "goodbye" — are matched locally before the model is consulted, so they land instantly, including mid-sentence. Matching is **exact** against the normalised utterance (plus a leading "okay" or trailing "please"); fuzzy matching here would mistake "stop the server" for a cancel and drop a real request.
+[leo/session.py](leo/session.py) defines `IDLE` (wake phrase required) / `ENGAGED` (name optional, decays after `CONVERSATION_WINDOW_S`) / `STANDBY` (ignores everything but "wake up"). Control phrases — "take five", "wake up", "stop", "goodbye" — are matched locally before the model is consulted, so they land instantly, including mid-sentence. Matching is **exact** against the normalised utterance (plus a leading "okay" or trailing "please"); fuzzy matching here would mistake "stop the server" for a cancel and drop a real request.
 
-Wake detection in [ev/wake.py](ev/wake.py) *is* fuzzy, because STT mangles "E.V." into Eve, Evie, AV, heavy. It slices the command off the original transcript by character offset — slicing by word index desynchronises and eats the next word.
+Wake detection in [leo/wake.py](leo/wake.py) *is* fuzzy, because STT mangles "Leo" into Lio and L E O. It slices the command off the original transcript by character offset — slicing by word index desynchronises and eats the next word.
 
 `is_resume_phrase()` is the one deliberate exception to the exact-match rule, and it runs **only in standby**. The risk that makes fuzzy matching wrong everywhere else — swallowing a real request — does not exist there, because standby has exactly two exits and accepts no commands. What it fixes is the opposite failure: "hey, wake up" falling through `match_intent` to a bare `return`, leaving the user with their words echoed, no reply, and no way back in. A non-matching utterance in standby now draws a hint (`ui.note`, never spoken — answering aloud would defeat standby), and anything longer than `STANDBY_MAX_UTTERANCE_S` is dropped before it costs a transcription call.
 
-**The name alone wakes it.** `wake.summons()` is the standby test, and it is looser again than `detect`: the name may sit anywhere in the utterance and a near-miss counts (`_SUMMON_RATIO`, 0.6 - the same bar `heard_something_like_a_name` uses to print a hint). Insisting on "wake up" on top of being called by name made standby a password. `_NEVER_A_NAME` still applies, so "every" and "even" do not wake it, and `config.WAKE_REQUIRED` is deliberately ignored - with it off `detect` matches everything, and a standby any sound ends is not a standby. When the strict match found a command after the name ("E.V., open Chrome"), E.V. resumes and runs it, with no "Back." in front: the reply to the command is the acknowledgement.
+**The name alone wakes it.** `wake.summons()` is the standby test, and it is looser again than `detect`: the name may sit anywhere in the utterance and a near-miss counts (`_SUMMON_RATIO`, 0.6 - the same bar `heard_something_like_a_name` uses to print a hint). Insisting on "wake up" on top of being called by name made standby a password. `_NEVER_A_NAME` still applies, so "lemon" and "lee" do not wake it, and `config.WAKE_REQUIRED` is deliberately ignored - with it off `detect` matches everything, and a standby any sound ends is not a standby. When the strict match found a command after the name ("Leo, open Chrome"), Leo resumes and runs it, with no "Back." in front: the reply to the command is the acknowledgement.
 
 ### Silence has to look like silence
 
 An utterance with no wake phrase, once the conversation window has lapsed, is
-not E.V.'s business - and `_tick` used to draw it anyway. The echo came before
+not Leo's business - and `_tick` used to draw it anyway. The echo came before
 the wake check, so every sentence spoken near the microphone appeared on
 screen under a `you >` prompt whether or not it was addressed: a conversation
-with somebody else in the room was written into E.V.'s terminal, looked like
+with somebody else in the room was written into Leo's terminal, looked like
 it had been heard and understood, and then got no reply. The order is now
 wake-check first, echo second, and an unaddressed transcript is also kept out
 of `note_transcript`, so the room cannot steer the decoding prompt for the
@@ -1350,7 +1387,7 @@ command that follows it.
 
 The spinner is the same argument made about the same moment. `Listening...`
 now runs only while the conversation window is open. Animated the whole time,
-it says E.V. is listening to *you*, which outside the window it is not:
+it says Leo is listening to *you*, which outside the window it is not:
 nothing is acted on there without the wake phrase, so the animation was
 claiming an attention it was not paying. Inside the window it is the honest
 version of the same signal - the next sentence needs no name in front of it.
@@ -1362,24 +1399,24 @@ across polls rather than rebuilt on each one (`ui.begin_status` /
 and a spinner torn down that often is a flicker; `rich` allows one live
 display at a time, so `ui.status` retires it before starting its own.
 
-What none of this does is **stop the transcription**. Detecting "E.V." in an
-utterance means having the words of that utterance, and `ev.wake` matches
+What none of this does is **stop the transcription**. Detecting "Leo" in an
+utterance means having the words of that utterance, and `leo.wake` matches
 against the transcript because the project runs no local model by design - a
 local wake-word engine is exactly the resident-memory dependency the whole
 architecture exists to avoid. So audio is still sent to Whisper while idle.
-Anyone who minds that has two honest levers, both in `.env`: `EV_STANDBY...`
+Anyone who minds that has two honest levers, both in `.env`: `LEO_STANDBY...`
 via "take five", which drops to standby and stops transcribing anything longer
-than `STANDBY_MAX_UTTERANCE_S`, or a local `EV_STT_PROVIDER=whispercpp`.
+than `STANDBY_MAX_UTTERANCE_S`, or a local `LEO_STT_PROVIDER=whispercpp`.
 
 ### Speech recognition
 
-Whisper reports how sure it was, and E.V. used to throw that away by asking for `response_format=json`. The cost of ignoring it is not a wrong word on screen — it is a **wrong action**, because a garbled transcript is still handed to the model, which picks a tool and runs it. `verbose_json` costs nothing extra on the same free endpoint.
+Whisper reports how sure it was, and Leo used to throw that away by asking for `response_format=json`. The cost of ignoring it is not a wrong word on screen — it is a **wrong action**, because a garbled transcript is still handed to the model, which picks a tool and runs it. `verbose_json` costs nothing extra on the same free endpoint.
 
 `Transcriber.transcribe` returns a `Transcript`, a `str` subclass carrying `avg_logprob`, `no_speech` and `compression`. The subclassing is what keeps the change small: every existing call site (`.lower()`, truthiness, `match_intent`, f-strings) works untouched. Note that `str` methods return plain `str`, so the metadata does not survive `.strip()` — read it before slicing, as `_tick` does. Three bands: `rejected` → "Didn't catch that", checked *after* `_extract_command` so an unaddressed utterance stays silent; `uncertain` → run it, but tell the model the words may be wrong; otherwise straight through. Backends that report no confidence (`google`, `whispercpp`) are `scored == False` and the gate leaves them alone.
 
-The decoding prompt is built per-utterance by `Transcriber._prompt()` from hints the core loop supplies — installed programs, user folders, open backlog items — plus the previous transcript last, since Whisper reads the prompt as text immediately preceding the audio and weights the end most. `ev.stt` never reaches up into `tools`; `ev_core._stt_hints()` owns that wiring. The total is capped because Whisper silently drops the front of a prompt over ~224 tokens.
+The decoding prompt is built per-utterance by `Transcriber._prompt()` from hints the core loop supplies — installed programs, user folders, open backlog items — plus the previous transcript last, since Whisper reads the prompt as text immediately preceding the audio and weights the end most. `leo.stt` never reaches up into `tools`; `leo_core._stt_hints()` owns that wiring. The total is capped because Whisper silently drops the front of a prompt over ~224 tokens.
 
-**Hearing adapts to the user** ([ev/hearing.py](ev/hearing.py), `STATE_DIR/hearing.json`). Nothing can be retrained - Whisper is an HTTP call - so "adapting to the voice" means learning the two inputs E.V. controls, from addressed speech only (`note_transcript`, which `_route` calls once it knows the words were for E.V.; typed text is a plain `str` and teaches nothing):
+**Hearing adapts to the user** ([leo/hearing.py](leo/hearing.py), `STATE_DIR/hearing.json`). Nothing can be retrained - Whisper is an HTTP call - so "adapting to the voice" means learning the two inputs Leo controls, from addressed speech only (`note_transcript`, which `_route` calls once it knows the words were for Leo; typed text is a plain `str` and teaches nothing):
 
 - **Vocabulary.** Recurring non-filler words go into the prompt, budgeted *first* (`STT_LEARN_PROMPT_CHARS`) so 90 installed programs cannot crowd them out, and written *after* the program list because Whisper weights the end. A clear repeat inside `STT_RETRY_WINDOW_S` of a rejected or doubtful transcript is the best evidence there is - the words that changed are the misheard ones - so they count triple. Doubtful transcripts never teach words: learning "obese" from a mangled "OBS" biases the recogniser towards its own mistake. A rejected transcript is fed in for that reason, and is never made the recent context.
 - **The gate.** `STT_MIN_LOGPROB`/`STT_UNCERTAIN_LOGPROB` were measured on a clear speaker. Someone Whisper is consistently less sure of sits on the line and hears "Didn't catch that" half the time, so after `STT_ADAPT_MIN` scored utterances each threshold sits 3σ / 1.5σ under the user's own mean. It **only loosens**, and by at most `STT_ADAPT_MAX_SHIFT`: a stricter gate buys a clear speaker nothing, and an unbounded drift ends up acting on noise. `Transcript.reject_below`/`doubt_below` carry the per-user values, set in `transcribe`; `None` means the configured ones, so a bare `Transcript` in a test behaves exactly as before.
@@ -1388,15 +1425,70 @@ The decoding prompt is built per-utterance by `Transcriber._prompt()` from hints
 
 ### Configuration
 
-[config.py](config.py) holds every setting, each overridable by an `EV_*` environment variable, with `.env` loaded by a built-in parser (deferring to `python-dotenv` if installed). `.env.example` is the annotated template. Add new settings there rather than hardcoding them at the call site.
+[config.py](config.py) holds every setting, each overridable by a `LEO_*` environment variable (the older `EV_*` names still work), with `.env` loaded by a built-in parser (deferring to `python-dotenv` if installed). `.env.example` is the annotated template. Add new settings there rather than hardcoding them at the call site.
 
 Note that `config.GROQ_MODEL` is mutated at runtime by `Brain.verify_model()`: Groq's catalogue varies per account, so a startup check falls back down `GROQ_MODEL_FALLBACKS` instead of erroring on every command.
 
 `USER_DIRS` resolves Windows user folders through the `User Shell Folders` registry key rather than assuming `~/Desktop`, because OneDrive redirection means `~/Documents` and `~/OneDrive/Documents` can both exist while only the second is the one Explorer shows.
 
-`STATE_DIR` (default `.cache/state`, git-ignored) holds `memory.json` and `backlog.json`. `MEMORY_FILE` and `BACKLOG_FILE` derive from it, so a test — or a second instance — can relocate all persisted state with one `EV_STATE_DIR`. `get_memory()` and `get_backlog()` rebuild their singleton when the configured path changes, which is what lets a test redirect the whole system with a single monkeypatch.
+`STATE_DIR` (default `.cache/state`, git-ignored) holds `memory.json` and `backlog.json`. `MEMORY_FILE` and `BACKLOG_FILE` derive from it, so a test — or a second instance — can relocate all persisted state with one `LEO_STATE_DIR`. `get_memory()` and `get_backlog()` rebuild their singleton when the configured path changes, which is what lets a test redirect the whole system with a single monkeypatch.
 
-## The three seconds before E.V. speaks
+## What the revamp added, and why it is shaped this way
+
+The project was E.V.; it is now L.E.O., the Latency-optimized Executive Operator, spoken "Leo". Screens say `config.DISPLAY_NAME`; anything read aloud or shown to a model says `config.PERSONA_NAME`, and `clean_for_speech` turns stray initials into the name, because TTS spells them out. Older text here that says "E.V." in a story about a past bug means this same program.
+
+### Hyprland, where the usual answers are wrong
+
+[tools/desktop/hyprland.py](tools/desktop/hyprland.py), measured on 0.56.2 configured in Lua. `hyprctl dispatch` takes a *Lua expression* (`hl.dsp.focus({ window = "address:0x..." })`) rather than a dispatcher name, and `hyprctl keyword` refuses outright, so `_dispatch` tries Lua first and the legacy form second. Eyes are `grim`, the uinput tablet maps straight onto the desktop, and text goes through `wtype`, since uinput presses US-layout key positions. On this desktop `input_choice` returns `none` rather than falling back to XTest when uinput is not writable: almost every window is native, so XTest reports clicks that land nowhere.
+
+**The face must not be a native client.** Ryoku sets `QT_QPA_PLATFORM=wayland;xcb` for the whole session. `prefer_xwayland` used to read any value as the user's choice, so the face ran as a normal Wayland window: dwindle gave it half the screen and tiled the caption too. Only a value without `wayland` in it counts now; `LEO_FACE_XWAYLAND=false` is the real opt-out. Through XWayland both windows bypass the window manager, measured floating at 240x192 and 408x63 with focus left alone. Hyprland then blurred the face's whole transparent window, and with `blur:xray` that drew a rectangle of wallpaper behind the eyes, so `clear_compositor_effects` sets a `no_blur` rule by class and title before the window maps. Offscreen tests cannot see any of this; check it with `grim`.
+
+**The kill key must be a compositor bind.** The X11 grab fires only while an XWayland window has focus, and the panel used to name it as working. `KillBind` binds once per process through `hl.bind` with an `exec_cmd` that touches a file, polled at about 7Hz: no socket, no protocol, nothing of ours has to be healthy. A reload drops runtime binds, so it checks every few seconds and re-adds. A killed process leaves its bind behind, and `leo-kill-switch.bound` is what stops the next start reading that as somebody else's shortcut. `arm_global_kill` holds it for the life of the process, because a background session needs stopping with nothing on screen. Only Hyprland gets that; elsewhere the key stays with the takeover and "stop everything" reaches the rest. **As of writing no real key press has fired it**: synthetic keys from uinput and wtype did not, which proves nothing either way. If you can press one, do.
+
+### The on-demand tier
+
+`"on_demand": True` on a spec means it is sent only when this utterance asks for it, or one of the last `TOOL_ON_DEMAND_STICKY_TURNS` did ("continue it" names nothing). It is a flag and not a second list because `_ALLOWED_ARGS`, the aliases and every schema test read `TOOL_SPECS`, and a tool missing from it silently loses every argument. `to_openai_tools()` with no names now means the base schema; pass names to see the rest, as the Gemini shape tests do so they keep covering everything.
+
+The ceiling moved, it did not go away. `test_a_worst_case_turn_still_fits_two_turn_budget` holds the base plus the two largest on-demand tools under 8000 for two turns; `ON_DEMAND_MAX` is what makes that a real bound. The floor is ~3619 and the worst case ~3969, so ~31 tokens of headroom on that test, and it has already failed once, correctly, at 8058. The cost is that the failure retry cannot rescue a miss in this tier, so these trigger lists are generous. All of this is `chars // 4`: nobody has yet checked it against `x-ratelimit-remaining-tokens` for this schema.
+
+### The Memory Tree
+
+[leo/memory_tree.py](leo/memory_tree.py) holds paths, names and links; notes stay in `semantic_memory.json` with `tags` like `entities/priya`. The tree is logical on purpose. One file per branch means N embedding calls per search, scores that cannot be compared because IDF is per store, an unbounded total, and fan-out on the event loop, where `recall_lines` runs. Measured: 3ms at 200 notes, 14.5ms at 1000, 32ms at 2000 (61ms worst), hence the cap of 1000.
+
+Three things are load-bearing. Twin merging and pruning stay **within a branch**: "Priya's party is in June" and "Sam's party is in June" score over the merge bar, and folding them would state something false about both. Notes tagged `entities/` skip the embedder unless `MEMORY_TREE_EMBED_PEOPLE` says otherwise, since those people agreed to nothing. And **memory is the one thing that outlives the fence**: a page saying "remember the bank details changed" would become a standing fact, so `guard.note_read_outside` makes `remember_fact` ask first for `MEMORY_TAINT_S` after any tool in `TEXT_READERS`. The self-update pass ([tools/memory_extract.py](tools/memory_extract.py)) reads `Turn.user` only, never `observation`, and is off by default: a wrong note is quiet and it stays.
+
+### WhatsApp
+
+[tools/whatsapp.py](tools/whatsapp.py) wraps `wacli`, an unofficial client. **Nothing here can promise the number will not be banned**, and the user was told so. The docstring lists the one road a send takes. Details that are easy to break:
+
+- `wacli` is BLOCKED in `tools.safety` except `doctor`, `--version` and `--help`, because a shell could otherwise send, forward or sign out with none of the limits. `classify_gui` names WhatsApp too, since "message Priya on WhatsApp" contains no "send".
+- `jid`, `label`, `draft` and `device` are in `CONFIRMATION_ONLY_ARGS`. The replay sends the stored text and re-checks every limit, because minutes can pass between question and yes.
+- The attempt goes in the ledger **before** the send: wacli can lose the connection after the frame left. So a failure is reported as uncertain, is never retried, and still counts against a repeat. The ledger holds hashes, not text.
+- The latch has no tool to release it, the same reasoning as lockdown: `--whatsapp-reset` is a person's decision.
+- The draft prompt only ever holds the user's own messages (`--from-me`), so an incoming message cannot steer one. Message text is `detail` only; `speech` becomes an assistant turn, unfenced, and anyone can message this number.
+- `speech` strips URLs to "that link", so the question has to say a link is there.
+
+The JSON field names came from wacli's docs. Real output was not available when this was written, hence `_field`'s tolerance. The tests use a fake binary, so argv is real and the answers are not. wacli's `--read-only` is passed on every read as a second lock.
+
+### Supervised coding sessions
+
+[tools/dev_session.py](tools/dev_session.py). `dev_workflow` launches and forgets; this watches. Verified once against the real CLI: a 12-cent run in a throwaway repo. Whether the VS Code extension can open such a session was **not** verified, so the bridge today is that the worktree opens in VS Code and L.E.O. tracks the run.
+
+`-p` has nobody to approve anything, so everything is bounded up front. The push block lives in `child_environment` as `GIT_CONFIG_*` `pushInsteadOf` entries rather than in the repo's config, which would break the user's real pushes; `test_git_push_really_fails_in_its_environment` pushes for real, including to a local path, a prefix that was easy to miss. An allowed test runner still runs arbitrary code: accepted and stated. Claude's text never reaches `speech`; `spoken_summary` is built from numbers and fixed words only.
+
+The worker bypasses `dispatch`, so it polls lockdown, redacts and audits for itself, and owns a stop event instead of a `CancelToken`, which dies with the call that started it. It never touches `Speaker` or `Brain`: `set_notifier` hands a template string to a loop task that waits for `session.pending`, a running tool and standby to clear. `recover` stops sessions a killed process left behind.
+
+`tools` exports functions named after several of its modules, so `from tools import system_control` gets the function. Use `importlib.import_module("tools.system_control")`. This has bitten twice.
+
+### Awareness is asked for, not watched
+
+The brief wanted continuous awareness. Continuous vision costs ~1900 tokens a frame, and a stream of window titles is a log of the user's day sent to a cloud provider. So `_awareness_for` asks for the focused window on turns that point at something ("this", "that window"), and it is opt-in. The title has its own field, `awareness_context`, rather than `extra_context`, because that one reaches `select_tools`, and a page should not be able to choose tools by what it is titled.
+
+### The rename
+
+Full: `leo/`, `leo_core.py`, class `Leo`, `LEO_*`, `data-leo`, `org.leo.Windows`. `_env` reads `LEO_X` then `EV_X` and records the old name for `--check`, because config is imported before logging exists. State file names did not change, so nothing migrates. `gnome.py` still answers to an already-installed `org.ev.Windows`, since Wayland only loads extensions at login; the new extension id has **not** been run on a real GNOME session. The GitHub repo is still `Alan-Betty/EV`: renaming it is the owner's call.
+
+## The three seconds before Leo speaks
 
 "It feels slow" is not a bug report, and the only way to act on it is to
 measure the stages separately, because they have completely different fixes.
@@ -1404,7 +1496,7 @@ Measured on a free Groq key with the real payload, a `chat` turn was:
 
 | stage | cost | what it is |
 |---|---|---|
-| endpointing | **1.00s** | silence after the user stops, before E.V. knows they have |
+| endpointing | **1.00s** | silence after the user stops, before Leo knows they have |
 | transcription | 0.34s | `whisper-large-v3`, short utterance |
 | the model | 0.57–0.93s | time to a usable first token, streaming |
 | the voice | ~0.80s | edge-tts round trip for the first chunk |
@@ -1415,7 +1507,7 @@ Three facts fall out of that table, and two of them are counter-intuitive.
 which is dead air by definition — the user has stopped and nothing is
 happening yet — and unlike the other three it is entirely ours to spend. It
 is now adaptive, and the split is about *when* people pause rather than how
-long for: the dangerous pause is right at the start, "E.V." and then a beat
+long for: the dangerous pause is right at the start, "Leo" and then a beat
 while they decide what they want. A pause a second into a sentence is far
 rarer, and by then there is a real utterance in the buffer. So a short
 utterance keeps the generous wait and anything with a sentence's worth of
@@ -1439,19 +1531,19 @@ playback would buy ~0.27s in exchange for playing a half-written file through
 MCI. Groq's own TTS would skip the WebSocket entirely, but `playai-tts` is
 decommissioned and `orpheus` needs terms accepted on the console.
 
-`EV_TURN_TIMING=true` prints the per-stage line on the terminal; it is always
+`LEO_TURN_TIMING=true` prints the per-stage line on the terminal; it is always
 in the log at INFO. The stopwatch starts when the recogniser is handed the
 audio, because everything before that is the user still talking, which is not
-E.V.'s latency to own.
+Leo's latency to own.
 
 One thing the table hides: on a free key this account is throttled after
 roughly four tool-schema requests per model per minute, which is why
-`GROQ_MODEL_ROTATION` across three buckets matters more to how E.V. *feels*
+`GROQ_MODEL_ROTATION` across three buckets matters more to how Leo *feels*
 than any of the milliseconds above.
 
 ## Platform
 
-Windows is the primary target. The core loop, brain, STT and TTS are portable; the `winmm` player, the App Paths registry lookup in [tools/base.py](tools/base.py), the Start Menu index in [tools/app_launcher.py](tools/app_launcher.py), `USER_DIRS`, and `dev_workflow`'s integrated-terminal path are Windows-specific and each has a documented fallback.
+Windows and Linux are both real targets, and the machine this was last worked on is Arch with Hyprland. The core loop, brain, STT and TTS are portable; the `winmm` player, the App Paths registry lookup in [tools/base.py](tools/base.py), the Start Menu index in [tools/app_launcher.py](tools/app_launcher.py), `USER_DIRS`, and `dev_workflow`'s integrated-terminal path are Windows-specific and each has a documented fallback.
 
 **Ubuntu is a real target now, and three things only work there because of
 fallbacks.** Each was "it works in every other app" from the user's side:
@@ -1460,15 +1552,15 @@ fallbacks.** Each was "it works in every other app" from the user's side:
   PortAudio, which stock Ubuntu does not ship, so it fails at import with
   "PortAudio library not found" while `pip` insists it is installed. The
   error used to be "No microphone backend. Install sounddevice", which sent
-  the user to reinstall the one thing that was fine. `ev.audio` now falls
+  the user to reinstall the one thing that was fine. `leo.audio` now falls
   through to `_CommandStream` - `pw-record`, then `parec`, then `arecord` -
   reading raw PCM off a pipe, and the final error keeps every backend's
   reason and names `libportaudio2`. A recorder is checked 150ms after
   launch, because one that cannot reach the server exits at once and should
   hand over to the next rather than fail twenty reads later.
-- **Which input.** An empty `EV_INPUT_DEVICE` used to mean "the system
+- **Which input.** An empty `LEO_INPUT_DEVICE` used to mean "the system
   default", and the default source can be the *speaker monitor*
-  (`<sink>.monitor`) - it was, on the user's machine. E.V. then recorded the
+  (`<sink>.monitor`) - it was, on the user's machine. Leo then recorded the
   screen: every video, and its own replies at full digital level, which it
   barged in on and answered in a loop no echo heuristic could fix.
   `resolve_capture_source` asks `pactl` and pins a real microphone by name
@@ -1476,7 +1568,7 @@ fallbacks.** Each was "it works in every other app" from the user's side:
   `--device`, and the command backend goes first when a source is pinned,
   because PortAudio on Linux goes through ALSA's `default` and lands on the
   same monitor. Only monitors present is an error, never a fallback. A
-  monitor is recorded only when `EV_INPUT_DEVICE` names one.
+  monitor is recorded only when `LEO_INPUT_DEVICE` names one.
 - **The voice.** No ffplay, mpv or mpg123 on a stock install either;
   `gst-play-1.0` is, and GStreamer's mpg123 decoder with it.
 - **Finding programs.** The Start Menu index has a Linux twin: every
@@ -1496,7 +1588,7 @@ through `keybd_event` on Windows, no package anywhere. It is deliberately
 calls back to back, which is exactly what the limiter reads as a loop and
 answers with lockdown. It *is* in `UNTRUSTED_OUTPUT`, because a track title
 is whatever the uploader called it. One Linux trap: a snapped player
-(Ubuntu's Firefox, Brave) only answers MPRIS from unconfined callers, so E.V.
+(Ubuntu's Firefox, Brave) only answers MPRIS from unconfined callers, so Leo
 run from VS Code's snapped terminal gets `AccessDenied` - reported as
 sandboxing, never as "nothing is playing".
 

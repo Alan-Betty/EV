@@ -1,4 +1,4 @@
-"""The overlay goes up whenever E.V. has the screen, and only once.
+"""The overlay goes up whenever Leo has the screen, and only once.
 
 Nothing here draws anything or registers a hotkey: `conftest.py` turns both
 off, and `Takeover` is replaced with a recorder where the test needs to see
@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import config  # noqa: E402
 from tools import overlay  # noqa: E402

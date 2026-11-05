@@ -1,4 +1,4 @@
-"""Screen perception and direct computer control - E.V.'s eyes and hands.
+"""Screen perception and direct computer control - Leo's eyes and hands.
 
 Four tools live here, in increasing order of how much they can do to a
 machine:
@@ -17,7 +17,7 @@ uses, as one ordinary JSON request. That keeps the resident cost to the peak
 of a single frame - a couple of megabytes, freed immediately - instead of the
 gigabytes a local vision model would want. Nothing is written to disk unless
 the user explicitly asks for a saved copy, and that write goes through
-`file_manager`'s root check like every other file E.V. touches.
+`file_manager`'s root check like every other file Leo touches.
 
 **Every import is lazy.** `mss`, `Pillow` and `pyautogui` are loaded on first
 use and not before, so a session that never looks at the screen never pays
@@ -58,7 +58,7 @@ from tools.desktop import system as desktop_system
 from tools.safety import classify, classify_gui
 from tools.overlay import taking_over
 
-log = logging.getLogger("ev.tools.computer_use")
+log = logging.getLogger("leo.tools.computer_use")
 
 
 # ---------------------------------------------------------------------------
@@ -468,7 +468,7 @@ def capture_screen(
 
 _BLANK_REASON = (
     "the screen grab came back entirely black - on Wayland an X11 grab cannot "
-    "see native windows (set EV_CAPTURE_BACKEND, or see --check)"
+    "see native windows (set LEO_CAPTURE_BACKEND, or see --check)"
 )
 
 
@@ -636,7 +636,7 @@ def _note_budget(headers: Any) -> None:
 def ask_vision(frame: Frame, prompt: str, system: str = "") -> str:
     """Post one frame and one question; return the model's text.
 
-    Provider-shaped by hand, like `ev.brain`, and for the same reason: both
+    Provider-shaped by hand, like `leo.brain`, and for the same reason: both
     are a single JSON POST, and the vendor SDKs that would save ten lines
     here cost tens of megabytes of resident memory.
     """
@@ -671,10 +671,10 @@ def _post_json(url: str, payload: dict, headers: dict) -> dict:
     budget, so it is the thing most likely to meet a 429 - and it meets one
     half way through, with several steps of real work already done. Failing
     there throws that away and leaves the desktop in a state nobody asked
-    for. The server says how long its window is; waiting is E.V.'s job, not
+    for. The server says how long its window is; waiting is Leo's job, not
     the user's.
     """
-    from ev.brain import _gemini_retry_after, _retry_after
+    from leo.brain import _gemini_retry_after, _retry_after
 
     response = None
     wait: float | None = None
@@ -1136,13 +1136,13 @@ def take_screenshot(
 
     `save_as` is the one path that writes a frame to disk, and it goes
     through `file_manager.resolve_user_path`, so the same root check that
-    governs every other file E.V. writes governs this one too. A refused
+    governs every other file Leo writes governs this one too. A refused
     path is reported, never quietly retargeted.
     """
     if not config.COMPUTER_USE_ENABLED:
         return ToolResult.failure(
             "Screen access is switched off.",
-            "EV_COMPUTER_USE_ENABLED is false; no screenshot was taken.",
+            "LEO_COMPUTER_USE_ENABLED is false; no screenshot was taken.",
         )
 
     crop = _parse_region(region)
@@ -1280,7 +1280,7 @@ def mouse_action(
     if not config.COMPUTER_USE_ENABLED:
         return ToolResult.failure(
             "Screen control is switched off.",
-            "EV_COMPUTER_USE_ENABLED is false; no mouse action was taken.",
+            "LEO_COMPUTER_USE_ENABLED is false; no mouse action was taken.",
         )
 
     verb = (action or "click").strip().lower().replace("-", "_").replace(" ", "_")
@@ -1416,7 +1416,7 @@ def keyboard_action(
     if not config.COMPUTER_USE_ENABLED:
         return ToolResult.failure(
             "Keyboard control is switched off.",
-            "EV_COMPUTER_USE_ENABLED is false; nothing was typed.",
+            "LEO_COMPUTER_USE_ENABLED is false; nothing was typed.",
         )
 
     verb = (action or "type").strip().lower().replace("-", "_").replace(" ", "_")
@@ -1529,7 +1529,7 @@ An action is one of these:
 {"action":"fail","speech":"why this cannot be done from here"}
 
 Rules:
-- The red border and the status panel belong to E.V.'s own overlay. Ignore
+- The red border and the status panel belong to Leo's own overlay. Ignore
   them; they are not part of any application, and nothing is ever clicked there.
 - Coordinates are FRACTIONS of the whole screen, 0 to 1. Read them off the grid:
   the yellow labels along the top are x, the ones down the left are y. On a
@@ -1790,7 +1790,7 @@ def screen_task(
     if not config.COMPUTER_USE_ENABLED:
         return ToolResult.failure(
             "Screen control is switched off.",
-            "EV_COMPUTER_USE_ENABLED is false; the screen task did not run.",
+            "LEO_COMPUTER_USE_ENABLED is false; the screen task did not run.",
         )
     # The goal itself is gated up front. "Buy the first result" should ask
     # before the first click, not three clicks in at the checkout.
@@ -1818,7 +1818,7 @@ def screen_task(
         if not config.VISION_ENABLED:
             return ToolResult.failure(
                 "I can't see the screen, so I can't drive it.",
-                "EV_VISION_ENABLED is false; screen_task needs vision for this window.",
+                "LEO_VISION_ENABLED is false; screen_task needs vision for this window.",
             )
         if prior:
             return _drive_screen(goal, max_steps, confirmed, token, hud, prior=prior)
@@ -1893,7 +1893,7 @@ def _drive_screen(
     # The ceiling counts actions, not looks. One reply may carry a small
     # batch, so bounding the loop alone would quietly allow three times the
     # steps the caller asked for - and `max_steps` is a promise about what
-    # will happen to the screen, not about how often E.V. glances at it.
+    # will happen to the screen, not about how often Leo glances at it.
     for index in range(1, ceiling + 1):
         if len(history) >= ceiling:
             break

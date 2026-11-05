@@ -1,4 +1,4 @@
-"""The desktop section of `python ev_core.py --check`.
+"""The desktop section of `python leo_core.py --check`.
 
 Every tier here degrades quietly at run time - a window list with no
 rectangles, an app that publishes nothing, input that only reaches XWayland
@@ -47,14 +47,14 @@ def lines() -> list[tuple[str, str]]:
         add(
             "WARN",
             "windows: XWayland windows plus accessibility only - no positions, and focus "
-            "goes through the overview. For exact windows: python ev_core.py "
+            "goes through the overview. For exact windows: python leo_core.py "
             "--install-gnome-extension, then log out and back in",
         )
     else:
         add("OK", f"windows: {' + '.join(listing)}")
 
     if not getattr(config, "A11Y_ENABLED", True):
-        add("WARN", "accessibility: off (EV_A11Y_ENABLED=false) - every in-app job uses vision")
+        add("WARN", "accessibility: off (LEO_A11Y_ENABLED=false) - every in-app job uses vision")
         return out
     if system.IS_LINUX:
         if not importlib.util.find_spec("jeepney"):
@@ -70,14 +70,14 @@ def lines() -> list[tuple[str, str]]:
             add(
                 "WARN",
                 "accessibility: AT-SPI reachable, but toolkit accessibility is off - Chromium, "
-                "Electron and Qt apps publish nothing until it is on. E.V. turns it on at first "
-                "use (EV_A11Y_AUTO_ENABLE); apps already open then need a restart",
+                "Electron and Qt apps publish nothing until it is on. Leo turns it on at first "
+                "use (LEO_A11Y_AUTO_ENABLE); apps already open then need a restart",
             )
         if system.snap_confined():
             add(
                 "WARN",
-                f"sandbox: E.V. runs confined ({system.confinement_label()}) - snapped apps may refuse "
-                "to be read. Start E.V. from a normal terminal, not VS Code's",
+                f"sandbox: Leo runs confined ({system.confinement_label()}) - snapped apps may refuse "
+                "to be read. Start Leo from a normal terminal, not VS Code's",
             )
     elif system.IS_WINDOWS:
         if importlib.util.find_spec("comtypes"):
@@ -90,7 +90,7 @@ def lines() -> list[tuple[str, str]]:
         if macos.available():
             add(
                 "OK",
-                "accessibility: System Events - the app running E.V. needs Accessibility "
+                "accessibility: System Events - the app running Leo needs Accessibility "
                 "permission (System Settings > Privacy & Security > Accessibility)",
             )
         else:

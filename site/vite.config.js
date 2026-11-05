@@ -7,6 +7,6 @@ export default defineConfig({
   base: './',
   build: { target: 'es2022', cssMinify: true },
   plugins: [adminApi()],
-  // The face is drawn from ../ev/face/expressions.json, outside this folder.
+  // The face is drawn from ../leo/face/expressions.json, outside this folder.
   server: { fs: { allow: ['..'] } },
 });

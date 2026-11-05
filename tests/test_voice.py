@@ -1,15 +1,15 @@
-"""E.V. hearing itself, and learning who it is listening to.
+"""Leo hearing itself, and learning who it is listening to.
 
-On loudspeakers E.V. barged in on its own reply, kept the audio, transcribed
+On loudspeakers Leo barged in on its own reply, kept the audio, transcribed
 its own words and answered them - a loop that never finished a sentence.
 Three independent fixes, each pinned here:
 
-* **Barge-in is measured against E.V.'s echo, not the room.** The reference
-  is how loud E.V. was a moment ago, and the grace period is timed from the
+* **Barge-in is measured against Leo's echo, not the room.** The reference
+  is how loud Leo was a moment ago, and the grace period is timed from the
   first sound rather than from the reply being queued.
-* **A learned voiceprint** tells the user from E.V.-through-the-speakers, and
+* **A learned voiceprint** tells the user from Leo-through-the-speakers, and
   has no vote until it has heard enough of both.
-* **A transcript of E.V.'s own words is never answered,** however it got in.
+* **A transcript of Leo's own words is never answered,** however it got in.
 
 Offline: no audio device is opened and no network call is made. The voices
 are synthetic - two harmonic sources with different spectral shapes - which
@@ -27,18 +27,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 
 import config  # noqa: E402
-import ev_core  # noqa: E402
-from ev import voice  # noqa: E402
-from ev.audio import Microphone, Utterance  # noqa: E402
-from ev.session import Session  # noqa: E402
-from ev.stt import Transcript  # noqa: E402
-from ev.tts import Speaker  # noqa: E402
+import leo_core  # noqa: E402
+from leo import voice  # noqa: E402
+from leo.audio import Microphone, Utterance  # noqa: E402
+from leo.session import Session  # noqa: E402
+from leo.stt import Transcript  # noqa: E402
+from leo.tts import Speaker  # noqa: E402
 
 RATE = 16000
 
@@ -288,7 +288,7 @@ class SilentUI:
 
 
 def _assistant(mic, speaker, voice_profile=None):
-    assistant = ev_core.EV.__new__(ev_core.EV)
+    assistant = leo_core.Leo.__new__(leo_core.Leo)
     assistant.ui = SilentUI()
     assistant.mic = mic
     assistant.speaker = speaker
@@ -328,7 +328,7 @@ async def _watch(assistant, seconds, script=None):
 
 
 def test_e_v_s_own_steady_voice_never_takes_the_floor():
-    """The bug: E.V. through the speakers is far louder than the room."""
+    """The bug: Leo through the speakers is far louder than the room."""
     mic = FakeMic(level=0.09)  # 4.5x the floor; the old rule fired on this
     speaker = FakeSpeaker()
     assistant = _assistant(mic, speaker)
@@ -346,7 +346,7 @@ def test_the_user_talking_over_the_echo_still_takes_the_floor():
 
     def script(elapsed):
         if elapsed > 0.8:
-            mic.level = 0.2  # the user, on top of E.V.
+            mic.level = 0.2  # the user, on top of Leo
 
     state = asyncio.run(_watch(assistant, 1.5, script))
 
@@ -446,7 +446,7 @@ class EchoingSpeaker:
 def _ticking(heard, said, ear=None):
     assistant = _assistant(FakeMic(), EchoingSpeaker(said), ear)
     assistant.session = Session()
-    assistant.session.engage()  # E.V. just spoke: no wake phrase needed
+    assistant.session.engage()  # Leo just spoke: no wake phrase needed
     assistant._queued_utterance = None
     assistant._last_utterance = Utterance(echo_voice(), 3.0, RATE)
     assistant.routed = []

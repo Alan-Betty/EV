@@ -23,8 +23,6 @@ function apply(content) {
     el.textContent = text;
     if (el.classList.contains('is-split')) splitWords(el);
   });
-  const tag = document.getElementById('hero-tag');
-  if (tag && content.hero?.statusLink) tag.href = content.hero.statusLink;
 }
 
 export function initContent() {

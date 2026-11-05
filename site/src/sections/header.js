@@ -17,7 +17,7 @@ export function initHeader() {
     const platform = store.get('platform');
     const mobile = store.get('mobile');
     badge.querySelector('[data-os-icon]').innerHTML = mobile ? '' : platformIcon(platform, 'size-4');
-    badge.querySelector('[data-os-label]').textContent = mobile ? 'Get E.V.' : `Download for ${PLATFORMS[platform].label}`;
+    badge.querySelector('[data-os-label]').textContent = mobile ? 'Get L.E.O.' : `Download for ${PLATFORMS[platform].label}`;
   };
   ['platform', 'mobile'].forEach((k) => store.on(k, render));
 

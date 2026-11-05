@@ -6,8 +6,9 @@ answered. The choice is the whole of the cross-platform story for input:
 
     Windows, macOS, X11          pyautogui + mss, exactly as before
     GNOME on Wayland             Mutter remote-desktop session (eyes + hands)
+    Hyprland                     grim eyes, uinput pointer, wtype text
     other Wayland desktops       uinput hands; no reliable eyes yet
-    forced via EV_INPUT_BACKEND  whatever was asked for, or a clear error
+    forced via LEO_INPUT_BACKEND  whatever was asked for, or a clear error
 
 A backend that fails to come up costs the capability with a reason, never
 the assistant: `hands()` returns None and the mouse and keyboard tools
@@ -23,7 +24,7 @@ from typing import Any
 import config
 from tools.desktop import system
 
-log = logging.getLogger("ev.tools.desktop.hands")
+log = logging.getLogger("leo.tools.desktop.hands")
 
 _lock = threading.Lock()
 _hands: Any = None
@@ -64,6 +65,10 @@ def input_choice() -> str:
 
     if uinput.writable():
         return "uinput"
+    # Almost every window on Hyprland is native, so XTest would report clicks
+    # that land nowhere. An honest "I can't" beats that.
+    if system.desktop() == "hyprland":
+        return "none"
     # Last resort, and a partial one: XTest through XWayland reaches only
     # XWayland windows. Better than nothing, and `--check` says so.
     return "pyautogui"
@@ -78,6 +83,12 @@ def capture_choice() -> str:
 
         if mutter.available():
             return "mutter"
+    # An X11 grab on a wlroots-style compositor is black or XWayland-only.
+    if system.is_wayland() and system.desktop() == "hyprland":
+        import shutil
+
+        if shutil.which("grim"):
+            return "grim"
     return "mss"
 
 
@@ -94,6 +105,10 @@ def _pyautogui() -> Any:
 
 def _desktop_size() -> tuple[int, int]:
     """The X root size, which under XWayland spans the whole desktop."""
+    if system.desktop() == "hyprland":
+        from tools.desktop import hyprland
+
+        return hyprland.size() or (0, 0)
     try:
         size = _pyautogui().size()
         return int(size[0]), int(size[1])
@@ -120,11 +135,18 @@ def hands() -> Any:
             size = _desktop_size()
             if not size[0]:
                 raise RuntimeError("the desktop size is unknown, so a click cannot be placed")
-            made = UinputHands(_uinput, size)
+            if system.desktop() == "hyprland":
+                from tools.desktop.hyprland import HyprlandHands
+
+                made = HyprlandHands(_uinput, size)
+            else:
+                made = UinputHands(_uinput, size)
+        elif choice == "none":
+            raise RuntimeError("/dev/uinput is not writable; join the 'input' group")
         elif choice == "pyautogui":
             made = _pyautogui()
         else:
-            raise RuntimeError(f"unknown EV_INPUT_BACKEND {choice!r}")
+            raise RuntimeError(f"unknown LEO_INPUT_BACKEND {choice!r}")
     except Exception as exc:  # ImportError, no display, refused device
         _last_error = f"{choice}: {exc}"
         log.warning("Input backend %s unavailable: %s", choice, exc)
@@ -149,7 +171,12 @@ def capture_png() -> bytes | None:
     Raises when the chosen backend fails, so `capture_screen` can report the
     real reason instead of falling through to a grab that will be black.
     """
-    if capture_choice() != "mutter":
+    choice = capture_choice()
+    if choice == "grim":
+        from tools.desktop import hyprland
+
+        return hyprland.capture_png()
+    if choice != "mutter":
         return None
     return mutter_session().capture_png()
 
@@ -173,6 +200,11 @@ def screen_size(open_session: bool = True) -> tuple[int, int] | None:
                 return size
         except Exception as exc:
             log.debug("Mutter size unavailable: %s", exc)
+    if capture_choice() == "grim" or input_choice() == "uinput":
+        if system.desktop() == "hyprland":
+            from tools.desktop import hyprland
+
+            return hyprland.size()
     return None
 
 
@@ -202,4 +234,6 @@ def report() -> dict[str, str]:
         info["uinput"] = "writable" if uinput.writable() else "not writable (join the 'input' group)"
         if info["input"] == "pyautogui":
             info["warning"] = "XTest reaches XWayland windows only"
+        elif info["input"] == "none":
+            info["warning"] = "no way to reach native windows; join the 'input' group"
     return info

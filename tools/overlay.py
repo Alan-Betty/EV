@@ -1,4 +1,4 @@
-"""The overlay that says E.V. has the screen, and the switch that takes it back.
+"""The overlay that says Leo has the screen, and the switch that takes it back.
 
 An autonomous run moves the pointer, changes windows and types into things
 while the user watches. Two things have to be true the whole time that is
@@ -13,13 +13,13 @@ happening, and neither of them is about correctness:
   deliberate, supervised and stoppable, and a badge that looks like a debug
   print says the opposite of all three.
 * **It must be stoppable from anywhere.** The user will not be looking at
-  E.V.'s terminal - they will be looking at whatever E.V. is driving. The
+  Leo's terminal - they will be looking at whatever Leo is driving. The
   kill switch is registered with the window manager, so it lands whatever has
   focus, including a full-screen application that owns every other keystroke.
 
 Three constraints shape the drawing.
 
-**The overlay must never take focus.** Everything E.V. types goes to the
+**The overlay must never take focus.** Everything Leo types goes to the
 focused window, so a HUD that stole focus would swallow the work it is
 narrating. Both windows get `WS_EX_NOACTIVATE` and `WS_EX_TOOLWINDOW`: they
 cannot be activated, and they stay out of Alt-Tab.
@@ -28,8 +28,8 @@ cannot be activated, and they stay out of Alt-Tab.
 with `-transparentcolor`, which on Windows makes those pixels both invisible
 and click-through, and `WS_EX_TRANSPARENT` puts the rest of it out of the way
 too. The panel is click-through by default for the same reason - a button
-sitting over the page E.V. is about to click is a button that intercepts it.
-`EV_AGENT_OVERLAY_CLICKTHROUGH=false` trades that back for a clickable STOP,
+sitting over the page Leo is about to click is a button that intercepts it.
+`LEO_AGENT_OVERLAY_CLICKTHROUGH=false` trades that back for a clickable STOP,
 which is the right call on a machine with no hotkey to spare.
 
 The panel is keyed too, which is what buys its rounded corners: the pixels
@@ -46,6 +46,7 @@ unannounced rather than not at all.
 from __future__ import annotations
 
 import ctypes
+import importlib
 import gc
 import logging
 import queue
@@ -57,7 +58,7 @@ from typing import Any, Callable, Iterator
 
 import config
 
-log = logging.getLogger("ev.tools.overlay")
+log = logging.getLogger("leo.tools.overlay")
 
 from tools.desktop.system import IS_LINUX, IS_WINDOWS  # noqa: E402
 
@@ -292,7 +293,7 @@ class Overlay:
             return False
         self._started = time.monotonic()
         self._thread = threading.Thread(
-            target=self._run, name="ev-overlay", daemon=True
+            target=self._run, name="leo-overlay", daemon=True
         )
         self._thread.start()
         # Bounded: a Tk that never comes up must not hold the mission at the
@@ -348,7 +349,7 @@ class Overlay:
             # left on `self`, or a widget cycle collected later by some other
             # thread's GC, frees it there instead - and Tcl answers that with
             # "Tcl_AsyncDelete: async handler deleted by the wrong thread"
-            # and abort(), taking E.V. down after every takeover. Measured:
+            # and abort(), taking Leo down after every takeover. Measured:
             # exit 134 on the first gc.collect() after a run.
             self._glow_canvas = None
             self._badge_canvas = None
@@ -535,7 +536,7 @@ class Overlay:
             _PAD, 25, _PAD + 9, 34, fill=self.accent, outline="",
         )
         self._title = canvas.create_text(
-            _PAD + 18, 29, anchor="w", text="E.V. HAS CONTROL",
+            _PAD + 18, 29, anchor="w", text="L.E.O. HAS CONTROL",
             fill=_TEXT, font=("Segoe UI Semibold", 10),
         )
         self._counter = canvas.create_text(
@@ -566,7 +567,7 @@ class Overlay:
         self._stop_label = None
         if not click_through:
             # Only where the user has said they would rather have a button
-            # than an inert panel. A STOP sitting over the page E.V. is about
+            # than an inert panel. A STOP sitting over the page Leo is about
             # to click is a button that intercepts that click.
             self._stop_shape = _round_rect(
                 canvas, width - _PAD - 76, 110, width - _PAD, 132, 11,
@@ -719,7 +720,7 @@ class Overlay:
                 dirty = True
             elif kind == "stopping":
                 self._stopping = True
-                canvas.itemconfigure(self._title, text="E.V. IS STOPPING")
+                canvas.itemconfigure(self._title, text="L.E.O. IS STOPPING")
                 canvas.itemconfigure(self._rule, fill=_WARN)
                 canvas.itemconfigure(self._dot, fill=_WARN)
                 dirty = True
@@ -838,7 +839,7 @@ class KillSwitch:
 
     Registered with the window manager rather than read from a keyboard hook,
     which matters for both halves of the job: it needs no extra dependency,
-    and it reaches E.V. even when a full-screen application owns every other
+    and it reaches Leo even when a full-screen application owns every other
     keystroke on the machine.
     """
 
@@ -853,6 +854,7 @@ class KillSwitch:
         self._halt = threading.Event()
         self._gnome = False
         self._x11: Any = None
+        self._hypr_remove: Callable[[], None] | None = None
         self.route = ""
 
     def start(self) -> bool:
@@ -867,7 +869,7 @@ class KillSwitch:
             log.warning("Unusable kill-switch hotkey %r; not registered", self.combo)
             return False
         self._thread = threading.Thread(
-            target=self._run, name="ev-killswitch", daemon=True
+            target=self._run, name="leo-killswitch", daemon=True
         )
         self._thread.start()
         self._started.wait(timeout=2.0)
@@ -890,10 +892,19 @@ class KillSwitch:
                 self._gnome = True
                 self.route = "gnome"
                 self._thread = threading.Thread(
-                    target=self._poll_gnome, name="ev-killswitch-gnome", daemon=True
+                    target=self._poll_gnome, name="leo-killswitch-gnome", daemon=True
                 )
                 self._thread.start()
                 return True
+        if system.is_wayland() and system.desktop() == "hyprland":
+            from tools.desktop import hyprland
+
+            if hyprland.available():
+                remove = hyprland.kill_bind().listen(self.combo, self._on_fire)
+                if remove is not None:
+                    self._hypr_remove = remove
+                    self.route = "hyprland"
+                    return True
         grab = xhud.X11KillGrab(self.combo, self._on_fire)
         if grab.start():
             self._x11 = grab
@@ -927,6 +938,10 @@ class KillSwitch:
 
     def stop(self) -> None:
         self._halt.set()
+        if self._hypr_remove is not None:
+            self._hypr_remove()
+            self._hypr_remove = None
+            return
         if self._x11 is not None:
             self._x11.stop()
             self._x11 = None
@@ -1021,7 +1036,10 @@ class Takeover:
 
     def __enter__(self) -> "Takeover":
         # Hotkey first, so the panel only names a key that really works.
-        self.hotkey_live = self._switch.start()
+        # An XWayland-only grab fires only while an XWayland window has focus,
+        # so naming it on the panel would promise a key that usually does
+        # nothing. It stays registered; it just is not advertised.
+        self.hotkey_live = self._switch.start() and self._switch.route != "x11-wayland"
         self._overlay.hotkey_live = self.hotkey_live
         self.drawing = self._overlay.start()
         return self
@@ -1058,6 +1076,43 @@ class Takeover:
             self._on_kill()
 
 
+def arm_global_kill() -> bool:
+    """Hold the kill key for the life of the process, where that is possible.
+
+    A takeover holds it only while the screen is taken, but background work
+    needs stopping too. Only the compositor bind can be shared between
+    listeners, so this is Hyprland for now; elsewhere the key stays with the
+    takeover, and "stop everything" still reaches everything.
+    """
+    if not config.AGENT_HOTKEY_ENABLED or not IS_LINUX:
+        return False
+    from tools.desktop import hyprland, system
+
+    if not system.is_wayland() or not hyprland.available():
+        return False
+
+    def fired() -> None:
+        from tools.guard import audit, engage_lockdown
+
+        # Whatever the lockdown setting says. It is the one thing running that
+        # no takeover is holding the key for.
+        importlib.import_module("tools.dev_session").stop_all()
+        if config.AGENT_KILL_LOCKS_DOWN:
+            engage_lockdown("the kill switch was pressed")
+        audit("kill_switch_pressed")
+
+    return hyprland.kill_bind().listen(config.AGENT_KILL_HOTKEY, fired) is not None
+
+
+def disarm_global_kill() -> None:
+    if not IS_LINUX:
+        return
+    from tools.desktop import hyprland
+
+    if hyprland.available():
+        hyprland.kill_bind().shutdown()
+
+
 # The one takeover on screen, if any. A mission hands sub-goals to
 # `screen_task` and `browser_task`, and both of those now announce
 # themselves too - so without this a mission would stack a second frame and
@@ -1071,16 +1126,16 @@ _ACTIVE_LOCK = threading.Lock()
 def taking_over(
     goal: str, cancel: Any = None, on_kill: Callable[[], None] | None = None
 ) -> Iterator[Takeover]:
-    """Announce that E.V. has the screen for the length of a `with` block.
+    """Announce that Leo has the screen for the length of a `with` block.
 
     Every tool that drives the pointer or a visible browser for more than one
     action goes through here, so the frame and the kill switch mean the same
-    thing wherever they appear: E.V. is in control, and this is how to take
+    thing wherever they appear: Leo is in control, and this is how to take
     it back. Nested calls share the outer takeover and only update its status
     line, because the outer run is the thing the user is watching.
 
     The kill switch cancels `cancel` - the same token "stop" reaches - and by
-    default locks E.V. down, since someone reaching for it means everything.
+    default locks Leo down, since someone reaching for it means everything.
     """
     global _ACTIVE
     with _ACTIVE_LOCK:
@@ -1101,7 +1156,7 @@ def taking_over(
         from tools.guard import audit, engage_lockdown
 
         if config.AGENT_KILL_LOCKS_DOWN:
-            engage_lockdown("the kill switch was pressed while E.V. had the screen")
+            engage_lockdown("the kill switch was pressed while Leo had the screen")
         audit("takeover_killed", task=goal[:200])
         if on_kill is not None:
             on_kill()

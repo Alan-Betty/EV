@@ -1,11 +1,11 @@
 """GNOME on Wayland: eyes and hands through Mutter's own remote-desktop API.
 
-On a GNOME Wayland session nothing E.V. used to rely on works. An X11 grab
+On a GNOME Wayland session nothing Leo used to rely on works. An X11 grab
 of the screen comes back the right size and entirely black - measured, every
 channel `(0, 0)` - and XTest input reaches XWayland windows but not Files,
 Settings or the Text Editor. The obvious replacement, the xdg Screenshot
 portal, refuses outright for a process with no window of its own: "Only the
-focused app is allowed to show a system access dialog", and E.V. has no
+focused app is allowed to show a system access dialog", and Leo has no
 focused window to ask from.
 
 `org.gnome.Mutter.ScreenCast` and `org.gnome.Mutter.RemoteDesktop` are what
@@ -41,7 +41,7 @@ from typing import Any
 
 from tools.desktop import bus, keys
 
-log = logging.getLogger("ev.tools.desktop.mutter")
+log = logging.getLogger("leo.tools.desktop.mutter")
 
 _RD = "org.gnome.Mutter.RemoteDesktop"
 _SC = "org.gnome.Mutter.ScreenCast"

@@ -6,7 +6,7 @@ expensive in two different ways.
 **The old fallback was worse than failing.** When nothing resolved, this used
 to run `cmd /c start "" <name>`. For a name Windows cannot find, `start` pops
 a *modal error dialog* and blocks until it is dismissed - so an unknown app
-cost a ten-second freeze and left a window on screen, and E.V. still ended up
+cost a ten-second freeze and left a window on screen, and Leo still ended up
 saying it could not find it. Nothing here shells out to `start` any more:
 `os.startfile` does the same job, returns immediately, and raises instead of
 drawing a dialog.
@@ -41,14 +41,14 @@ from difflib import get_close_matches
 from pathlib import Path
 
 import config
-from ev.memory import read_json, write_json
+from leo.memory import read_json, write_json
 import subprocess
 
 from tools.base import IS_WINDOWS, ToolResult, popen_detached, resolve_executable
 
 from tools.desktop.system import IS_LINUX
 
-log = logging.getLogger("ev.tools.app")
+log = logging.getLogger("leo.tools.app")
 
 # Windows "shell:AppsFolder" / URI targets that have no PATH executable.
 _URI_PREFIXES = ("ms-settings:", "ms-clock:", "shell:", "http://", "https://")
@@ -102,7 +102,7 @@ def _scan_start_menu() -> dict[str, str]:
     """Map every Start Menu shortcut name onto its `.lnk` path.
 
     Walking a few hundred files takes tens of milliseconds and happens once a
-    day, which is a fair price for E.V. knowing about every program the user
+    day, which is a fair price for Leo knowing about every program the user
     has actually installed rather than the two dozen in `APP_ALIASES`.
     """
     found: dict[str, str] = {}
@@ -350,7 +350,7 @@ def _shell_open(target: str) -> bool:
     *"Windows cannot find ... Make sure you typed the name correctly"* itself,
     and there is nothing the caller can do about it - `os.startfile` has no way
     to ask for a silent failure. With it, a target that cannot be opened comes
-    back as a return code and E.V. says so in its own words.
+    back as a return code and Leo says so in its own words.
 
     That matters most for Start Menu shortcuts. A `.lnk` outlives the program
     it points at, so any machine has a few pointing at things that were
@@ -433,7 +433,7 @@ def _repair_path(text: str) -> str | None:
     The model will happily invent `C:\\Users\\Alan\\GitHub` for a machine whose
     user is not called Alan. Explorer opens its default location for a path
     that does not exist and exits 0, so without this the launch "succeeds",
-    E.V. says so, and the user is looking at the wrong folder wondering why
+    Leo says so, and the user is looking at the wrong folder wondering why
     nothing happened.
 
     A wrong absolute path is usually right about the *last* part, so the
@@ -449,7 +449,10 @@ def _repair_path(text: str) -> str | None:
 
     # "C:/Users/Alan/GitHub" on a machine with no Alan: the tail is still the
     # folder they meant.
-    for guess in (text, direct.name):
+    # `Path` only splits on the separator of the OS it runs on, so off Windows
+    # the whole of `C:\\Users\\Alan\\GitHub` is one "name".
+    tail = re.split(r"[\\\\/]", str(direct).rstrip("\\\\/"))[-1]
+    for guess in (text, tail):
         if not guess:
             continue
         try:
@@ -489,11 +492,11 @@ def _hold_if_downloaded(exe: str, pretty: str, app: str, arguments: str) -> Tool
     `open_app` is the one tool that starts an arbitrary process, and
     `FILE_ROOTS` does not help here: it defaults to the user's profile, so
     the Downloads folder is inside it by construction. Every other guard in
-    E.V. is about what a *known* program is told to do; this is about
+    Leo is about what a *known* program is told to do; this is about
     whether the program should be started at all.
 
     The confirmation is the point rather than a refusal. Downloading an
-    installer and then asking E.V. to run it is an ordinary thing to want.
+    installer and then asking Leo to run it is an ordinary thing to want.
     Doing it without being asked, because a web page suggested it, is not.
     """
     if not config.CONFIRM_DOWNLOADED_APPS or not _came_from_the_internet(exe):
@@ -517,7 +520,10 @@ def open_app(
     extra: list[str] = []
     if arguments and arguments.strip():
         try:
-            extra = shlex.split(arguments, posix=not IS_WINDOWS)
+            # POSIX rules read `C:\\Users\\x` as escapes and hand back `C:Usersx`,
+            # which then cannot be repaired from its last part.
+            drive_path = re.search(r"[a-zA-Z]:\\", arguments) is not None
+            extra = shlex.split(arguments, posix=not (IS_WINDOWS or drive_path))
         except ValueError:
             extra = [arguments.strip()]
 

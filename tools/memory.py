@@ -1,18 +1,18 @@
 """Long-term memory: the small facts about the user, and their to-do list.
 
-The store itself lives in [ev/memory.py](../ev/memory.py) and is written
+The store itself lives in [leo/memory.py](../leo/memory.py) and is written
 atomically, so what is kept here survives a reboot or a power cut.
 
 Three tools, because the model picks better from three narrow names than from
 one wide one. `remember_fact` and `recall_fact` are a key-value store;
 `manage_todo` is a standing list of errands.
 
-No key = a free-form note in `ev.semantic_memory`, recalled by meaning.
+No key = a free-form note in `leo.semantic_memory`, recalled by meaning.
 `recall_fact` falls back to that search when no fact has the name. Forget
 by search, or wipe, asks first; the yes replays the exact note ids shown.
 
 Everything stored here ends up in the system prompt on every turn, which is
-why `ev.memory` caps both the facts and the open to-dos: an assistant that
+why `leo.memory` caps both the facts and the open to-dos: an assistant that
 remembers four hundred things is an assistant with a four-hundred-line
 prompt. Facts are short - "coffee is black", "editor is VS Code" - and the
 spoken confirmation is shorter still.
@@ -29,8 +29,10 @@ turn.
 from __future__ import annotations
 
 import config
-from ev.memory import get_memory
+from leo.memory import get_memory
+from leo.memory_tree import apply_link, get_memory_tree
 from tools.base import ToolResult
+from tools.guard import recently_read_outside
 
 
 def remember(
@@ -60,7 +62,7 @@ def remember(
     if not store.enabled:
         return ToolResult.failure(
             "My memory's switched off.",
-            "Memory disabled; set EV_MEMORY_ENABLED=true to use it.",
+            "Memory disabled; set LEO_MEMORY_ENABLED=true to use it.",
         )
 
     name = (key or "").strip()
@@ -126,7 +128,7 @@ def remember(
 def _disabled() -> ToolResult:
     return ToolResult.failure(
         "My memory's switched off.",
-        "Memory disabled; set EV_MEMORY_ENABLED=true to use it.",
+        "Memory disabled; set LEO_MEMORY_ENABLED=true to use it.",
     )
 
 
@@ -137,7 +139,7 @@ _WIPE_WORDS = frozenset(
 
 
 def _notes():
-    from ev.semantic_memory import get_semantic_memory
+    from leo.semantic_memory import get_semantic_memory
 
     return get_semantic_memory()
 
@@ -150,16 +152,21 @@ def remember_fact(
     key: str = "",
     value: str = "",
     forget: bool = False,
+    about: str = "",
+    link: str = "",
     ids: str = "",
     confirmed: bool = False,
     **_: object,
 ) -> ToolResult:
     """Store a fact (key+value) or a free-form note (value only); or forget.
 
-    Notes go to `ev.semantic_memory` and are recalled by meaning. A note close
+    Notes go to `leo.semantic_memory` and are recalled by meaning. A note close
     to an existing one replaces it, which is how an update lands. Forgetting
     a named fact is immediate; forgetting by search or wiping everything asks
     first, and the yes replays the exact `ids` that were shown.
+
+    `about` files the note on a branch of the Memory Tree, and `link` connects
+    that branch to another one, or gives it another name.
     """
     store = get_memory()
     if not store.enabled:
@@ -167,9 +174,30 @@ def remember_fact(
 
     name = (key or "").strip()
     fact = (value or "").strip()
+    subject = (about or "").strip()
+    connection = (link or "").strip()
 
     if forget:
+        if subject:
+            return _forget_branch(subject, ids, confirmed)
         return _forget(store, name or fact, ids, confirmed)
+
+    # Asked before anything is written, about the whole of what would be.
+    if (fact or connection) and not confirmed and recently_read_outside():
+        shown = _clip(" ".join(part for part in (subject, fact, connection) if part))
+        return ToolResult.confirm(
+            f"Save this: {shown}? Confirm?",
+            "Outside text was read moments ago, so this save may have come from it "
+            "rather than from the user. Waiting on a spoken yes.",
+            key=name,
+            value=fact,
+            about=subject,
+            link=connection,
+            reason="saves something it just read",
+        )
+
+    if subject or connection:
+        return _remember_in_tree(name, fact, subject, connection)
 
     if not fact:
         return ToolResult.failure(
@@ -182,7 +210,7 @@ def remember_fact(
         if not notes.enabled:
             return ToolResult.failure(
                 "Long-term notes are switched off.",
-                "Semantic memory disabled; set EV_SEMANTIC_ENABLED=true, or give a key.",
+                "Semantic memory disabled; set LEO_SEMANTIC_ENABLED=true, or give a key.",
             )
         note, verb = notes.add(fact)
         if note is None:
@@ -201,6 +229,73 @@ def remember_fact(
             f"Failed to persist '{name}' to {store.path}.",
         )
     return ToolResult.success("Noted.", f"Remembered that {name.lower()} is {fact}.")
+
+
+def _remember_in_tree(name: str, fact: str, subject: str, connection: str) -> ToolResult:
+    """A note on a branch, a link from it, or both."""
+    notes, tree = _notes(), get_memory_tree()
+    if not subject:
+        return ToolResult.failure(
+            "Link who to what?", "link needs about: the person or topic it starts from."
+        )
+    path = tree.ensure(subject)
+    if path is None:
+        return ToolResult.failure(
+            "Couldn't file that.", f"'{subject}' cannot name a person or topic."
+        )
+    said: list[str] = []
+    if fact:
+        text = f"{name}: {fact}" if name else fact
+        # Named in the note: it is read on its own, without the branch in sight.
+        node = tree.node(path)
+        if node is not None and node.name.lower() not in text.lower():
+            text = f"{node.name}: {text}"
+        note, verb = notes.add(text, tags=[path])
+        if note is None:
+            return ToolResult.failure(
+                "Couldn't hold on to that.", f"Failed to persist a note to {notes.path}."
+            )
+        tree.touch(path)
+        said.append(f"{verb.capitalize()} note {note.id} under {path}: {note.text}")
+    if connection:
+        done = apply_link(tree, notes, path, connection)
+        if not done:
+            return ToolResult.failure(
+                "Couldn't connect those.",
+                f"link must read 'relation: other', and '{connection}' did not work on {path}.",
+            )
+        said.append(done)
+    if not said:
+        return ToolResult.failure("Remember what, exactly?", "Nothing to store.")
+    speech = "Updated that note." if said[0].startswith("Updated") else "Noted."
+    return ToolResult.success(speech, " ".join(said))
+
+
+def _forget_branch(subject: str, ids: str, confirmed: bool) -> ToolResult:
+    """Everything about one person or topic. Always asks; the yes replays `ids`."""
+    notes, tree = _notes(), get_memory_tree()
+    path = tree.locate(subject)
+    if path is None:
+        return ToolResult.failure(
+            f"I don't have anything saved about {subject}.", f"No branch for '{subject}'."
+        )
+    node = tree.node(path)
+    label = node.name if node else subject
+    shown = notes.ids_under(path)
+    if not confirmed:
+        return ToolResult.confirm(
+            f"Forget everything about {label}, {len(shown)} notes? Confirm?",
+            f"Waiting on a yes before removing {path}, its notes and its links.",
+            forget=True,
+            about=subject,
+            ids=",".join(shown),
+            reason="forgets saved notes",
+        )
+    gone = notes.delete([i for i in ids.split(",") if i]) if ids else []
+    tree.remove(path)
+    return ToolResult.success(
+        f"Forgotten {label}.", f"Removed {path} and {len(gone)} notes (archived)."
+    )
 
 
 def _forget(store, target: str, ids: str, confirmed: bool) -> ToolResult:
@@ -223,6 +318,7 @@ def _forget(store, target: str, ids: str, confirmed: bool) -> ToolResult:
             )
         store.clear()
         wiped = notes.wipe()
+        get_memory_tree().wipe()
         return ToolResult.success(
             "Done. I've forgotten all of it.",
             f"Wiped {facts} facts and {wiped} notes; to-do list kept; "
@@ -269,14 +365,51 @@ def _forget(store, target: str, ids: str, confirmed: bool) -> ToolResult:
     )
 
 
-def recall_fact(key: str = "", **_: object) -> ToolResult:
-    """Look up a fact by name, else search notes by meaning; no key lists all."""
+def _recall_branch(path: str, query: str) -> ToolResult:
+    """What is known about one person or topic, and who they connect to."""
+    notes, tree = _notes(), get_memory_tree()
+    node = tree.node(path)
+    label = node.name if node else path
+    tree_links = tree.describe_links(path)
+    hits = notes.search(query, limit=5, under=path) if query else []
+    found = [hit.note for hit in hits] or notes.recent_under(path, 8)
+    if hits:
+        notes.touch(hits)
+    if not found and not tree_links:
+        return ToolResult.failure(f"Nothing on {label} yet.", f"{path} has no notes or links.")
+    detail = f"{label} ({path}):\n" + "\n".join(f"  {note.text}" for note in found)
+    if tree_links:
+        detail += f"\nLinks: {tree_links}"
+    if found:
+        speech = found[0].text if len(found) == 1 else f"{len(found)} things on {label}. {found[0].text}"
+    else:
+        speech = tree_links
+    return ToolResult.success(speech, detail)
+
+
+def recall_fact(key: str = "", about: str = "", **_: object) -> ToolResult:
+    """Look up a fact by name, else search notes by meaning; no key lists all.
+
+    `about`, or a known name inside `key`, narrows to that branch of the tree.
+    """
     store = get_memory()
     if not store.enabled:
         return _disabled()
     notes = _notes()
+    tree = get_memory_tree()
 
     name = (key or "").strip()
+    subject = (about or "").strip()
+    if subject:
+        path = tree.locate(subject)
+        if path is None:
+            return ToolResult.failure(f"Nothing on {subject}.", f"No branch for '{subject}'.")
+        return _recall_branch(path, name)
+    if name and store.recall(name) is None:
+        named = tree.resolve(name)
+        if named:
+            return _recall_branch(named[0], name)
+
     if not name:
         # A bare "what do you know about me" is a listing, not a failure.
         facts = {**store.profile, **store.preferences}
@@ -327,7 +460,7 @@ def manage_todo(
 ) -> ToolResult:
     """The user's standing to-do list: add, list, complete, drop, clear.
 
-    Separate from `backlog`, which is what E.V. itself failed to finish. This
+    Separate from `backlog`, which is what Leo itself failed to finish. This
     is what the user asked to be held on to, so "clear the backlog" must never
     reach it.
     """

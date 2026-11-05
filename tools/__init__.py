@@ -1,4 +1,4 @@
-"""E.V.'s tool registry.
+"""Leo's tool registry.
 
 Every capability the LLM can invoke lives here. `dispatch` is the single
 entry point: it validates the tool name, filters the arguments down to what
@@ -23,6 +23,7 @@ from tools.computer_use import (
     screen_task,
     take_screenshot,
 )
+from tools.dev_session import dev_session
 from tools.dev_tools import dev_workflow
 from tools import guard
 from tools.file_manager import file_manager
@@ -44,9 +45,11 @@ from tools.schemas import (
     to_gemini_tools,
     to_openai_tools,
 )
+from tools.system_control import system_control
 from tools.terminal import terminal_command
+from tools.whatsapp import whatsapp
 
-log = logging.getLogger("ev.tools")
+log = logging.getLogger("leo.tools")
 
 
 def chat(reply: str = "", **_: object) -> ToolResult:
@@ -82,6 +85,9 @@ REGISTRY: dict[str, Callable[..., ToolResult]] = {
     "recall_fact": recall_fact,
     "manage_todo": manage_todo,
     "media_control": media_control,
+    "system_control": system_control,
+    "whatsapp": whatsapp,
+    "dev_session": dev_session,
     # Not in `TOOL_SPECS`, so it costs no tokens per turn, but still callable.
     # It predates the three named tools above and a model that half-recalls
     # the schema reaches for it; `dispatch` would otherwise answer a perfectly
@@ -122,7 +128,15 @@ _ALLOWED_ARGS["remember_fact"] |= {"ids"}
 # the real mouse is on this list. The computer-use tools are all here: they
 # have no sandbox and no undo, so the spoken yes is the only thing standing
 # between a misheard word and a purchase.
+# A send's target and text, and the phone a file goes to, only ever come back
+# from the tool's own confirmation. See CONFIRMATION_ONLY_ARGS.
+_ALLOWED_ARGS["whatsapp"] |= {"jid", "label", "draft", "device"}
 for _gated in (
+    # Spends money and runs code nobody is watching.
+    "dev_session",
+    "whatsapp",
+    # Starting something the shell classifier wants asked about.
+    "system_control",
     # `open_app` is gated for one case only - a binary Windows marked as
     # downloaded - but the argument still has to be declared here or the
     # spoken yes would be filtered out on its way back in.
@@ -142,7 +156,7 @@ for _gated in (
     "keyboard_action",
     "screen_task",
     "browser_task",
-    # The biggest one of all: this is the yes that hands E.V. the whole
+    # The biggest one of all: this is the yes that hands Leo the whole
     # screen for the length of an errand.
     "agent_task",
 ):
@@ -156,7 +170,7 @@ for _gated in (
 # loop strips these from every call the model makes, and only a replay of a
 # confirmation can supply them.
 CONFIRMATION_ONLY_ARGS: frozenset[str] = frozenset(
-    {"confirmed", "notes", "approved", "ids"}
+    {"confirmed", "notes", "approved", "ids", "jid", "label", "draft", "device"}
 )
 
 
@@ -168,7 +182,7 @@ def from_model(arguments: Any) -> Any:
 
 
 # Tools that can be stopped part-way through, at a point where stopping is
-# safe. Everything else runs to completion, and `ev_core` says so rather than
+# safe. Everything else runs to completion, and `leo_core` says so rather than
 # pretending otherwise - a "stopped it" that did not stop anything is worse
 # than an honest "can't".
 #
@@ -242,14 +256,14 @@ def dispatch(
             kwargs[key] = str(value)
     kwargs = {key: ("" if value is None else value) for key, value in kwargs.items()}
 
-    # Lockdown still allows E.V. to look, but not to leave a file behind
+    # Lockdown still allows Leo to look, but not to leave a file behind
     # doing it. Dropped rather than refused: the screenshot is the useful
     # half and the write is incidental to it.
     if name == "take_screenshot" and is_locked_down():
         kwargs.pop("save_as", None)
 
     # Before the tool, and therefore before the tool's own confirmation gate.
-    # A locked-down E.V. that asked "Confirm?" and then refused the yes would
+    # A locked-down Leo that asked "Confirm?" and then refused the yes would
     # be worse than one that says no straight away.
     refused = guard.check(name, kwargs)
     if refused is not None:
@@ -282,11 +296,12 @@ def dispatch(
     # leak becomes a leak in every request that follows it.
     #
     # `untrusted` marks the results that carry text written by someone who is
-    # not the user. `ev.brain` fences those so the model reads them as data.
+    # not the user. `leo.brain` fences those so the model reads them as data.
     result.speech = redact(result.speech)
     result.detail = redact(result.detail)
     if name in UNTRUSTED_OUTPUT:
         result.untrusted = True
+        guard.note_read_outside(name)
 
     guard.record(name, kwargs, result)
     return result

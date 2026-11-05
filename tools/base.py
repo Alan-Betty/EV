@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-log = logging.getLogger("ev.tools")
+log = logging.getLogger("leo.tools")
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -27,7 +27,7 @@ class CancelToken:
 
     That restraint is the whole design. A voice assistant hearing "stop" must
     not leave a half-copied file behind, and it must not claim to have stopped
-    something it could not. Tools that cannot honour it say so, and E.V.
+    something it could not. Tools that cannot honour it say so, and Leo
     repeats that to the user rather than pretending.
 
     Backed by `threading.Event` because the setter is the event loop and the
@@ -64,7 +64,7 @@ def was_cancelled(token: "CancelToken | None") -> bool:
 class ToolResult:
     """Outcome of a tool invocation.
 
-    `speech` is what E.V. says out loud. `detail` is the fuller text that goes
+    `speech` is what Leo says out loud. `detail` is the fuller text that goes
     back to the model on the next turn so it knows what actually happened.
     """
 
@@ -73,9 +73,9 @@ class ToolResult:
     detail: str = ""
     data: dict[str, Any] = field(default_factory=dict)
     needs_confirmation: bool = False
-    # True when `detail` carries text E.V. did not write and the user did not
+    # True when `detail` carries text Leo did not write and the user did not
     # say - a web page, a file, whatever was on the screen. Set centrally by
-    # `dispatch`, read by `ev.brain.Brain.remember`, which fences it so the
+    # `dispatch`, read by `leo.brain.Brain.remember`, which fences it so the
     # model reads it as data rather than as an instruction. See
     # `tools.guard.UNTRUSTED_OUTPUT`.
     untrusted: bool = False
@@ -109,9 +109,9 @@ class ToolResult:
 
 
 def popen_detached(args: list[str] | str, cwd: str | None = None, shell: bool = False) -> subprocess.Popen:
-    """Start a process that outlives E.V. and does not steal its console.
+    """Start a process that outlives Leo and does not steal its console.
 
-    Detaching matters here: E.V. is a long-running loop and must never end up
+    Detaching matters here: Leo is a long-running loop and must never end up
     waiting on a GUI app or blocking on an inherited stdout pipe.
     """
     kwargs: dict[str, Any] = {
@@ -185,8 +185,8 @@ def resolve_directory(raw: str | None, default: str) -> Path | None:
     text = os.path.expandvars(raw.strip().strip('"'))
 
     # Only treat the input as a path when it actually looks like one. A bare
-    # word such as "EV" must not be resolved against the current working
-    # directory, or it silently matches a subfolder of wherever E.V. was
+    # word such as "Leo" must not be resolved against the current working
+    # directory, or it silently matches a subfolder of wherever Leo was
     # started from instead of the user's project.
     looks_like_path = (
         "/" in text

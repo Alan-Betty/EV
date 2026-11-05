@@ -4,11 +4,11 @@ Keystroke automation is only safe once we know *which* window will receive
 the keys, and screen perception is only accurate once the model is told
 what the window manager already knows - which application owns which
 rectangle and which one has focus. This module answers both, on every
-desktop E.V. runs on, through one set of names:
+desktop Leo runs on, through one set of names:
 
     Windows              user32, by ctypes                     tools.desktop.win32
     Linux on X11         EWMH, by ctypes against libX11         tools.desktop.x11
-    GNOME on Wayland     E.V.'s Shell extension if installed    tools.desktop.gnome
+    GNOME on Wayland     Leo's Shell extension if installed    tools.desktop.gnome
                          otherwise X11 for XWayland windows,
                          plus accessibility for native ones     tools.desktop.atspi
     macOS                System Events through osascript        tools.desktop.macos
@@ -37,7 +37,7 @@ import config
 from tools.desktop import system
 from tools.desktop.model import WindowInfo
 
-log = logging.getLogger("ev.tools.window")
+log = logging.getLogger("leo.tools.window")
 
 __all__ = [
     "WindowInfo", "list_windows", "find_window", "find", "focus", "focus_window", "focus_by_title",
@@ -63,6 +63,10 @@ def _listing_backends() -> list[str]:
     if system.is_wayland():
         if system.desktop() == "gnome" and _module("gnome").available():
             return ["gnome"]
+        # The compositor knows every window, native ones included, with
+        # exact rectangles, so nothing needs merging.
+        if system.desktop() == "hyprland" and _module("hyprland").available():
+            return ["hyprland"]
         return ["x11", "atspi"]
     return ["x11"]
 

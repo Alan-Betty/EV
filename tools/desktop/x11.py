@@ -26,7 +26,7 @@ import time
 from tools.desktop.model import WindowInfo
 from tools.desktop.system import IS_LINUX
 
-log = logging.getLogger("ev.tools.desktop.x11")
+log = logging.getLogger("leo.tools.desktop.x11")
 
 _Window = ctypes.c_ulong
 _Atom = ctypes.c_ulong

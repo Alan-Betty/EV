@@ -1,5 +1,5 @@
 // What the activity log streams after the real commit history: a replay of
-// the kinds of events one E.V. session writes. The shapes come from the code
+// the kinds of events one L.E.O. session writes. The shapes come from the code
 // (tool calls, the wake and echo checks, the guard), the values are examples.
 import REPO from './repo.json';
 
@@ -16,7 +16,7 @@ export const POOLS = {
     ['manage_todo add "call the dentist"', 'ok'],
   ],
   voice: [
-    ['wake matched "Eve" -> E.V.', 'info'],
+    ['wake matched "Lio" -> Leo', 'info'],
     ['end of speech after 600 ms (full sentence)', 'info'],
     ['stt avg_logprob -0.31  accepted', 'ok'],
     ['stt avg_logprob -1.12  doubtful, told the model', 'warn'],

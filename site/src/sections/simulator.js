@@ -5,7 +5,7 @@ const STATES = {
   idle: { pill: 'IDLE', title: 'Idle' },
   listening: { pill: 'LISTENING', title: 'Listening...' },
   thinking: { pill: 'THINKING', title: 'Thinking...' },
-  executing: { pill: 'EXECUTING LOGIC', title: 'Executing...' },
+  executing: { pill: 'EXECUTING', title: 'Executing...' },
   done: { pill: 'DONE', title: 'Done' },
 };
 const ABORT = Symbol('abort');
@@ -40,7 +40,7 @@ export function initSimulator() {
     const s = STATES[name];
     el.pill.dataset.state = name;
     el.pill.textContent = `[${s.pill}]`;
-    el.title.textContent = `E.V. - ${s.title}`;
+    el.title.textContent = `L.E.O. - ${s.title}`;
     wave.setMode(name);
   }
 
@@ -110,7 +110,7 @@ export function initSimulator() {
       plan.textContent = script.plan;
 
       if (script.confirm) {
-        const ask = message('E.V.');
+        const ask = message('L.E.O.');
         setState('executing');
         wave.setMode('speaking');
         await type(ask, script.confirm, 22, (c) => wave.kick(c));
@@ -140,14 +140,14 @@ export function initSimulator() {
       }
 
       wave.setMode('speaking');
-      el.title.textContent = 'E.V. - Speaking...';
-      const reply = message('E.V.');
+      el.title.textContent = 'L.E.O. - Speaking...';
+      const reply = message('L.E.O.');
       reply.classList.add('is-typing');
       await type(reply, script.reply, 17, (c) => wave.kick(c));
       reply.classList.remove('is-typing');
 
       setState('done');
-      el.status.textContent = `E.V.: ${script.reply}`;
+      el.status.textContent = `L.E.O.: ${script.reply}`;
       idleTimer = setTimeout(() => id === runId && setState('idle'), 7000);
     } catch (err) {
       if (err !== ABORT) throw err;
@@ -161,7 +161,7 @@ export function initSimulator() {
   });
 
   // The command palette asks for a run without knowing about this module.
-  document.addEventListener('ev:demo', (e) => {
+  document.addEventListener('leo:demo', (e) => {
     const script = SCRIPTS.find((s) => s.id === e.detail);
     if (script) play(script);
   });

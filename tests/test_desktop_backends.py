@@ -1,4 +1,4 @@
-"""The desktop backends: which hands and eyes E.V. uses, and that they work.
+"""The desktop backends: which hands and eyes Leo uses, and that they work.
 
 Offline. Nothing here opens a session bus, a Mutter session or a real
 /dev/uinput device: the session is a recorder, the uinput file descriptor
@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 
@@ -248,7 +248,7 @@ class FakeKernel:
                 continue
             for offset in range(0, len(payload), size):
                 _sec, _usec, kind, code, value = uinput._EVENT.unpack_from(payload, offset)
-                if kind != uinput.EV_SYN:
+                if kind != uinput.LEO_SYN:
                     out.append((kind, code, value))
         return out
 
@@ -285,8 +285,8 @@ def test_uinput_maps_pixels_onto_the_tablet_range():
     hand = uinput.UinputHands(_devices(kernel), (1920, 1080))
     hand.moveTo(1919, 0)
     assert kernel.events(hand.devices.pointer_fd) == [
-        (uinput.EV_ABS, uinput.ABS_X, uinput.ABS_MAX),
-        (uinput.EV_ABS, uinput.ABS_Y, 0),
+        (uinput.LEO_ABS, uinput.ABS_X, uinput.ABS_MAX),
+        (uinput.LEO_ABS, uinput.ABS_Y, 0),
     ]
 
 
@@ -296,8 +296,8 @@ def test_uinput_shifts_capitals_and_symbols():
     hand.write("A!")
     shift, a, one = keys.KEY["shift"], keys.KEY["a"], keys.KEY["1"]
     assert kernel.events(hand.devices.keyboard_fd) == [
-        (uinput.EV_KEY, shift, 1), (uinput.EV_KEY, a, 1), (uinput.EV_KEY, a, 0), (uinput.EV_KEY, shift, 0),
-        (uinput.EV_KEY, shift, 1), (uinput.EV_KEY, one, 1), (uinput.EV_KEY, one, 0), (uinput.EV_KEY, shift, 0),
+        (uinput.LEO_KEY, shift, 1), (uinput.LEO_KEY, a, 1), (uinput.LEO_KEY, a, 0), (uinput.LEO_KEY, shift, 0),
+        (uinput.LEO_KEY, shift, 1), (uinput.LEO_KEY, one, 1), (uinput.LEO_KEY, one, 0), (uinput.LEO_KEY, shift, 0),
     ]
 
 

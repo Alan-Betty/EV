@@ -1,17 +1,17 @@
-"""What E.V. does with words that were not meant for it.
+"""What Leo does with words that were not meant for it.
 
 Once the conversation window has expired the wake phrase is required again,
-and everything said without it is not E.V.'s business. That has to *look* like
-it is not E.V.'s business too. Echoing the transcript first and checking the
+and everything said without it is not Leo's business. That has to *look* like
+it is not Leo's business too. Echoing the transcript first and checking the
 wake phrase afterwards put every sentence spoken near the microphone on screen
 under a "you >" prompt - so a conversation with somebody else in the room was
-written into E.V.'s terminal, appeared to have been heard and understood, and
+written into Leo's terminal, appeared to have been heard and understood, and
 then got no reply. Silence is the right answer to something that was not said
 to you, and silence has to be visible as silence.
 
 The recogniser is a separate question and is answered in the module docstring
-of `ev.wake`: detecting "E.V." in an utterance means having the words of that
-utterance, and E.V. runs no local model by design. What this file pins is that
+of `leo.wake`: detecting "Leo" in an utterance means having the words of that
+utterance, and Leo runs no local model by design. What this file pins is that
 an unaddressed transcript goes no further - it is not drawn, not acted on, and
 does not steer the decoding prompt for whatever is said next.
 
@@ -28,14 +28,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 
 import config  # noqa: E402
-import ev_core  # noqa: E402
-from ev.session import Session  # noqa: E402
-from ev.stt import Transcript  # noqa: E402
+import leo_core  # noqa: E402
+from leo.session import Session  # noqa: E402
+from leo.stt import Transcript  # noqa: E402
 
 
 class RecordingUI:
@@ -85,9 +85,9 @@ class FakeSpeaker:
         self.speaking = False
 
 
-def _assistant(monkeypatch, heard: str, engaged: bool = False) -> ev_core.EV:
-    """An `EV` whose microphone yields exactly one utterance."""
-    assistant = ev_core.EV.__new__(ev_core.EV)
+def _assistant(monkeypatch, heard: str, engaged: bool = False) -> leo_core.Leo:
+    """An `Leo` whose microphone yields exactly one utterance."""
+    assistant = leo_core.Leo.__new__(leo_core.Leo)
     assistant.ui = RecordingUI()
     assistant.speaker = FakeSpeaker()
     assistant.transcriber = FakeTranscriber()
@@ -148,17 +148,17 @@ def test_an_unaddressed_utterance_does_not_steer_the_next_transcription():
 
 
 def test_an_addressed_utterance_is_echoed_and_routed():
-    assistant = _assistant(None, "E.V. open notepad")
+    assistant = _assistant(None, "Leo open notepad")
 
     asyncio.run(assistant._tick())
 
-    assert assistant.ui.echoed == ["E.V. open notepad"]
+    assert assistant.ui.echoed == ["Leo open notepad"]
     assert assistant.routed == ["open notepad"]
-    assert assistant.transcriber.noted == ["E.V. open notepad"]
+    assert assistant.transcriber.noted == ["Leo open notepad"]
 
 
 def test_the_wake_phrase_is_stripped_before_the_command_is_routed():
-    assistant = _assistant(None, "hey E.V., what's my python version")
+    assistant = _assistant(None, "hey Leo, what's my python version")
 
     asyncio.run(assistant._tick())
 
@@ -197,15 +197,15 @@ def test_once_the_window_expires_the_name_is_required_again(monkeypatch):
 # the near-miss hint still works
 # ---------------------------------------------------------------------------
 def test_a_mangled_name_still_counts_as_being_addressed():
-    """Wake detection is fuzzy on purpose: STT turns "E.V." into Evie, AV,
-    heavy. Those are matches, not near misses, so they are echoed and routed
+    """Wake detection is fuzzy on purpose: STT turns "Leo" into Lio, L E O,
+    heyleo. Those are matches, not near misses, so they are echoed and routed
     like any other command - the fuzziness is what makes the wake phrase
     usable at all, and tightening it here would break waking up."""
-    assistant = _assistant(None, "evie open notepad")
+    assistant = _assistant(None, "lio open notepad")
 
     asyncio.run(assistant._tick())
 
-    assert assistant.ui.echoed == ["evie open notepad"]
+    assert assistant.ui.echoed == ["lio open notepad"]
     assert assistant.routed == ["open notepad"]
 
 
@@ -280,8 +280,8 @@ class EchoTranscriber(FakeTranscriber):
         return Transcript(self.text)
 
 
-def _listener(engaged: bool, clips: int = 1) -> ev_core.EV:
-    assistant = ev_core.EV.__new__(ev_core.EV)
+def _listener(engaged: bool, clips: int = 1) -> leo_core.Leo:
+    assistant = leo_core.Leo.__new__(leo_core.Leo)
     assistant.ui = SpinnerUI()
     assistant.speaker = FakeSpeaker()
     assistant.transcriber = EchoTranscriber()
@@ -296,10 +296,10 @@ def _listener(engaged: bool, clips: int = 1) -> ev_core.EV:
 
 
 def test_the_listening_spinner_runs_only_inside_the_conversation_window():
-    """Animated while idle, it claims an attention E.V. is not paying.
+    """Animated while idle, it claims an attention Leo is not paying.
 
     Outside the window nothing is acted on without the wake phrase, so a
-    spinner through that says "I am listening to you" about a room E.V. is
+    spinner through that says "I am listening to you" about a room Leo is
     only filtering. Inside the window it is the honest signal that the next
     sentence needs no name in front of it.
     """
@@ -334,7 +334,7 @@ def test_the_spinner_is_down_before_anything_is_printed():
 
 
 def test_a_quiet_window_does_not_restart_the_spinner_every_poll():
-    """The window is several trips round the loop: E.V. polls on a short
+    """The window is several trips round the loop: Leo polls on a short
     timeout so it can expire. Rebuilt each time, the spinner is a flicker."""
     assistant = _listener(engaged=True, clips=0)
     for _ in range(3):

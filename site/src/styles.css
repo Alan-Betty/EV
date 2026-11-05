@@ -178,10 +178,6 @@
     -webkit-text-fill-color: transparent;
   }
 
-  .tag-pill {
-    @apply glass glass-hover inline-flex max-w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-full px-3.5 py-1.5 font-mono text-[10.5px] tracking-[0.02em] text-slate-400 hover:text-slate-200 sm:text-[11px];
-  }
-
   .sha-tip {
     @apply surface pointer-events-none absolute left-0 top-[calc(100%+10px)] z-20 w-[min(340px,calc(100vw-2rem))] rounded-xl border border-white/10 p-3.5 opacity-0 shadow-lift backdrop-blur-xl;
     transform: translateY(-4px);
@@ -233,8 +229,8 @@
   @keyframes line-in { from { opacity: 0; transform: translateY(6px); } }
   .sim-who { @apply text-right font-mono text-[10.5px] text-slate-600; }
   .sim-text { @apply text-[14.5px] leading-7 text-slate-300; }
-  .sim-msg[data-who='E.V.'] .sim-who { @apply text-electric; }
-  .sim-msg[data-who='E.V.'] .sim-text { @apply text-white; }
+  .sim-msg[data-who='L.E.O.'] .sim-who { @apply text-electric; }
+  .sim-msg[data-who='L.E.O.'] .sim-text { @apply text-white; }
   .sim-plan .sim-text { @apply font-mono text-[12px] leading-6 text-violet-300/80; }
   .sim-text.is-typing::after {
     content: '';
@@ -276,7 +272,7 @@
   .bento-copy p { @apply mt-2 max-w-[46ch] text-[14px] leading-6 text-slate-400 text-pretty; }
   .bento-num { @apply mt-1.5 text-[15px] font-medium tabular text-slate-100; }
 
-  /* Voice: two lanes, E.V. yields when the user cuts in */
+  /* Voice: two lanes, L.E.O. yields when the user cuts in */
   .duplex { @apply relative space-y-2; }
   .duplex-lane { @apply grid grid-cols-[2.75rem_1fr] items-center gap-3; }
   .duplex-label { @apply font-mono text-[10.5px] text-slate-500; }

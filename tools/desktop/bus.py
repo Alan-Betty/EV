@@ -1,6 +1,6 @@
 """The session bus, through `jeepney`, with a timeout on everything.
 
-`media.py` and `ev/face/busy.py` shell out to `gdbus`, which is right for one
+`media.py` and `leo/face/busy.py` shell out to `gdbus`, which is right for one
 call every few seconds and wrong for this: a screenshot portal round trip is
 a call plus a signal, and an accessibility tree is hundreds of calls. A
 process per call would cost more than the work. `jeepney` is pure Python
@@ -9,7 +9,7 @@ the capability rather than the assistant - callers get `BusUnavailable`.
 
 Every call carries a timeout because the other end is an arbitrary
 application. A frozen app does not refuse an AT-SPI call; it simply never
-answers, and without a deadline it takes E.V. down with it.
+answers, and without a deadline it takes Leo down with it.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import secrets
 import threading
 from typing import Any
 
-log = logging.getLogger("ev.tools.desktop.bus")
+log = logging.getLogger("leo.tools.desktop.bus")
 
 DEFAULT_TIMEOUT_S = 2.0
 
@@ -160,7 +160,7 @@ def portal_request(
     """
     from jeepney import MatchRule
 
-    token = "ev" + secrets.token_hex(6)
+    token = "leo" + secrets.token_hex(6)
     sender = unique_name().lstrip(":").replace(".", "_")
     handle = f"/org/freedesktop/portal/desktop/request/{sender}/{token}"
     rule = MatchRule(

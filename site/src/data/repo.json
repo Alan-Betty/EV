@@ -12,15 +12,23 @@
     "subject": "14h Iteration - Added Semantic Memory and tests for semantic memory and implement X11 overlay functionality"
   },
   "commitCount": 15,
-  "tests": 950,
+  "tests": 1166,
   "testFiles": [
     {
       "file": "tests/test_computer_use.py",
       "tests": 85
     },
     {
+      "file": "tests/test_whatsapp.py",
+      "tests": 58
+    },
+    {
       "file": "tests/test_web_agent.py",
       "tests": 46
+    },
+    {
+      "file": "tests/test_memory_tree.py",
+      "tests": 45
     },
     {
       "file": "tests/test_guard.py",
@@ -39,6 +47,10 @@
       "tests": 31
     },
     {
+      "file": "tests/test_dev_session.py",
+      "tests": 31
+    },
+    {
       "file": "tests/test_standby_and_stt.py",
       "tests": 30
     },
@@ -47,11 +59,11 @@
       "tests": 28
     },
     {
-      "file": "tests/test_memory.py",
-      "tests": 27
+      "file": "tests/test_smoke.py",
+      "tests": 28
     },
     {
-      "file": "tests/test_smoke.py",
+      "file": "tests/test_memory.py",
       "tests": 27
     },
     {
@@ -83,6 +95,10 @@
       "tests": 26
     },
     {
+      "file": "tests/test_hyprland.py",
+      "tests": 25
+    },
+    {
       "file": "tests/test_streaming_and_ui.py",
       "tests": 25
     },
@@ -108,6 +124,10 @@
     },
     {
       "file": "tests/test_face_expression.py",
+      "tests": 21
+    },
+    {
+      "file": "tests/test_system_control.py",
       "tests": 21
     },
     {
@@ -143,12 +163,16 @@
       "tests": 15
     },
     {
+      "file": "tests/test_speech_purity.py",
+      "tests": 15
+    },
+    {
       "file": "tests/test_media.py",
       "tests": 14
     },
     {
-      "file": "tests/test_speech_purity.py",
-      "tests": 13
+      "file": "tests/test_tool_tier.py",
+      "tests": 14
     },
     {
       "file": "tests/test_stream_integration.py",
@@ -163,8 +187,16 @@
       "tests": 12
     },
     {
+      "file": "tests/test_rename.py",
+      "tests": 11
+    },
+    {
       "file": "tests/test_web_agent_live.py",
       "tests": 10
+    },
+    {
+      "file": "tests/test_awareness.py",
+      "tests": 8
     },
     {
       "file": "tests/test_app_index_linux.py",

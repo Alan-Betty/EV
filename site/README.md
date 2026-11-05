@@ -1,6 +1,6 @@
-# E.V. site
+# L.E.O. site
 
-Landing page and install guide for E.V., the voice assistant in the parent
+Landing page and install guide for L.E.O., the voice assistant in the parent
 folder. Vite, vanilla ES modules, Tailwind 3.
 
 ```bash

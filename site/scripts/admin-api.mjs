@@ -122,7 +122,7 @@ const receiveFile = (req, name) =>
 
 export function adminApi() {
   return {
-    name: 'ev-site-admin',
+    name: 'leo-site-admin',
     apply: 'serve',
     configureServer(server) {
       server.middlewares.use('/__admin', async (req, res) => {
@@ -134,7 +134,7 @@ export function adminApi() {
         };
         try {
           const origin = req.headers.origin;
-          if (req.headers['x-ev-admin'] !== '1' || (origin && origin !== `http://${req.headers.host}`)) {
+          if (req.headers['x-leo-admin'] !== '1' || (origin && origin !== `http://${req.headers.host}`)) {
             return send(403, { error: 'only the site manager page can call this' });
           }
           const url = new URL(req.url, 'http://local');

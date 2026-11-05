@@ -28,7 +28,7 @@ import threading
 from contextlib import contextmanager
 from typing import Any, Callable, Iterator
 
-log = logging.getLogger("ev.tools.desktop.xhud")
+log = logging.getLogger("leo.tools.desktop.xhud")
 
 # X modifier masks.
 _SHIFT, _LOCK, _CONTROL, _MOD1, _MOD2, _MOD4 = 1, 2, 4, 8, 16, 64
@@ -116,7 +116,7 @@ _libs: dict[str, Any] = {}
 _libs_lock = threading.Lock()
 # Recent X error codes. Xlib's error handler is process-wide and its default
 # *exits the process* - a BadAccess from a hotkey somebody else holds would
-# take E.V. down. Ours records and returns.
+# take Leo down. Ours records and returns.
 _errors: list[int] = []
 
 
@@ -327,7 +327,7 @@ class X11KillGrab:
     def start(self) -> bool:
         if parse_linux_hotkey(self.combo) is None or _x11() is None:
             return False
-        self._thread = threading.Thread(target=self._run, name="ev-killswitch-x11", daemon=True)
+        self._thread = threading.Thread(target=self._run, name="leo-killswitch-x11", daemon=True)
         self._thread.start()
         self._ready.wait(timeout=2.0)
         return self._ok

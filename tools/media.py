@@ -24,7 +24,7 @@ exists to stop.
 
 One Linux trap is worth naming. A snapped browser (Ubuntu's Firefox, Brave)
 is confined by AppArmor, and its MPRIS endpoint only answers unconfined
-callers - so E.V. started from VS Code's terminal, itself a snap, is refused.
+callers - so Leo started from VS Code's terminal, itself a snap, is refused.
 That arrives as `AccessDenied` and is reported as exactly that, rather than
 as "nothing is playing".
 """
@@ -38,7 +38,7 @@ import subprocess
 
 from tools.base import IS_WINDOWS, ToolResult
 
-log = logging.getLogger("ev.tools.media")
+log = logging.getLogger("leo.tools.media")
 
 from tools.desktop.system import IS_MAC  # noqa: E402
 TIMEOUT_S = 3.0
@@ -246,7 +246,7 @@ def _windows(action: str, level: int | None) -> ToolResult:
     if action == "now_playing":
         return ToolResult.failure(
             "I can't see what's playing on Windows.",
-            "Track metadata needs the WinRT media session API, which E.V. does "
+            "Track metadata needs the WinRT media session API, which Leo does "
             "not use. take_screenshot can read it off the player instead.",
         )
     try:
@@ -320,8 +320,8 @@ def _media_failure(exc: Exception) -> ToolResult:
         return ToolResult.failure(
             "The player won't take orders from me here - it's sandboxed.",
             "The player's MPRIS endpoint refused the call (AppArmor). This "
-            "happens when E.V. runs inside a snap such as VS Code's terminal; "
-            "run E.V. from a normal terminal. Do not retry.",
+            "happens when Leo runs inside a snap such as VS Code's terminal; "
+            "run Leo from a normal terminal. Do not retry.",
         )
     return ToolResult.failure("Couldn't reach the player.", f"Media control failed: {text[:300]}")
 

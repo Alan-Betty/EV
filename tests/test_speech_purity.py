@@ -21,13 +21,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 
 import config  # noqa: E402
-from ev.brain import Brain, Turn  # noqa: E402
-from ev.tts import clean_for_speech, strip_meta_labels  # noqa: E402
+from leo.brain import Brain, Turn  # noqa: E402
+from leo.tts import clean_for_speech, strip_meta_labels  # noqa: E402
 from tools import chat, dispatch  # noqa: E402
 
 
@@ -39,9 +39,13 @@ from tools import chat, dispatch  # noqa: E402
         "spoke: Chrome's up.",
         "SPOKE: Chrome's up.",
         "E.V.: Chrome's up.",
-        "EV: Chrome's up.",
+        "Leo: Chrome's up.",
         "E.V. > Chrome's up.",
         "[E.V.] Chrome's up.",
+        "Leo: Chrome's up.",
+        "L.E.O. > Chrome's up.",
+        "[L.E.O.] Chrome's up.",
+        "**Leo:** Chrome's up.",
         "(assistant) Chrome's up.",
         "<system> Chrome's up.",
         "Response: Chrome's up.",
@@ -182,3 +186,14 @@ def test_everything_cleaned_survives_a_cp1252_console():
         cleaned = clean_for_speech(sample)
         # Raises UnicodeEncodeError if anything curly survived.
         cleaned.encode("cp1252")
+
+
+def test_the_initials_are_said_as_a_name():
+    """TTS reads "L.E.O." as three letters."""
+    assert clean_for_speech("L.E.O. is on it.") == "Leo is on it."
+    assert clean_for_speech("Ask L.E.O") == "Ask Leo"
+
+
+def test_the_name_in_a_sentence_is_kept():
+    assert clean_for_speech("Leo is on it.") == "Leo is on it."
+    assert clean_for_speech("Leonard called.") == "Leonard called."

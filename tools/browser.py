@@ -10,7 +10,7 @@ from urllib.parse import quote_plus
 import config
 from tools.base import ToolResult, popen_detached, resolve_executable
 
-log = logging.getLogger("ev.tools.browser")
+log = logging.getLogger("leo.tools.browser")
 
 # Executable candidates per browser, in preference order.
 _BROWSER_BINARIES: dict[str, list[str]] = {

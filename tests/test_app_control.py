@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-not-real")
-os.environ["EV_TTS_ENABLED"] = "false"
+os.environ["LEO_TTS_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 
@@ -146,7 +146,7 @@ def test_closing_without_saving_needs_a_strict_yes(desktop):
     result = dispatch("app_control", {"action": "close", "discard": True})
     assert result.needs_confirmation
     assert result.data["reason"] in HIGH_RISK_REASONS
-    # Replayed after the yes, "the focused window" might be E.V.'s own
+    # Replayed after the yes, "the focused window" might be Leo's own
     # terminal - so the window is pinned by its title.
     assert result.data["app"] == EDITOR.title
 

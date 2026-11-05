@@ -17,7 +17,7 @@ twenty-round errand fits in a window that used to hold four.
 Four things make that work rather than merely cost less.
 
 **Elements are numbered, not described.** Every interactive element is
-stamped with `data-ev="<n>"` during the scan, and the planner acts on
+stamped with `data-leo="<n>"` during the scan, and the planner acts on
 `click 12`. A CSS selector the model invented can be wrong; a number it read
 off the inventory two hundred milliseconds ago cannot be, because the
 attribute is still on the element. That removes the single largest source of
@@ -61,7 +61,7 @@ from tools.base import CancelToken, ToolResult, was_cancelled
 from tools.browser_automation import _normalise_url, _open_browser
 from tools.safety import classify, classify_gui
 
-log = logging.getLogger("ev.tools.web_agent")
+log = logging.getLogger("leo.tools.web_agent")
 
 
 class BrowserError(RuntimeError):
@@ -103,8 +103,8 @@ _SCAN_JS = """
 
   // Stale numbers from the previous look would still match, and on a page
   // that changed without navigating they would point at the wrong thing.
-  for (const el of document.querySelectorAll('[data-ev]')) el.removeAttribute('data-ev');
-  for (const el of document.querySelectorAll('[data-ev-seen]')) el.removeAttribute('data-ev-seen');
+  for (const el of document.querySelectorAll('[data-leo]')) el.removeAttribute('data-leo');
+  for (const el of document.querySelectorAll('[data-leo-seen]')) el.removeAttribute('data-leo-seen');
 
   // What a row is about, for an element that cannot say for itself: the
   // nearest heading or title above it. This is what tells twenty identical
@@ -131,7 +131,7 @@ _SCAN_JS = """
     if (!root) return;
     for (const el of root.querySelectorAll(pick)) {
       if (out.length >= limit) return;
-      if (el.hasAttribute('data-ev-seen')) continue;
+      if (el.hasAttribute('data-leo-seen')) continue;
       const style = window.getComputedStyle(el);
       if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
       const box = el.getBoundingClientRect();
@@ -161,7 +161,7 @@ _SCAN_JS = """
         const seen = byHref[href];
         if (seen !== undefined) {
           if (label.length > out[seen].label.length) out[seen].label = label;
-          el.setAttribute('data-ev-seen', '1');
+          el.setAttribute('data-leo-seen', '1');
           continue;
         }
         byHref[href] = out.length;
@@ -177,9 +177,9 @@ _SCAN_JS = """
         if (where && where !== label) label = label + ' - ' + where;
       }
 
-      el.setAttribute('data-ev-seen', '1');
+      el.setAttribute('data-leo-seen', '1');
       index += 1;
-      el.setAttribute('data-ev', String(index));
+      el.setAttribute('data-leo', String(index));
       const item = {i: index, tag: el.tagName.toLowerCase(), label: label};
       if (el.type) item.type = String(el.type).slice(0, 20);
       if (el.tagName === 'A' && el.href) item.href = String(el.href).slice(0, 120);
@@ -260,7 +260,7 @@ class BrowserSession:
     exactly why `dispatch` puts every tool on a worker thread: there is no
     loop on this thread, so this is the supported way to use it. The context
     manager is deliberately the only way in, because the one thing that must
-    never happen is a Chromium left running after E.V. has moved on.
+    never happen is a Chromium left running after Leo has moved on.
     """
 
     def __init__(self, headless: bool | None = None) -> None:
@@ -407,7 +407,7 @@ class BrowserSession:
 # against. Playwright's sync objects belong to the thread that made them, so
 # a browser that outlives the tool call has to live on a thread of its own:
 # every run is handed to it, and it closes the browser itself when the user
-# closes the window, when an errand ends badly, or when E.V. exits.
+# closes the window, when an errand ends badly, or when Leo exits.
 #
 # A second run reuses the open browser, which also skips a Chromium cold start.
 _KEEP_ON = frozenset({"done", "ask"})
@@ -437,7 +437,7 @@ class _Keeper:
         with self._start:
             if self._thread is None or not self._thread.is_alive():
                 self._thread = threading.Thread(
-                    target=self._loop, name="ev-browser", daemon=True
+                    target=self._loop, name="leo-browser", daemon=True
                 )
                 self._thread.start()
         done: Future = Future()
@@ -649,7 +649,7 @@ def _locator(page: Any, target: str) -> Any:
     text = (target or "").strip().strip('"').strip("'")
     match = _REF.match(text)
     if match:
-        return page.locator(f'[data-ev="{int(match.group(1))}"]')
+        return page.locator(f'[data-leo="{int(match.group(1))}"]')
     if looks_like_selector(text):
         return page.locator(text)
     return page.get_by_text(text, exact=False).first
@@ -940,7 +940,7 @@ def page_frame(page: Any) -> Any:
 
     Playwright screenshots the viewport rather than the desktop, which is
     exactly right here: the errand is on the page, and the taskbar, the other
-    windows and E.V.'s own overlay are all noise that would cost accuracy and
+    windows and Leo's own overlay are all noise that would cost accuracy and
     tokens to send.
     """
     from tools.computer_use import Frame, _encode_with_pillow
@@ -1109,7 +1109,7 @@ def _number(raw: str, default: float) -> float:
 # ---------------------------------------------------------------------------
 # The planner: a text model on a bucket of its own
 # ---------------------------------------------------------------------------
-_PLANNER_SYSTEM = """You are E.V., running one errand in a web browser by \
+_PLANNER_SYSTEM = """You are Leo, running one errand in a web browser by \
 yourself. You are given the page as text: its URL, a numbered list of every \
 element you can act on, and the visible text. You never see a picture, and \
 you do not need one.
@@ -1253,7 +1253,7 @@ def rotate_planner_model() -> bool:
 
 def ask_planner(prompt: str, system: str = _PLANNER_SYSTEM) -> str:
     """One planning round. Text in, text out, no image anywhere near it."""
-    from ev.brain import _retry_after
+    from leo.brain import _retry_after
 
     global _budget_remaining
 
